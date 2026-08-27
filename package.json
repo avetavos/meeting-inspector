@@ -2,7 +2,7 @@
   "name": "meeting-inspector",
   "version": "0.1.0",
   "private": true,
-  "description": "Meeting transcription and summarization for macOS",
+  "description": "Offline meeting transcription for macOS",
   "author": "Aveta Vos",
   "main": "out/main/index.js",
   "scripts": {

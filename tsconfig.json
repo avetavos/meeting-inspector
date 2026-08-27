@@ -12,6 +12,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "electron.vite.config.ts"],
-  "exclude": ["worker"]
+  "include": ["src", "electron.vite.config.ts"]
 }

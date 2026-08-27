@@ -1,10 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelStatus, Progress } from '../main/download.ts'
-import type { Settings } from '../main/settings.ts'
 import type { Transcript } from '../shared/meetings.ts'
 
 export type { Transcript } from '../shared/meetings.ts'
-export type { Settings } from '../main/settings.ts'
 export type { ModelStatus, Progress } from '../main/download.ts'
 
 export type Track = 'loopback' | 'mic'

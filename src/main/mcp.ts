@@ -2,7 +2,11 @@ import { timingSafeEqual } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { NodeStreamableHTTPServerTransport, hostHeaderValidation } from '@modelcontextprotocol/node'
+import {
+  NodeStreamableHTTPServerTransport,
+  hostHeaderValidation,
+  localhostOriginValidation,
+} from '@modelcontextprotocol/node'
 import { McpServer } from '@modelcontextprotocol/server'
 import {
   registerTools,
@@ -77,9 +81,12 @@ export async function startMcp(opts: { token: string; root: string; port?: numbe
   // Loopback names only. Nothing off this machine is meant to reach the archive, and
   // this also blocks a web page from rebinding DNS onto the port.
   const validateHost = hostHeaderValidation(['localhost', '127.0.0.1', '[::1]'])
+  // A page in a browser cannot guess the token, but Origin is the one check that
+  // stops such a request before it is even read.
+  const validateOrigin = localhostOriginValidation()
 
   const http = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    if (!validateHost(req, res)) return
+    if (!validateHost(req, res) || !validateOrigin(req, res)) return
     if (!authorized(req, opts.token)) {
       res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' })
       res.end(JSON.stringify({ error: 'unauthorized' }))

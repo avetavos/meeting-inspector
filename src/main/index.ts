@@ -222,6 +222,33 @@ function registerIpc(): void {
     return updated
   })
 
+  ipcMain.handle('models:status', () => modelStatus())
+  ipcMain.handle('models:cancel', () => downloads?.abort())
+
+  // Downloads run one at a time so the progress the user sees matches what is
+  // actually moving, and a failure names the file that failed.
+  ipcMain.handle('models:download', async (e) => {
+    if (downloads) throw new Error('กำลังโหลดอยู่แล้ว')
+    downloads = new AbortController()
+    try {
+      for (const spec of MODELS) {
+        if ((await modelStatus()).find((m) => m.file === spec.file)?.present) continue
+        try {
+          await downloadModel(spec, (p) => e.sender.send('models:progress', p), downloads.signal)
+        } catch (err) {
+          // Whatever went wrong, the bytes already written are a valid prefix — they
+          // stay on disk so the next attempt resumes rather than restarts. Cancelling
+          // is a choice, not a failure, so it comes back as a result.
+          if (downloads.signal.aborted) return { cancelled: true }
+          throw err
+        }
+      }
+      return { cancelled: false }
+    } finally {
+      downloads = null
+    }
+  })
+
   ipcMain.handle('mcp:state', () => mcpState())
 
   ipcMain.handle('mcp:toggle', async (_e, on: boolean) => {

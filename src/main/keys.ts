@@ -34,7 +34,3 @@ export async function setKey(provider: string, key: string): Promise<void> {
 export async function getKey(provider: string): Promise<string | undefined> {
   return (await load())[provider]
 }
-
-export async function hasKey(provider: string): Promise<boolean> {
-  return Boolean(await getKey(provider))
-}
