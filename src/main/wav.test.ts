@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { meetingId, slug } from './store.ts'
+import { localIso, meetingId, readTranscript, slug, writeTranscript } from './store.ts'
 import { WavWriter } from './wav.ts'
 
 test('wav: header matches what was actually written, across many appends', async () => {
@@ -47,4 +47,37 @@ test('store: slug cannot escape the notes folder', () => {
   assert.equal(slug('a/b:c'), 'abc')
   assert.equal(slug('   '), 'meeting')
   assert.equal(slug(''), 'meeting')
+})
+
+test('store: a transcript survives the round trip, sorted by time', async () => {
+  const dir = join(tmpdir(), `transcript-test-${process.pid}`)
+  await mkdir(dir, { recursive: true })
+  const written = {
+    id: '2026-08-27-1400-sprint-planning',
+    startedAt: localIso(new Date(2026, 7, 27, 14, 0, 0)),
+    durationSec: 3120,
+    speakers: { me: 'คุณ', them: 'คนอื่น' },
+    // Out of order on purpose: the two tracks are transcribed independently.
+    segments: [
+      { t0: 19.1, t1: 24.0, speaker: 'me', text: 'เดี๋ยวผม deploy ให้' },
+      { t0: 12.4, t1: 18.9, speaker: 'them', text: 'ตัว backend พร้อมยัง' },
+    ],
+  }
+  await writeTranscript(dir, written)
+
+  const read = await readTranscript(dir)
+  assert.deepEqual(read.segments.map((s) => s.t0), [12.4, 19.1])
+  assert.deepEqual(read, { ...written, segments: [written.segments[1]!, written.segments[0]!] })
+
+  const md = await readFile(join(dir, 'transcript.md'), 'utf8')
+  assert.match(md, /# 2026-08-27-1400-sprint-planning/)
+  assert.match(md, /\*\*คนอื่น\*\* `00:12`\s+ตัว backend พร้อมยัง/)
+  assert.ok(md.indexOf('คนอื่น') < md.indexOf('คุณ'), 'markdown should follow the same order')
+})
+
+test('store: timestamps keep their local offset', () => {
+  const at = new Date(2026, 7, 27, 14, 5, 9)
+  const iso = localIso(at)
+  assert.match(iso, /^2026-08-27T14:05:09[+-]\d{2}:\d{2}$/)
+  assert.equal(new Date(iso).getTime(), at.getTime(), 'must parse back to the same instant')
 })

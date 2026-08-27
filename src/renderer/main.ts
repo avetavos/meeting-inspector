@@ -114,15 +114,21 @@ async function stop(): Promise<void> {
   recorder = null
   clearInterval(ticker)
   toggle.disabled = true
+  // stop() only resolves once the queued tail chunks have come back and the
+  // transcript is on disk, which can take a chunk or two.
+  done.textContent = 'กำลังถอดเสียงส่วนที่เหลือ…'
   const result = await r?.stop()
   toggle.disabled = false
   toggle.textContent = 'เริ่มอัด'
   title.disabled = false
   elapsed.textContent = ''
   for (const track of ['loopback', 'mic'] as const) setLevel(track, 0)
-  if (!result) return
+  if (!result) {
+    done.replaceChildren()
+    return
+  }
 
-  done.textContent = `บันทึกแล้ว ${fmt(result.loopback.durationSec)} — `
+  done.textContent = `บันทึกแล้ว ${fmt(result.durationSec)} · ${result.segments} ท่อน — `
   const open = document.createElement('a')
   open.href = '#'
   open.textContent = result.id

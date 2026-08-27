@@ -1,7 +1,7 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
-import { createMeetingDir } from './store.ts'
+import { createMeetingDir, localIso, writeTranscript, type Transcript } from './store.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
 
@@ -14,7 +14,15 @@ type Session = {
   startedAt: number
   writers: Record<Track, WavWriter>
   chunkers: Record<Track, Chunker>
+  segments: Transcript['segments']
+  /** Set the moment stop begins: late PCM frames must not reach a closed writer. */
+  stopping: boolean
 }
+
+const TRACKS = ['loopback', 'mic'] as const
+
+/** The mic track is us by construction (spec §4.1); `them` is replaced by diarization. */
+const SPEAKER: Record<Track, string> = { mic: 'me', loopback: 'them' }
 let current: Session | null = null
 
 // One server for the app's lifetime: the 3GB model loads once, and by the time
@@ -25,7 +33,10 @@ function transcription(wc: WebContents): Promise<Whisper> {
   whisper ??= Whisper.start({
     language: 'th',
     prompt: DEFAULT_PROMPT,
-    onSegments: (track, segments) => wc.send('transcript:segments', track, segments),
+    onSegments: (track, segments) => {
+      current?.segments.push(...segments.map((s) => ({ ...s, speaker: SPEAKER[track as Track] })))
+      wc.send('transcript:segments', track, segments)
+    },
     onDepth: (depth) => wc.send('transcript:queue', depth),
   }).catch((err: unknown) => {
     whisper = null // let the next recording retry rather than wedging for good
@@ -99,28 +110,43 @@ function registerIpc(): void {
         mic: await WavWriter.open(join(dir, 'mic.wav')),
       },
       chunkers: { loopback: new Chunker(), mic: new Chunker() },
+      segments: [],
+      stopping: false,
     }
     return { id, dir }
   })
 
   ipcMain.handle('session:pcm', (e, track: Track, pcm: ArrayBuffer) => {
-    if (!current) return
+    if (!current || current.stopping) return
     const chunk = current.chunkers[track].push(new Int16Array(pcm))
     if (chunk) void enqueue(e.sender, track, chunk)
     return current.writers[track].write(Buffer.from(pcm))
   })
 
   ipcMain.handle('session:stop', async (e) => {
-    if (!current) return null
-    const session = current
-    current = null
-    for (const track of ['loopback', 'mic'] as const) {
-      const tail = session.chunkers[track].flush()
+    if (!current || current.stopping) return null
+    const s = current
+    s.stopping = true
+    for (const track of TRACKS) {
+      const tail = s.chunkers[track].flush()
       if (tail) void enqueue(e.sender, track, tail)
     }
-    const loopback = await session.writers.loopback.close()
-    const mic = await session.writers.mic.close()
-    return { id: session.id, dir: session.dir, loopback, mic }
+    const durations = { loopback: await s.writers.loopback.close(), mic: await s.writers.mic.close() }
+
+    // Those tail chunks are still queued for ASR. Writing the transcript now would
+    // silently drop the last minute of the meeting, so wait them out.
+    await whisper?.then((w) => w.drain()).catch(() => {})
+    current = null
+
+    const transcript: Transcript = {
+      id: s.id,
+      startedAt: localIso(new Date(s.startedAt)),
+      durationSec: Math.max(durations.loopback.durationSec, durations.mic.durationSec),
+      speakers: { me: 'คุณ', them: 'คนอื่น' },
+      segments: s.segments,
+    }
+    await writeTranscript(s.dir, transcript)
+    return { id: s.id, dir: s.dir, durationSec: transcript.durationSec, segments: s.segments.length }
   })
 
   ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(dir))
@@ -146,13 +172,26 @@ app.whenReady().then(() => {
 })
 
 // A half-written meeting is worth more than none: close the WAVs before quitting.
+// A half-written meeting is worth more than none. No drain here — the user asked to
+// quit, so we save what already came back rather than making them wait for the tail.
 app.on('before-quit', async (e) => {
   void whisper?.then((w) => w.stop()).catch(() => {})
-  if (!current) return
+  if (!current || current.stopping) return
   e.preventDefault()
-  const session = current
+  const s = current
+  s.stopping = true
   current = null
-  await Promise.allSettled([session.writers.loopback.close(), session.writers.mic.close()])
+  const closed = await Promise.allSettled([s.writers.loopback.close(), s.writers.mic.close()])
+  const durationSec = Math.max(
+    ...closed.map((r) => (r.status === 'fulfilled' ? r.value.durationSec : 0)),
+  )
+  await writeTranscript(s.dir, {
+    id: s.id,
+    startedAt: localIso(new Date(s.startedAt)),
+    durationSec,
+    speakers: { me: 'คุณ', them: 'คนอื่น' },
+    segments: s.segments,
+  }).catch(() => {})
   app.quit()
 })
 

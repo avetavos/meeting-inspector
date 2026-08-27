@@ -21,8 +21,18 @@ npm test           # wav writer + meeting-id/slug
 npm run typecheck
 ```
 
-Recordings land in `~/Documents/MeetingNotes/<yyyy-mm-dd-HHMM-title>/` as two
-16kHz mono WAVs — `loopback.wav` (everyone else) and `mic.wav` (you).
+Each meeting is a folder in `~/Documents/MeetingNotes/<yyyy-mm-dd-HHMM-title>/`:
+
+| file | what |
+|---|---|
+| `loopback.wav` | everyone else, 16kHz mono |
+| `mic.wav` | you, 16kHz mono |
+| `transcript.json` | the data — segments sorted by time, speaker per segment |
+| `transcript.md` | the same thing to read |
+
+Stopping waits for the queued tail chunks before writing, so the transcript
+reaches the end of the meeting. Quitting mid-meeting saves what came back
+rather than nothing.
 
 Live transcription runs at ~5x realtime on an M3 Pro, so a 30s chunk comes back
 in about 6s. Language is fixed to Thai for now.

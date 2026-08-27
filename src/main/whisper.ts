@@ -124,6 +124,11 @@ export class Whisper {
       .filter((s) => s.text.length > 0)
   }
 
+  /** Resolves once every queued chunk has come back — a meeting's tail is 1-2 chunks. */
+  async drain(): Promise<void> {
+    while (this.depth > 0) await new Promise((r) => setTimeout(r, 200))
+  }
+
   stop(): void {
     this.queue = []
     this.proc.kill()
