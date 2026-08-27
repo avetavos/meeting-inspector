@@ -65,13 +65,26 @@ async function showPermissionWarnings(includeScreen = false): Promise<void> {
   for (const which of includeScreen ? (['screen', 'microphone'] as const) : (['microphone'] as const)) {
     if (status[which] === 'granted') continue
     const [name, why] = PERMISSION_LABEL[which]
+
+    // not-determined means macOS has never asked. Sending someone to System Settings
+    // then is a dead end — an app only appears in that list once it has asked at
+    // least once. So ask, and let the OS add us to the list.
+    const canAsk = which === 'microphone' && status[which] === 'not-determined'
     const box = document.createElement('div')
     box.className = 'warn'
-    box.textContent = `ยังไม่ได้สิทธิ์ ${name} (${status[which]}) — ${why}`
-    const open = document.createElement('button')
-    open.textContent = 'เปิด System Settings'
-    open.onclick = () => window.api.openPrivacySettings(which)
-    box.append(document.createElement('br'), open)
+    box.textContent = canAsk
+      ? `ยังไม่เคยขอสิทธิ์ ${name} — ${why}`
+      : `ไม่ได้สิทธิ์ ${name} — ${why}`
+
+    const action = document.createElement('button')
+    action.textContent = canAsk ? `ขอสิทธิ์ ${name}` : 'เปิด System Settings'
+    action.onclick = async () => {
+      action.disabled = true
+      if (canAsk) await window.api.requestPermissions()
+      else await window.api.openPrivacySettings(which)
+      await showPermissionWarnings(includeScreen)
+    }
+    box.append(document.createElement('br'), action)
     warnings.append(box)
   }
 }
