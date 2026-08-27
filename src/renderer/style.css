@@ -303,7 +303,11 @@ select:disabled { opacity: 0.4; cursor: default; }
 /* cards, one row per setting, control right-aligned.                      */
 /* ======================================================================= */
 
-.settings-page { display: flex; align-items: flex-start; gap: 18px; }
+/* padding-top must equal .settings-sidebar's sticky `top`. Without it the sidebar
+   sat at the scrollport edge on a short category and 10px lower on a tall one —
+   sticky only offsets once the container can scroll — so the top of the page moved
+   depending on which category you were looking at. */
+.settings-page { display: flex; align-items: flex-start; gap: 18px; padding-top: 10px; }
 /* `display: flex` above is author CSS, which always beats the UA stylesheet's
    `[hidden] { display: none }` regardless of specificity — so toggling the
    `hidden` property from main.ts silently did nothing without this override. */
