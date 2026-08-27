@@ -25,7 +25,7 @@ summarizes it there.
 
 **1. Download**
 
-Get `Meeting Inspector-<version>-arm64.dmg` from
+Get the `.dmg` from
 [the latest release](https://github.com/avetavos/meeting-inspector/releases/latest).
 
 **2. Install**
@@ -115,7 +115,7 @@ done.
 
 **1. ดาวน์โหลด**
 
-โหลด `Meeting Inspector-<version>-arm64.dmg` จาก
+โหลดไฟล์ `.dmg` จาก
 [release ล่าสุด](https://github.com/avetavos/meeting-inspector/releases/latest)
 
 **2. ติดตั้ง**
