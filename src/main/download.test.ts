@@ -47,7 +47,7 @@ before(async () => {
 
 after(() => server.close())
 
-const spec = (file: string): ModelSpec => ({ file, label: file, url: `${base}/${file}`, bytes: BODY.length })
+const spec = (file: string): ModelSpec => ({ file, url: `${base}/${file}`, bytes: BODY.length })
 const run = (file: string) => downloadModel(spec(file), () => {}, AbortSignal.timeout(10_000))
 
 test('download: a fresh file lands complete and drops its .part', async () => {

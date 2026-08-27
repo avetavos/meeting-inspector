@@ -13,16 +13,23 @@ export const NOTES_ROOT = join(homedir(), 'Documents', 'MeetingNotes')
 export function assertMeetingDir(dir: string): string {
   const resolved = resolve(dir)
   if (!resolved.startsWith(NOTES_ROOT + sep)) {
-    throw new Error(`ไม่ใช่โฟลเดอร์การประชุม: ${dir}`)
+    throw new Error(`not a meeting folder: ${dir}`)
   }
   return resolved
 }
 
-/** `2026-08-27-1400-sprint-planning` — sorts by time, still readable in Finder. */
+/**
+ * `2026-08-27-1400-sprint-planning` — sorts by time, still readable in Finder.
+ *
+ * An untitled meeting is just the stamp. The date is already in there, so adding a
+ * date-shaped title would only repeat it; `titleOf` renders the stamp back as a
+ * readable time when there is nothing else to show.
+ */
 export function meetingId(title: string, at: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
   const stamp = `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}`
-  return `${stamp}-${slug(title)}`
+  const named = slug(title)
+  return named ? `${stamp}-${named}` : stamp
 }
 
 /** Thai is kept as-is; only what a path cannot hold is stripped. */
@@ -33,7 +40,7 @@ export function slug(title: string): string {
     .replace(/[\p{Cc}/\\:]/gu, '')
     .replace(/\s+/gu, '-')
     .replace(/^[.-]+/, '')
-  return s || 'meeting'
+  return s
 }
 
 export async function createMeetingDir(title: string, at = new Date()): Promise<{ id: string; dir: string }> {

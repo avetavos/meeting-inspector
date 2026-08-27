@@ -1,11 +1,13 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
-import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
+import { assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
 import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { mcpToken } from './token.ts'
-import { getSettings, setSettings, type Settings } from './settings.ts'
+import { getSettings, setSettings, validPort, type Language, type Settings } from './settings.ts'
+import { hasSpeech } from './vad.ts'
+import { forget, identify, knownVoices, remember } from './voices.ts'
 import {
   NOTES_ROOT,
   assertMeetingDir,
@@ -38,14 +40,17 @@ const TRACKS = ['loopback', 'mic'] as const
  * Written into transcript.json, so they follow the UI language at the time of the
  * meeting. Diarization replaces `them`; the user can rename either afterwards.
  */
-const DEFAULT_SPEAKERS = {
-  en: { me: 'You', them: 'Others' },
-  th: { me: 'คุณ', them: 'คนอื่น' },
-} as const
+const SPEAKER_LABELS: Record<Language, SpeakerLabels> = {
+  en: { me: 'You', them: 'Others', speaker: (n) => `Speaker ${n}` },
+  th: { me: 'คุณ', them: 'คนอื่น', speaker: (n) => `ผู้พูด ${n}` },
+}
 
-const defaultSpeakers = async (): Promise<Record<string, string>> => ({
-  ...DEFAULT_SPEAKERS[(await getSettings()).language],
-})
+const speakerLabels = async (): Promise<SpeakerLabels> => SPEAKER_LABELS[(await getSettings()).language]
+
+const defaultSpeakers = async (): Promise<Record<string, string>> => {
+  const { me, them } = await speakerLabels()
+  return { me, them }
+}
 
 /** The mic track is us by construction (spec §4.1); `them` is replaced by diarization. */
 const SPEAKER: Record<Track, string> = { mic: 'me', loopback: 'them' }
@@ -59,6 +64,7 @@ function transcription(wc: WebContents): Promise<Whisper> {
   whisper ??= Whisper.start({
     language: 'th',
     prompt: DEFAULT_PROMPT,
+    noiseFilter: async () => (await getSettings()).noiseFilter,
     onSegments: (track, segments) => {
       current?.segments.push(...segments.map((s) => ({ ...s, speaker: SPEAKER[track as Track] })))
       wc.send('transcript:segments', track, segments)
@@ -82,7 +88,17 @@ async function diarizeMeeting(wc: WebContents, dir: string): Promise<void> {
     const turns = await diarize(join(dir, 'loopback.wav'))
     const previous = await readTranscript(dir)
     const segments = assignSpeakers(previous.segments, turns)
-    const updated: Transcript = { ...previous, segments, speakers: speakerNames(segments, previous.speakers) }
+    const named = speakerNames(segments, previous.speakers, await speakerLabels())
+
+    // A voice the user has named before comes back with its name already on it.
+    const withTranscript: Transcript = { ...previous, segments, speakers: named }
+    for (const speaker of Object.keys(named)) {
+      if (speaker === 'me' || speaker === 'them') continue
+      const known = await identify(dir, withTranscript, speaker).catch(() => null)
+      if (known) named[speaker] = known
+    }
+
+    const updated: Transcript = { ...withTranscript, speakers: named }
     await writeTranscript(dir, updated)
     wc.send('meeting:transcript', dir, updated)
   } catch (err) {
@@ -110,21 +126,48 @@ let downloads: AbortController | null = null
 
 let mcp: McpHandle | null = null
 
-async function restartMcp(): Promise<void> {
+// startMcp's retry ladder can take a few hundred ms. Three IPC handlers can call
+// restartMcp() close together (toggle, port change, the un-awaited call at startup),
+// and without serializing them a slower call's assignment could overwrite a faster
+// one's, orphaning a bound server nothing can ever close. Chaining onto this promise
+// (and always resolving it, even on failure, so one failed restart doesn't wedge every
+// restart after it) makes restarts run one at a time.
+let restartChain: Promise<void> = Promise.resolve()
+
+function restartMcp(): Promise<void> {
+  const run = restartChain.catch(() => {}).then(doRestart)
+  restartChain = run.catch(() => {})
+  return run
+}
+
+async function doRestart(): Promise<void> {
   await mcp?.close()
   mcp = null
   if (!(await getSettings()).mcp) return
-  mcp = await startMcp({ token: await mcpToken(), root: NOTES_ROOT })
+  const handle = await startMcp({ token: await mcpToken(), root: NOTES_ROOT, port: (await getSettings()).mcpPort })
+  // Settings can change while startMcp() was retrying — e.g. the user flipped MCP
+  // off during those few hundred ms. Since restarts are serialized, nothing else
+  // could have already reassigned `mcp` out from under us, so this check is only
+  // about whether we're still meant to be on; if not, close what we just opened
+  // rather than leave it listening with the toggle off.
+  if (!(await getSettings()).mcp) {
+    await handle.close()
+    return
+  }
+  mcp = handle
 }
 
 async function mcpState() {
-  const { mcp: enabled } = await getSettings()
+  const { mcp: enabled, mcpPort } = await getSettings()
   return {
     enabled,
     url: mcp?.url ?? null,
     token: mcp ? await mcpToken() : null,
+    requestedPort: mcpPort,
+    port: mcp?.port ?? null,
+    defaultPort: PREFERRED_PORT,
     // Anything else means the saved client configs are pointing at the wrong place.
-    portMoved: mcp !== null && mcp.port !== PREFERRED_PORT,
+    portMoved: mcp !== null && mcp.port !== mcpPort,
   }
 }
 
@@ -230,8 +273,30 @@ function registerIpc(): void {
     const previous = await readTranscript(assertMeetingDir(dir))
     const updated: Transcript = { ...previous, speakers: { ...previous.speakers, ...speakers } }
     await writeTranscript(assertMeetingDir(dir), updated)
+
+    // Typing a name is the only moment we know whose voice this is. Learn it here so
+    // the next meeting can fill it in on its own.
+    for (const [speaker, name] of Object.entries(speakers)) {
+      if (speaker === 'me' || speaker === name || !name.trim()) continue
+      await remember(assertMeetingDir(dir), updated, speaker, name.trim()).catch(() => {})
+    }
     return updated
   })
+
+  // Microphone test: is what I just said speech at the current setting, and what
+  // survives of it? Answering both is the only way the slider means anything.
+  ipcMain.handle('mic:probe', async (_e, pcm: ArrayBuffer) =>
+    hasSpeech(new Int16Array(pcm), (await getSettings()).noiseFilter),
+  )
+
+  ipcMain.handle('mic:transcribe', async (e, pcm: ArrayBuffer) => {
+    const samples = new Int16Array(pcm)
+    if (!(await hasSpeech(samples, (await getSettings()).noiseFilter))) return ''
+    return (await transcription(e.sender)).transcribeOnce(samples)
+  })
+
+  ipcMain.handle('voices:list', () => knownVoices())
+  ipcMain.handle('voices:forget', (_e, name: string) => forget(name))
 
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => setSettings(patch))
@@ -242,7 +307,7 @@ function registerIpc(): void {
   // Downloads run one at a time so the progress the user sees matches what is
   // actually moving, and a failure names the file that failed.
   ipcMain.handle('models:download', async (e) => {
-    if (downloads) throw new Error('กำลังโหลดอยู่แล้ว')
+    if (downloads) throw new Error('a download is already running')
     downloads = new AbortController()
     try {
       for (const spec of MODELS) {
@@ -267,6 +332,15 @@ function registerIpc(): void {
 
   ipcMain.handle('mcp:toggle', async (_e, on: boolean) => {
     await setSettings({ mcp: on })
+    await restartMcp()
+    return mcpState()
+  })
+
+  ipcMain.handle('mcp:port', async (_e, port: number) => {
+    // The renderer's range check is only a UX nicety — an IPC caller can send
+    // anything, so this is the check that actually protects settings.json.
+    if (!validPort(port)) throw new Error('port must be an integer between 1024 and 65535')
+    await setSettings({ mcpPort: port })
     await restartMcp()
     return mcpState()
   })

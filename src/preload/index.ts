@@ -1,11 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelStatus, Progress } from '../main/download.ts'
-import type { Language, Settings } from '../main/settings.ts'
+import type { Language, NoiseFilter, Settings } from '../main/settings.ts'
 import type { Transcript } from '../shared/meetings.ts'
 
 export type { Transcript } from '../shared/meetings.ts'
 export type { ModelStatus, Progress } from '../main/download.ts'
-export type { Language, Settings } from '../main/settings.ts'
+export type { Language, NoiseFilter, Settings } from '../main/settings.ts'
 
 export type Track = 'loopback' | 'mic'
 export type Segment = { t0: number; t1: number; text: string }
@@ -13,6 +13,9 @@ export type McpState = {
   enabled: boolean
   url: string | null
   token: string | null
+  requestedPort: number
+  port: number | null
+  defaultPort: number
   portMoved: boolean
 }
 
@@ -51,9 +54,18 @@ const api = {
   getSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
   setLanguage: (language: Language): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', { language }),
+  setNoiseFilter: (noiseFilter: NoiseFilter): Promise<Settings> =>
+    ipcRenderer.invoke('settings:set', { noiseFilter }),
+
+  probeMic: (pcm: ArrayBuffer): Promise<boolean> => ipcRenderer.invoke('mic:probe', pcm),
+  transcribeMic: (pcm: ArrayBuffer): Promise<string> => ipcRenderer.invoke('mic:transcribe', pcm),
+
+  knownVoices: (): Promise<string[]> => ipcRenderer.invoke('voices:list'),
+  forgetVoice: (name: string): Promise<void> => ipcRenderer.invoke('voices:forget', name),
 
   mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
   toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),
+  setMcpPort: (port: number): Promise<McpState> => ipcRenderer.invoke('mcp:port', port),
 }
 
 export type Api = typeof api

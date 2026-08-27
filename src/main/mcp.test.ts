@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
-import { startMcp, type McpHandle } from './mcp.ts'
+import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { writeTranscript } from './store.ts'
 
 const TOKEN = 'test-token-do-not-guess'
@@ -136,4 +137,32 @@ test('mcp: search spans meetings and carries context', async () => {
 test('mcp: an id cannot climb out of the notes folder', async () => {
   const escaped = await callTool('get_transcript', { id: '../../../etc' })
   assert.equal(escaped.isError, true)
+})
+
+test('mcp: a busy requested port falls back to the default port', async (t) => {
+  // If a real instance of the app is already running on this machine, it's already
+  // holding PREFERRED_PORT — stepping down there wouldn't prove the fallback works,
+  // it would just collide. Skip rather than assert on a coin flip.
+  const probe = await new Promise<ReturnType<typeof createServer> | null>((resolve) => {
+    const s = createServer()
+    s.once('error', () => resolve(null))
+    s.listen(PREFERRED_PORT, '127.0.0.1', () => resolve(s))
+  })
+  if (!probe) {
+    t.skip(`port ${PREFERRED_PORT} is already in use on this machine — skipping to avoid a flaky assertion`)
+    return
+  }
+  await new Promise<void>((resolve) => probe.close(() => resolve()))
+
+  const busy = createServer()
+  await new Promise<void>((resolve) => busy.listen(0, '127.0.0.1', () => resolve()))
+  const busyPort = (busy.address() as { port: number }).port
+
+  const fellBack = await startMcp({ token: TOKEN, root, port: busyPort })
+  try {
+    assert.equal(fellBack.port, PREFERRED_PORT)
+  } finally {
+    await fellBack.close()
+    await new Promise<void>((resolve) => busy.close(() => resolve()))
+  }
 })

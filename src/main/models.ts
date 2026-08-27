@@ -16,5 +16,5 @@ export async function requireFiles(paths: string[], hint: string): Promise<void>
   for (const path of paths) {
     if (!(await access(path).then(() => true, () => false))) missing.push(path)
   }
-  if (missing.length > 0) throw new Error(`หาไฟล์ไม่เจอ: ${missing.join(', ')} — ${hint}`)
+  if (missing.length > 0) throw new Error(`Missing ${missing.join(', ')} — ${hint}`)
 }

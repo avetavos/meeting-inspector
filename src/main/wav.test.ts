@@ -12,7 +12,7 @@ import {
   slug,
   writeTranscript,
 } from './store.ts'
-import { safeId } from '../shared/meetings.ts'
+import { safeId, titleOf } from '../shared/meetings.ts'
 import { WavWriter } from './wav.ts'
 
 test('wav: header matches what was actually written, across many appends', async () => {
@@ -51,11 +51,25 @@ test('store: meeting id is sortable and keeps Thai', () => {
   assert.equal(meetingId('ประชุม ทีม', at), '2026-08-27-1400-ประชุม-ทีม')
 })
 
+test('store: an untitled meeting is just its timestamp', () => {
+  const at = new Date(2026, 7, 27, 14, 0)
+  // No filler word in the folder name, and no date repeated after the date.
+  assert.equal(meetingId('', at), '2026-08-27-1400')
+  assert.equal(meetingId('   ', at), '2026-08-27-1400')
+})
+
+test('meetings: an untitled meeting reads as the time it happened', () => {
+  assert.equal(titleOf('2026-08-27-1400'), '27-08-2026 14:00')
+  assert.equal(titleOf('2026-08-27-1400-sprint-planning'), 'sprint-planning')
+  assert.equal(titleOf('2026-08-27-1400-ประชุม-ทีม'), 'ประชุม-ทีม')
+  assert.equal(titleOf('not-a-meeting-id'), 'not-a-meeting-id')
+})
+
 test('store: slug cannot escape the notes folder', () => {
   assert.equal(slug('../../etc/passwd'), 'etcpasswd')
   assert.equal(slug('a/b:c'), 'abc')
-  assert.equal(slug('   '), 'meeting')
-  assert.equal(slug(''), 'meeting')
+  assert.equal(slug('   '), '')
+  assert.equal(slug(''), '')
 })
 
 test('store: a transcript survives the round trip, sorted by time', async () => {
@@ -106,7 +120,7 @@ test('store: a path from the renderer cannot point outside the notes folder', ()
     NOTES_ROOT,
     '',
   ]) {
-    assert.throws(() => assertMeetingDir(escape), /ไม่ใช่โฟลเดอร์การประชุม/, `should refuse ${escape}`)
+    assert.throws(() => assertMeetingDir(escape), /not a meeting folder/, `should refuse ${escape}`)
   }
 })
 

@@ -58,6 +58,28 @@ export type RecorderEvents = {
   onTrackLost: (track: Track) => void
 }
 
+/**
+ * Mic only, no screen permission — for the microphone test in settings, where the
+ * point is hearing what the current noise setting does to your own voice.
+ */
+export async function openMicTap(onFrame: (frame: Float32Array) => void): Promise<() => void> {
+  const mic = await navigator.mediaDevices.getUserMedia({ audio: true })
+  const ctx = new AudioContext({ sampleRate: SAMPLE_RATE })
+  await ctx.audioWorklet.addModule(
+    URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'text/javascript' })),
+  )
+  const node = new AudioWorkletNode(ctx, 'pcm-tap', { channelCount: 1, channelCountMode: 'explicit' })
+  node.port.onmessage = (e: MessageEvent<Float32Array>) => onFrame(e.data)
+  const sink = new GainNode(ctx, { gain: 0 })
+  sink.connect(ctx.destination)
+  new MediaStreamAudioSourceNode(ctx, { mediaStream: mic }).connect(node).connect(sink)
+
+  return () => {
+    mic.getTracks().forEach((t) => t.stop())
+    void ctx.close()
+  }
+}
+
 export class Recorder {
   private constructor(
     private readonly ctx: AudioContext,

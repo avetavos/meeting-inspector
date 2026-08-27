@@ -6,14 +6,15 @@
 //
 // Runs the app's real Chunker and Whisper over mic.wav, so the number describes
 // the pipeline we ship rather than a one-shot transcription of the whole file.
-import { readFile, readdir } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { Chunker } from '../../src/main/chunker.ts'
 import { Whisper } from '../../src/main/whisper.ts'
 
 const NOTES = join(homedir(), 'Documents', 'MeetingNotes')
-const SCRIPT = new URL('script.th.txt', import.meta.url)
+const SCRIPTS = new URL('scripts/', import.meta.url).pathname
+const CORPUS = new URL('corpus/', import.meta.url).pathname
 
 function parseScript(text) {
   const lines = text.split('\n')
@@ -22,10 +23,12 @@ function parseScript(text) {
     .split(',')
     .map((t) => t.trim())
     .filter(Boolean)
-  const reference = lines
-    .filter((l) => l.trim() && !l.startsWith('#') && !l.startsWith('TERMS:'))
-    .join(' ')
-  return { terms, reference }
+  const spoken = lines.filter((l) => l.trim() && !l.startsWith('#') && !l.startsWith('TERMS:'))
+  // A multi-speaker script prefixes each line with who says it. Nobody reads the
+  // prefix out loud, so counting it as reference text would inflate CER.
+  const speakers = [...new Set(spoken.map((l) => /^([^:]{1,20}):\s/.exec(l)?.[1]).filter(Boolean))]
+  const reference = spoken.map((l) => l.replace(/^[^:]{1,20}:\s*/, '')).join(' ')
+  return { terms, reference, speakers }
 }
 
 /** Thai has no word spacing, so whitespace and punctuation carry no signal here. */
@@ -62,10 +65,20 @@ function pcmFrom(wav) {
   return new Int16Array(wav.buffer.slice(wav.byteOffset + 44, wav.byteOffset + wav.length))
 }
 
-const dir = process.argv[2] ?? (await newestMeeting())
-const track = process.argv[3] ?? 'mic'
-const { terms, reference } = parseScript(await readFile(SCRIPT, 'utf8'))
+// npm run asr:score -- <script> [meeting-dir] [track]
+const scripts = (await readdir(SCRIPTS)).filter((f) => f.endsWith('.txt')).sort()
+const wanted = process.argv[2]
+const scriptFile = scripts.find((f) => f.startsWith(wanted ?? '')) ?? scripts[0]
+if (!scriptFile) throw new Error('no scripts found')
+
+const dir = process.argv[3] ?? (await newestMeeting())
+const track = process.argv[4] ?? 'mic'
+const { terms, reference, speakers } = parseScript(await readFile(join(SCRIPTS, scriptFile), 'utf8'))
+if (speakers.length > 1) console.log(`คนพูดในบทนี้: ${speakers.join(', ')} (${speakers.length} คน)`)
 const pcm = pcmFrom(await readFile(join(dir, `${track}.wav`)))
+// Say both out loud. Scoring the wrong recording against the wrong script produces
+// a catastrophic-looking number that means nothing, and it is easy to miss.
+console.log(`script:  ${scriptFile}`)
 console.log(`meeting: ${basename(dir)}  track: ${track}  ${(pcm.length / 16000).toFixed(1)}s\n`)
 
 async function transcribe(prompt) {
@@ -121,5 +134,20 @@ console.log(`${''.padEnd(13)}CER     terms`)
 for (const [label, r] of runs) {
   console.log(`${label} ${(r.cer * 100).toFixed(1).padStart(5)}%   ${r.hits.length}/${terms.length}   missed: ${r.misses.join(', ') || '-'}`)
 }
-console.log('\nCER counts Thai wording drift too, so it moves when you paraphrase the script.')
+const best = runs[1][1]
+if (best.cer > 0.5) {
+  console.log('\n⚠️  CER สูงผิดปกติ — น่าจะให้คะแนนคนละบทกับที่อ่าน ลองระบุบทให้ตรง')
+}
+
+// A read-aloud recording is audio with a known-correct transcript, which is exactly
+// what fine-tuning would need later. Keep the pair rather than only the score.
+await mkdir(CORPUS, { recursive: true })
+await writeFile(
+  join(CORPUS, `${basename(dir)}.json`),
+  JSON.stringify({ script: scriptFile, meeting: basename(dir), track, audio: join(dir, `${track}.wav`),
+    reference, hypothesis: best.segments.map((s) => s.text).join(' '), cer: best.cer,
+    terms: { found: best.hits, missed: best.misses } }, null, 2) + '\n',
+)
+console.log(`\nเก็บคู่ เสียง+บทที่ถูกต้อง ไว้ที่ spike/asr-accuracy/corpus/${basename(dir)}.json`)
+console.log('CER counts Thai wording drift too, so it moves when you paraphrase the script.')
 console.log('The terms column is the one that decides whether summaries end up usable.')

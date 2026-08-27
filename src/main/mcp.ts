@@ -87,7 +87,7 @@ export async function startMcp(opts: { token: string; root: string; port?: numbe
   // stops such a request before it is even read.
   const validateOrigin = localhostOriginValidation()
 
-  const http = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const handler: Handler = async (req, res) => {
     if (!validateHost(req, res) || !validateOrigin(req, res)) return
     if (!authorized(req, opts.token)) {
       res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' })
@@ -98,9 +98,19 @@ export async function startMcp(opts: { token: string; root: string; port?: numbe
     const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
     await buildServer(opts.root).connect(transport)
     await transport.handleRequest(req, res)
-  })
+  }
 
-  const port = await listen(http, opts.port ?? PREFERRED_PORT)
+  const http = await listen(handler, opts.port ?? PREFERRED_PORT)
+  // bind()'s own error listener is off by now (it comes off in the listen callback),
+  // so without this a post-listen error — accept() failing under fd exhaustion, say —
+  // would be an uncaught exception that takes the whole main process down with it.
+  http.on('error', (err) => console.error('mcp: server error after bind', err))
+  const address = http.address()
+  // Only null before 'listening' fires or after 'close' — unreachable here since we
+  // already got the listen callback. Throwing rather than defaulting to a fake port
+  // number (0) that could otherwise be mistaken for a real, if odd, bound state.
+  if (typeof address !== 'object' || !address) throw new Error('mcp: server bound but has no address')
+  const port = address.port
   return {
     port,
     url: `http://127.0.0.1:${port}/`,
@@ -108,30 +118,53 @@ export async function startMcp(opts: { token: string; root: string; port?: numbe
   }
 }
 
-const bind = (http: Server, port: number): Promise<number | null> =>
+type Handler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+
+/**
+ * A fresh server per attempt. Reusing one across attempts looks harmless and is not:
+ * after a failed bind the object is still settling, and the next listen() throws
+ * ERR_SERVER_ALREADY_LISTEN synchronously — so one busy port poisoned every fallback
+ * and the server ended up on a random one even when the requested port was free.
+ */
+const bind = (handler: Handler, port: number): Promise<Server | null> =>
   new Promise((resolve) => {
-    const onError = () => resolve(null)
+    const http = createServer(handler)
+    const onError = () => {
+      http.close()
+      resolve(null)
+    }
     http.once('error', onError)
     http.listen(port, '127.0.0.1', () => {
       http.off('error', onError)
-      const address = http.address()
-      resolve(typeof address === 'object' && address ? address.port : null)
+      resolve(http)
     })
   })
 
+const RETRY_ATTEMPTS = 3
+const RETRY_DELAY_MS = 150
+
 /**
- * Client configs hardcode the port, so a busy 8787 is worth waiting out — it is
- * usually our own previous instance still letting go of it. Only after that does it
- * fall back to any free port, and the UI says so, because every config then needs
- * updating.
+ * Client configs name the port, so a busy one is worth a brief retry first — but only
+ * brief. restartMcp() already awaited our own previous server's close() before calling
+ * in here, so by the time we're retrying it is almost always a foreign holder that
+ * will never let go, not our own instance settling; this retry mainly covers our old
+ * socket sitting in TIME_WAIT. Only after that does it step down: to the default port
+ * if the user chose something else, and to any free port after that. Each step is
+ * visible in the UI, because a moved port means every saved client config is now
+ * pointing at nothing.
  */
-async function listen(http: Server, preferred: number): Promise<number> {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const bound = await bind(http, preferred)
+async function listen(handler: Handler, preferred: number): Promise<Server> {
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+    const bound = await bind(handler, preferred)
     if (bound) return bound
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    // No point sleeping after the last attempt — nothing is going to retry it.
+    if (attempt < RETRY_ATTEMPTS - 1) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
   }
-  const anyFree = await bind(http, 0)
+  if (preferred !== PREFERRED_PORT) {
+    const fallback = await bind(handler, PREFERRED_PORT)
+    if (fallback) return fallback
+  }
+  const anyFree = await bind(handler, 0)
   if (anyFree) return anyFree
-  throw new Error('เปิด MCP server ไม่ได้ — หา port ว่างไม่เจอ')
+  throw new Error('could not start the MCP server — no free port')
 }

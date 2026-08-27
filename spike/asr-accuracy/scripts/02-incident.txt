@@ -1,0 +1,31 @@
+# จำลองประชุม: คุยเรื่องระบบล่ม (incident review)
+# อ่านออกเสียงปกติ ความเร็วเท่าที่คุยประชุมจริง
+# TERMS: ศัพท์ที่ต้องออกมาเป็นภาษาอังกฤษ ถ้าถอดมาเป็นไทยถือว่าพลาด
+
+TERMS: incident, production, rollback, deploy, latency, timeout, error rate, alert, on-call, log, dashboard, root cause, postmortem, database, connection pool, memory leak, restart, traffic, load balancer, health check, retry, circuit breaker, monitoring, downtime
+
+เมื่อคืนตอนประมาณตีสองมี alert เด้งเข้ามาว่า error rate บน production พุ่งขึ้นไปถึงสิบสองเปอร์เซ็นต์
+
+คนที่ on-call คือผมเองครับ ผมเข้าไปดู dashboard แล้วเห็นว่า latency ของ endpoint หลักขึ้นจากสองร้อยมิลลิวินาทีเป็นเกินแปดวินาที
+
+ตอนแรกผมนึกว่าเป็นเรื่อง traffic แต่พอดูกราฟแล้ว traffic ปกติมาก ไม่ได้มีอะไรผิดปกติเลย
+
+ผมเลยไปดู log ของ service แล้วเจอว่ามันเต็มไปด้วย timeout ตอนขอ connection จาก database
+
+พอไปดูฝั่ง database ปรากฏว่า connection pool เต็มตลอดเวลา ทั้งที่จำนวน query ไม่ได้เยอะขึ้น
+
+สาเหตุที่แท้จริงคือ deploy รอบบ่ายวานนี้ เราเปลี่ยนโค้ดตรงที่เปิด connection แล้วลืมปิด กลายเป็น memory leak แบบหนึ่ง คือ connection รั่วไปเรื่อยๆ
+
+ผมตัดสินใจ rollback กลับไปเวอร์ชันก่อนหน้าทันที แล้ว restart service ทุกตัว ระบบกลับมาปกติภายในสิบห้านาที
+
+รวม downtime ประมาณสี่สิบนาที ซึ่งถือว่านานเกินไปสำหรับช่วงเวลานั้น
+
+สิ่งที่เราพลาดคือ health check ของเราไม่ได้เช็ค connection pool เลย load balancer เลยยังส่ง traffic เข้าไปที่เครื่องที่ตอบไม่ไหวแล้ว
+
+ใน postmortem ผมอยากเสนอสามข้อ หนึ่งคือเพิ่ม health check ให้ดู connection pool ด้วย
+
+สองคือใส่ circuit breaker ตรงที่เรียก database เพื่อไม่ให้ retry ซ้ำจนพังหนักกว่าเดิม
+
+สามคือ alert ตัวนี้ควรเด้งตั้งแต่ error rate เกินสองเปอร์เซ็นต์ ไม่ใช่รอถึงสิบ
+
+ผมจะเขียน postmortem ให้เสร็จภายในวันศุกร์ แล้วส่งให้ทุกคนอ่านก่อนประชุมสัปดาห์หน้าครับ

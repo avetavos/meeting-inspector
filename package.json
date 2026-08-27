@@ -11,11 +11,12 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-transform-types --test \"src/**/*.test.ts\"",
-    "asr:read": "cat spike/asr-accuracy/script.th.txt",
+    "asr:read": "node spike/asr-accuracy/read.mjs",
     "asr:score": "node --experimental-transform-types spike/asr-accuracy/score.mjs",
     "dist": "npm run build:whisper && electron-vite build && electron-builder",
     "icon": "electron build/icon.mjs",
-    "build:whisper": "node build/build-whisper.mjs"
+    "build:whisper": "node build/build-whisper.mjs",
+    "fixtures": "node spike/fixtures/make.mjs"
   },
   "devDependencies": {
     "@types/node": "^24",
