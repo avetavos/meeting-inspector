@@ -21,7 +21,17 @@ const en = {
   micTestSpeech: 'hearing speech',
   micTestDropped: 'ignoring this',
   micTestHeard: (text: string) => `Transcribed: ${text}`,
-  micTestNothing: 'Nothing survived the filter — try a lower setting, or speak closer to the mic.',
+  micTestNothing: 'Nothing survived the filter.',
+  micVerdictQuiet: 'The microphone barely picked anything up. This is not the filter — check the input device, or speak closer.',
+  micVerdictTooStrict: (pct: number) =>
+    `Your voice registered only ${pct}% of the time and nothing reached the transcript. This level is too strict for this room.`,
+  micVerdictPatchy: (pct: number) =>
+    `Your voice registered ${pct}% of the time — it is dropping in and out, so parts of a meeting would go missing.`,
+  micVerdictGood: (pct: number) =>
+    `Your voice registered ${pct}% of the time and came through to the transcript. This level suits this room.`,
+  micVerdictTryStricter: 'If the room still produces lines when nobody talks, move up one and test again.',
+  micLower: 'Lower it one step',
+  micRaise: 'Raise it one step',
   noiseLabel: 'Ignore noise',
   noiseLow: 'Keep everything',
   noiseMedium: 'Balanced',
@@ -88,7 +98,17 @@ const th: typeof en = {
   micTestSpeech: 'ได้ยินเป็นเสียงพูด',
   micTestDropped: 'กำลังทิ้งเสียงนี้',
   micTestHeard: (text: string) => `ถอดได้ว่า: ${text}`,
-  micTestNothing: 'ไม่มีอะไรรอดผ่านตัวกรอง — ลองลดระดับลง หรือพูดใกล้ไมค์ขึ้น',
+  micTestNothing: 'ไม่มีอะไรรอดผ่านตัวกรอง',
+  micVerdictQuiet: 'ไมค์แทบไม่ได้ยินอะไรเลย อันนี้ไม่ใช่เรื่องระดับกรอง ลองเช็คว่าเลือกไมค์ถูกตัวไหม หรือพูดใกล้ขึ้น',
+  micVerdictTooStrict: (pct: number) =>
+    `เสียงคุณถูกนับเป็นเสียงพูดแค่ ${pct}% ของเวลา และไม่มีอะไรถึง transcript เลย ระดับนี้เข้มเกินไปสำหรับห้องนี้`,
+  micVerdictPatchy: (pct: number) =>
+    `เสียงคุณถูกนับเป็นเสียงพูด ${pct}% ของเวลา ติดๆ หลุดๆ แบบนี้ประชุมจริงจะขาดหายเป็นช่วงๆ`,
+  micVerdictGood: (pct: number) =>
+    `เสียงคุณถูกนับเป็นเสียงพูด ${pct}% ของเวลา และถอดออกมาได้ ระดับนี้เหมาะกับห้องนี้`,
+  micVerdictTryStricter: 'ถ้ายังมีบรรทัดโผล่ตอนไม่มีใครพูด ลองเพิ่มอีกขั้นแล้วทดสอบใหม่',
+  micLower: 'ลดลงหนึ่งขั้น',
+  micRaise: 'เพิ่มขึ้นหนึ่งขั้น',
   noiseLabel: 'กรองเสียงรบกวน',
   noiseLow: 'เก็บทุกอย่าง',
   noiseMedium: 'สมดุล',
@@ -166,7 +186,7 @@ const noiseLabel = $('noise-label')
 const noiseHint = $('noisehint')
 const micToggle = $<HTMLButtonElement>('mictest-toggle')
 const micLevel = $('mictest-level')
-const micVerdict = $('mictest-verdict')
+const micVerdictEl = $('mictest-verdict')
 const micLine = $('mictest-line')
 const micHeard = $('mictest-heard')
 const mcpLabel = $('mcp-label')
@@ -485,6 +505,35 @@ async function renderVoices(): Promise<void> {
  */
 let micStop: (() => void) | null = null
 let micFrames: Float32Array[] = []
+let micProbes = { checks: 0, heard: 0, loudest: 0 }
+
+const LEVELS = ['low', 'medium', 'high'] as const
+
+/**
+ * Turns the test into an answer rather than a reading. How often the gate counted
+ * the voice, and whether anything reached the transcript, is what decides whether
+ * this level suits this room.
+ */
+function micVerdict(text: string): { message: string; move?: 'low' | 'medium' | 'high' } {
+  const pct = micProbes.checks > 0 ? Math.round((micProbes.heard / micProbes.checks) * 100) : 0
+  const index = LEVELS.indexOf(noiseSelect.value as (typeof LEVELS)[number])
+  const softer = LEVELS[index - 1]
+  const harder = LEVELS[index + 1]
+
+  // A silent microphone is not a filter problem, and telling someone to lower the
+  // setting would send them the wrong way entirely.
+  if (micProbes.loudest < 0.01) return { message: t().micVerdictQuiet }
+  // Already at the most permissive level: lowering is not on offer, so the advice
+  // has to be about the microphone instead of the setting.
+  if (!text.trim()) {
+    const message = `${t().micTestNothing} ${softer ? t().micVerdictTooStrict(pct) : t().micVerdictQuiet}`
+    return { message, move: softer }
+  }
+  if (pct < 50) {
+    return softer ? { message: t().micVerdictPatchy(pct), move: softer } : { message: t().micVerdictPatchy(pct) }
+  }
+  return { message: `${t().micVerdictGood(pct)} ${harder ? t().micVerdictTryStricter : ''}`.trim(), move: undefined }
+}
 
 async function toggleMicTest(): Promise<void> {
   if (micStop) {
@@ -492,8 +541,9 @@ async function toggleMicTest(): Promise<void> {
     micStop = null
     micToggle.textContent = t().micTest
     micLine.textContent = ''
-    micVerdict.textContent = ''
-    micVerdict.className = ''
+    micVerdictEl.textContent = ''
+    micVerdictEl.className = ''
+    micLevel.className = ''
     micLevel.style.width = '0%'
 
     const total = micFrames.reduce((n, f) => n + f.length, 0)
@@ -504,19 +554,42 @@ async function toggleMicTest(): Promise<void> {
     if (total > 16000) {
       micHeard.textContent = '…'
       const text = await window.api.transcribeMic(all.buffer as ArrayBuffer)
-      micHeard.textContent = text.trim() ? t().micTestHeard(text.trim()) : t().micTestNothing
+      const { message, move } = micVerdict(text)
+      micHeard.replaceChildren()
+      if (text.trim()) {
+        const heard = document.createElement('div')
+        heard.textContent = t().micTestHeard(text.trim())
+        micHeard.append(heard)
+      }
+      const verdict = document.createElement('div')
+      verdict.textContent = message
+      micHeard.append(verdict)
+      if (move) {
+        const fix = document.createElement('button')
+        const goingDown = LEVELS.indexOf(move) < LEVELS.indexOf(noiseSelect.value as (typeof LEVELS)[number])
+        fix.textContent = goingDown ? t().micLower : t().micRaise
+        fix.onclick = async () => {
+          noiseSelect.value = move
+          noiseSelect.dispatchEvent(new Event('change'))
+          micHeard.replaceChildren()
+        }
+        micHeard.append(fix)
+      }
     }
     return
   }
 
-  micHeard.textContent = ''
+  micHeard.replaceChildren()
   micFrames = []
+  micProbes = { checks: 0, heard: 0, loudest: 0 }
   try {
     micStop = await openMicTap((frame) => {
       micFrames.push(frame)
       let sum = 0
       for (const v of frame) sum += v * v
-      setMicLevel(Math.sqrt(sum / frame.length))
+      const rms = Math.sqrt(sum / frame.length)
+      micProbes.loudest = Math.max(micProbes.loudest, rms)
+      setMicLevel(rms)
     })
   } catch (err) {
     micHeard.textContent = reason(err)
@@ -542,10 +615,15 @@ async function probeLoop(): Promise<void> {
       for (const f of recent) for (const v of f) pcm[at++] = Math.max(-1, Math.min(1, v)) * 32767
       const speech = await window.api.probeMic(pcm.buffer as ArrayBuffer).catch(() => false)
       if (!micStop) break
-      micVerdict.textContent = speech ? t().micTestSpeech : t().micTestDropped
-      micVerdict.className = speech ? 'speech' : 'dropped'
+      micProbes.checks += 1
+      if (speech) micProbes.heard += 1
+      micVerdictEl.textContent = speech ? t().micTestSpeech : t().micTestDropped
+      micVerdictEl.className = speech ? 'speech' : 'dropped'
+      // The bar itself says whether this is counted, so the level and the verdict
+      // are one thing to watch rather than two.
+      micLevel.className = speech ? 'speech' : ''
     }
-    await new Promise((r) => setTimeout(r, 1000))
+    await new Promise((r) => setTimeout(r, 500))
   }
 }
 

@@ -258,3 +258,9 @@ select { font: inherit; color: inherit; padding: 7px 10px; border-radius: var(--
 #mictest-verdict { font-size: 13px; width: 8em; color: var(--text-dim); }
 #mictest-verdict.speech { color: var(--accent); font-weight: 600; }
 #mictest-verdict.dropped { color: var(--accent-rec); font-weight: 600; }
+
+/* the meter turns accent-coloured while the gate is counting it as speech */
+#mictest-level { background: var(--text-dim); transition: background 150ms ease; }
+#mictest-level.speech { background: var(--accent); }
+#mictest-heard > div { margin-top: 6px; }
+#mictest-heard button { margin-top: 8px; }
