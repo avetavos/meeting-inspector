@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
 import { createMeetingDir } from './store.ts'
 import { WavWriter } from './wav.ts'
-import { Whisper } from './whisper.ts'
+import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
 
 export type Track = 'loopback' | 'mic'
 
@@ -22,11 +22,12 @@ let current: Session | null = null
 let whisper: Promise<Whisper> | null = null
 
 function transcription(wc: WebContents): Promise<Whisper> {
-  whisper ??= Whisper.start(
-    'th',
-    (track, segments) => wc.send('transcript:segments', track, segments),
-    (depth) => wc.send('transcript:queue', depth),
-  ).catch((err: unknown) => {
+  whisper ??= Whisper.start({
+    language: 'th',
+    prompt: DEFAULT_PROMPT,
+    onSegments: (track, segments) => wc.send('transcript:segments', track, segments),
+    onDepth: (depth) => wc.send('transcript:queue', depth),
+  }).catch((err: unknown) => {
     whisper = null // let the next recording retry rather than wedging for good
     wc.send('transcript:error', String(err))
     throw err

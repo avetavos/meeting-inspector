@@ -68,12 +68,19 @@ const { terms, reference } = parseScript(await readFile(SCRIPT, 'utf8'))
 const pcm = pcmFrom(await readFile(join(dir, `${track}.wav`)))
 console.log(`meeting: ${basename(dir)}  track: ${track}  ${(pcm.length / 16000).toFixed(1)}s\n`)
 
-const segments = []
-const whisper = await Whisper.start(
-  'th',
-  (_t, batch) => segments.push(...batch),
-  () => {},
-)
+async function transcribe(prompt) {
+  const segments = []
+  const whisper = await Whisper.start({
+    language: 'th',
+    prompt,
+    onSegments: (_t, batch) => segments.push(...batch),
+    onDepth: () => {},
+  })
+  for (const chunk of chunks) whisper.enqueue(track, chunk)
+  while (whisper.depth > 0) await new Promise((r) => setTimeout(r, 300))
+  whisper.stop()
+  return segments.sort((a, b) => a.t0 - b.t0)
+}
 
 const chunker = new Chunker()
 const chunks = []
@@ -83,26 +90,36 @@ for (let i = 0; i < pcm.length; i += 1600) {
 }
 const tail = chunker.flush()
 if (tail) chunks.push(tail)
-
-for (const chunk of chunks) whisper.enqueue(track, chunk)
 console.log(`${chunks.length} chunks (${chunks.map((c) => (c.pcm.length / 16000).toFixed(0)).join('s, ')}s)`)
-while (whisper.depth > 0) await new Promise((r) => setTimeout(r, 300))
-whisper.stop()
 
-segments.sort((a, b) => a.t0 - b.t0)
-const hypothesis = segments.map((s) => s.text).join(' ')
+function score(segments) {
+  const hypothesis = segments.map((s) => s.text).join(' ')
+  const [ref, hyp] = [normalize(reference), normalize(hypothesis)]
+  const hits = terms.filter((t) => hyp.includes(normalize(t)))
+  return {
+    segments,
+    cer: editDistance(ref, hyp) / ref.length,
+    hits,
+    misses: terms.filter((t) => !hits.includes(t)),
+  }
+}
 
-const [ref, hyp] = [normalize(reference), normalize(hypothesis)]
-const cer = editDistance(ref, hyp) / ref.length
-const hits = terms.filter((t) => normalize(hypothesis).includes(normalize(t)))
-const misses = terms.filter((t) => !hits.includes(t))
+// Same audio, same chunk boundaries, one variable: does seeding the decoder with
+// the team's vocabulary rescue the terms it otherwise mishears?
+const runs = [
+  ['no prompt   ', score(await transcribe(undefined))],
+  ['with prompt ', score(await transcribe(terms.join(', ')))],
+]
 
-console.log('\n--- transcript ---')
-for (const s of segments) console.log(`${s.t0.toFixed(1).padStart(6)}s  ${s.text}`)
+for (const [label, r] of runs) {
+  console.log(`\n--- ${label.trim()} ---`)
+  for (const s of r.segments) console.log(`${s.t0.toFixed(1).padStart(6)}s  ${s.text}`)
+}
 
 console.log('\n--- score ---')
-console.log(`CER          ${(cer * 100).toFixed(1)}%  (${ref.length} reference chars)`)
-console.log(`term recall  ${hits.length}/${terms.length}  (${((hits.length / terms.length) * 100).toFixed(0)}%)`)
-if (misses.length) console.log(`missed       ${misses.join(', ')}`)
-console.log('\nCER counts Thai wording drift too. The term recall line is the one that decides')
-console.log('whether summaries will be usable — read the transcript above before trusting either.')
+console.log(`${''.padEnd(13)}CER     terms`)
+for (const [label, r] of runs) {
+  console.log(`${label} ${(r.cer * 100).toFixed(1).padStart(5)}%   ${r.hits.length}/${terms.length}   missed: ${r.misses.join(', ') || '-'}`)
+}
+console.log('\nCER counts Thai wording drift too, so it moves when you paraphrase the script.')
+console.log('The terms column is the one that decides whether summaries end up usable.')

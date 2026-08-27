@@ -17,6 +17,29 @@ const VAD_MODEL = join(MODELS, 'ggml-silero-v5.1.2.bin')
 
 type Job = Chunk & { track: string }
 
+/**
+ * Seed vocabulary for the decoder. Measured on 125s of read Thai dev-meeting speech
+ * (spike/asr-accuracy): term recall 21/27 -> 26/27, CER 15.1% -> 11.4%. Without it
+ * large-v3 hears Thai words that sound alike — log became หลอก, refactor became
+ * Refractor. Edit this when the team's jargon changes; it is the cheapest lever here.
+ */
+export const DEFAULT_PROMPT = [
+  'deploy', 'rollback', 'staging', 'production', 'backend', 'frontend',
+  'pull request', 'code review', 'merge', 'rebase', 'branch', 'commit',
+  'migration', 'endpoint', 'API', 'schema', 'query', 'index', 'cache',
+  'Redis', 'PostgreSQL', 'MongoDB', 'Docker', 'Kubernetes', 'pipeline',
+  'timeout', 'retry', 'log', 'monitoring', 'alert', 'error rate',
+  'sprint', 'backlog', 'story point', 'standup', 'refactor', 'unit test',
+].join(', ')
+
+export type WhisperOptions = {
+  language: string
+  /** Initial prompt: vocabulary to bias decoding toward (spec §13 risk #3). */
+  prompt?: string
+  onSegments: (track: string, segments: Segment[]) => void
+  onDepth: (depth: number) => void
+}
+
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = createServer()
@@ -40,15 +63,11 @@ export class Whisper {
   private constructor(
     private readonly proc: ChildProcess,
     private readonly url: string,
-    private readonly onSegments: (track: string, segments: Segment[]) => void,
-    private readonly onDepth: (depth: number) => void,
+    private readonly opts: WhisperOptions,
   ) {}
 
-  static async start(
-    language: string,
-    onSegments: (track: string, segments: Segment[]) => void,
-    onDepth: (depth: number) => void,
-  ): Promise<Whisper> {
+  static async start(opts: WhisperOptions): Promise<Whisper> {
+    const { language } = opts
     const port = await freePort()
     const proc = spawn(
       BIN,
@@ -57,7 +76,7 @@ export class Whisper {
     )
     const url = `http://127.0.0.1:${port}`
     await waitUntilUp(url, proc)
-    return new Whisper(proc, url, onSegments, onDepth)
+    return new Whisper(proc, url, opts)
   }
 
   get depth(): number {
@@ -67,7 +86,7 @@ export class Whisper {
   /** FIFO, nothing dropped (spec §7). The server handles one request at a time anyway. */
   enqueue(track: string, chunk: Chunk): void {
     this.queue.push({ track, ...chunk })
-    this.onDepth(this.depth)
+    this.opts.onDepth(this.depth)
     void this.pump()
   }
 
@@ -78,15 +97,15 @@ export class Whisper {
       for (let job = this.queue.shift(); job; job = this.queue.shift()) {
         try {
           const segments = await this.transcribe(job)
-          if (segments.length > 0) this.onSegments(job.track, segments)
+          if (segments.length > 0) this.opts.onSegments(job.track, segments)
         } catch (err) {
           console.error(`whisper: chunk at ${job.startSec}s failed`, err)
         }
-        this.onDepth(this.queue.length)
+        this.opts.onDepth(this.queue.length)
       }
     } finally {
       this.pumping = false
-      this.onDepth(this.queue.length)
+      this.opts.onDepth(this.queue.length)
     }
   }
 
@@ -94,6 +113,9 @@ export class Whisper {
     const body = new FormData()
     body.set('file', new Blob([toWav(job.pcm)], { type: 'audio/wav' }), 'chunk.wav')
     body.set('response_format', 'verbose_json')
+    // Whisper conditions on this as if it were the text just before the chunk, which
+    // is how a team's own jargon gets a chance against a phonetically similar word.
+    if (this.opts.prompt) body.set('prompt', this.opts.prompt)
     const res = await fetch(`${this.url}/inference`, { method: 'POST', body })
     if (!res.ok) throw new Error(`whisper ${res.status}: ${await res.text()}`)
     const json = (await res.json()) as { segments?: { start: number; end: number; text: string }[] }
