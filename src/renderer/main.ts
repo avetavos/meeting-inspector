@@ -299,6 +299,7 @@ async function start(): Promise<void> {
   toggle.textContent = 'จบประชุม'
   title.disabled = true
   warnings.replaceChildren()
+  document.body.classList.add('recording')
 }
 
 async function stop(): Promise<void> {
@@ -310,6 +311,7 @@ async function stop(): Promise<void> {
   // transcript is on disk, which can take a chunk or two.
   done.textContent = 'กำลังถอดเสียงส่วนที่เหลือ…'
   const result = await r?.stop()
+  document.body.classList.remove('recording')
   toggle.disabled = false
   toggle.textContent = 'เริ่มอัด'
   title.disabled = false
