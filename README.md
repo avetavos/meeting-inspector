@@ -99,6 +99,28 @@ proxy logs, which is why it is not the default.
 
 The server only answers while the app is open.
 
+### Cloudflare Worker (optional)
+
+`worker/` is the same four tools reading from R2 instead of the local disk — a
+permanent HTTPS URL, so clients reach your meetings without the Mac being awake
+and without a tunnel whose address changes every time.
+
+```
+npx wrangler login
+npx wrangler r2 bucket create meeting-inspector
+npx wrangler secret put MCP_TOKEN  --config worker/wrangler.jsonc   # read
+npx wrangler secret put SYNC_TOKEN --config worker/wrangler.jsonc   # write
+npm run worker:deploy
+```
+
+Put the URL and `SYNC_TOKEN` under ตั้งค่า; each meeting then has a
+"ส่งขึ้นคลาวด์" button. **Nothing uploads on its own** — spec §10's point is that
+putting transcripts online is a decision, so it stays one press per meeting.
+
+The two secrets are separate on purpose: the read token may travel in the URL
+for clients that cannot send headers, and a URL that reaches proxy logs must
+never carry write access.
+
 Model ids and prices were checked 2026-08-27 and move faster than this repo
 does — the Model field overrides the default per provider without a code
 change, and the table lives in one place in `src/main/summarize.ts`. Claude

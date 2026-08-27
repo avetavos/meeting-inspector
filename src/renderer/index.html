@@ -39,7 +39,7 @@
       details summary { cursor: pointer; opacity: .7; }
       details .row { margin-top: 12px; }
       #keystate { font-size: 13px; opacity: .7; margin-top: 8px; }
-      #mcpstate, #tunnelstate { font-size: 13px; opacity: .7; margin-top: 8px; }
+      #mcpstate, #tunnelstate, #syncstate { font-size: 13px; opacity: .7; margin-top: 8px; }
       #mcpstate code, #tunnelstate code { user-select: all; word-break: break-all; }
       .copyrow { margin-top: 6px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
       .copyrow button { padding: 2px 8px; font-size: 12px; }
@@ -90,6 +90,13 @@
         <label><input type="checkbox" id="tunnel" /> เปิด tunnel สำหรับ ChatGPT / Grok</label>
       </div>
       <div id="tunnelstate"></div>
+      <div class="row" style="margin-top:20px"><span class="label">Worker URL</span><input id="workerurl" placeholder="https://meeting-inspector.xxx.workers.dev" autocomplete="off" /></div>
+      <div class="row">
+        <span class="label">Sync token</span>
+        <input id="synctoken" type="password" placeholder="SYNC_TOKEN ของ Worker" autocomplete="off" />
+        <button id="savesync">บันทึก</button>
+      </div>
+      <div id="syncstate"></div>
     </details>
     <script type="module" src="./main.ts"></script>
   </body>

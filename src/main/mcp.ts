@@ -5,8 +5,14 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from 'node:path'
 import { NodeStreamableHTTPServerTransport, hostHeaderValidation } from '@modelcontextprotocol/node'
 import { McpServer } from '@modelcontextprotocol/server'
-import { z } from 'zod'
-import type { Transcript } from './store.ts'
+import {
+  registerTools,
+  safeId,
+  titleOf,
+  type MeetingMeta,
+  type MeetingStore,
+  type Transcript,
+} from '../shared/meetings.ts'
 
 /**
  * Streamable HTTP rather than stdio (spec §10): ChatGPT and Grok cannot speak stdio,
@@ -16,123 +22,42 @@ const PREFERRED_PORT = 8787
 
 export type McpHandle = { url: string; port: number; close: () => Promise<void> }
 
-type Meeting = { id: string; title: string; startedAt: string; durationSec: number; hasSummary: boolean }
+/** Meetings as folders on disk — the local half of the same four tools. */
+function diskStore(root: string): MeetingStore {
+  const read = async (id: string, file: string) =>
+    safeId(id) ? readFile(join(root, id, file), 'utf8').catch(() => null) : null
 
-async function meetings(root: string): Promise<Meeting[]> {
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
-  const found: Meeting[] = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const transcript = await readTranscriptAt(root, entry.name)
-    if (!transcript) continue
-    found.push({
-      id: transcript.id,
-      // The id is `<date>-<time>-<title>`; the title is whatever follows the stamp.
-      title: entry.name.replace(/^\d{4}-\d{2}-\d{2}-\d{4}-/, ''),
-      startedAt: transcript.startedAt,
-      durationSec: transcript.durationSec,
-      hasSummary: await readFile(join(root, entry.name, 'summary.md'), 'utf8').then(
-        () => true,
-        () => false,
-      ),
-    })
+  const transcript = async (id: string) => {
+    const raw = await read(id, 'transcript.json')
+    return raw === null ? null : (JSON.parse(raw) as Transcript)
   }
-  return found.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-}
 
-async function readTranscriptAt(root: string, id: string): Promise<Transcript | null> {
-  // The id doubles as the folder name, so refuse anything that could climb out of root.
-  if (id.includes('/') || id.includes('\\') || id.startsWith('.')) return null
-  return readFile(join(root, id, 'transcript.json'), 'utf8').then(
-    (raw) => JSON.parse(raw) as Transcript,
-    () => null,
-  )
+  return {
+    transcript,
+    summary: (id) => read(id, 'summary.md'),
+    async list() {
+      const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+      const found: MeetingMeta[] = []
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const t = await transcript(entry.name)
+        if (!t) continue
+        found.push({
+          id: t.id,
+          title: titleOf(entry.name),
+          startedAt: t.startedAt,
+          durationSec: t.durationSec,
+          hasSummary: (await read(entry.name, 'summary.md')) !== null,
+        })
+      }
+      return found.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    },
+  }
 }
-
-const who = (t: Transcript, speaker: string) => t.speakers[speaker] ?? speaker
 
 function buildServer(root: string): McpServer {
   const server = new McpServer({ name: 'meeting-inspector', version: '0.1.0' })
-  const text = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] })
-
-  server.registerTool(
-    'list_meetings',
-    {
-      title: 'List meetings',
-      description: 'ทุกการประชุมที่บันทึกไว้ ใหม่สุดก่อน',
-      inputSchema: z.object({}),
-    },
-    async () => text(await meetings(root)),
-  )
-
-  server.registerTool(
-    'get_transcript',
-    {
-      title: 'Get transcript',
-      description: 'transcript เต็มของการประชุมหนึ่ง พร้อมชื่อคนพูด',
-      inputSchema: z.object({ id: z.string().describe('meeting id จาก list_meetings') }),
-    },
-    async ({ id }) => {
-      const transcript = await readTranscriptAt(root, id)
-      if (!transcript) throw new Error(`ไม่พบการประชุม ${id}`)
-      return text({
-        ...transcript,
-        segments: transcript.segments.map((s) => ({ ...s, speakerName: who(transcript, s.speaker) })),
-      })
-    },
-  )
-
-  server.registerTool(
-    'get_summary',
-    {
-      title: 'Get summary',
-      description: 'สรุปของการประชุมหนึ่ง (markdown)',
-      inputSchema: z.object({ id: z.string() }),
-    },
-    async ({ id }) => {
-      if (!(await readTranscriptAt(root, id))) throw new Error(`ไม่พบการประชุม ${id}`)
-      const summary = await readFile(join(root, id, 'summary.md'), 'utf8').catch(() => null)
-      if (summary === null) throw new Error(`การประชุม ${id} ยังไม่ได้สรุป`)
-      return { content: [{ type: 'text' as const, text: summary }] }
-    },
-  )
-
-  server.registerTool(
-    'search_transcripts',
-    {
-      title: 'Search transcripts',
-      description: 'ค้นข้อความข้ามทุกการประชุม คืน segment ที่ตรงพร้อมบริบทรอบข้าง',
-      inputSchema: z.object({
-        query: z.string(),
-        limit: z.number().int().positive().max(200).default(20),
-      }),
-    },
-    // Straight scan over the JSON files, no index (spec §10). Add SQLite FTS the day
-    // this is actually slow, not before.
-    async ({ query, limit }) => {
-      const needle = query.toLowerCase()
-      const hits: unknown[] = []
-      for (const meeting of await meetings(root)) {
-        const transcript = await readTranscriptAt(root, meeting.id)
-        if (!transcript) continue
-        transcript.segments.forEach((segment, i) => {
-          if (hits.length >= limit || !segment.text.toLowerCase().includes(needle)) return
-          hits.push({
-            meetingId: meeting.id,
-            t0: segment.t0,
-            speaker: who(transcript, segment.speaker),
-            text: segment.text,
-            context: transcript.segments
-              .slice(Math.max(0, i - 2), i + 3)
-              .map((s) => `${who(transcript, s.speaker)}: ${s.text}`),
-          })
-        })
-        if (hits.length >= limit) break
-      }
-      return text({ query, hits })
-    },
-  )
-
+  registerTools(server, diskStore(root))
   return server
 }
 

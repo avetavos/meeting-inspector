@@ -45,6 +45,8 @@ const api = {
   onModelProgress: (fn: (progress: Progress) => void) =>
     ipcRenderer.on('models:progress', (_e, p: Progress) => fn(p)),
 
+  syncToCloud: (dir: string): Promise<{ id: string; segments: number }> => ipcRenderer.invoke('cloud:sync', dir),
+
   mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
   toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),
   toggleTunnel: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:tunnel', on),

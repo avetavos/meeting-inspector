@@ -9,3 +9,5 @@ models/
 .env
 resources/
 build/.whisper-src/
+worker/.dev.vars
+.wrangler/

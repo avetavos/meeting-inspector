@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import type { Transcript } from '../shared/meetings.ts'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -29,14 +30,7 @@ export async function createMeetingDir(title: string, at = new Date()): Promise<
   return { id, dir }
 }
 
-export type Transcript = {
-  id: string
-  startedAt: string
-  durationSec: number
-  /** Before diarization: just the two tracks. Step 5 replaces `them` with SPEAKER_xx. */
-  speakers: Record<string, string>
-  segments: { t0: number; t1: number; speaker: string; text: string }[]
-}
+export type { Transcript } from '../shared/meetings.ts'
 
 /** Local time with a real offset, so a transcript read months later still says when. */
 export function localIso(d: Date): string {

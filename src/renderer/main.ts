@@ -26,6 +26,10 @@ const mcpToggle = $<HTMLInputElement>('mcp')
 const mcpStateEl = $('mcpstate')
 const tunnelToggle = $<HTMLInputElement>('tunnel')
 const tunnelStateEl = $('tunnelstate')
+const workerUrlInput = $<HTMLInputElement>('workerurl')
+const syncTokenInput = $<HTMLInputElement>('synctoken')
+const saveSyncButton = $<HTMLButtonElement>('savesync')
+const syncStateEl = $('syncstate')
 const modelsEl = $('models')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 
@@ -41,7 +45,7 @@ let speakers: Record<string, string> = { me: 'คุณ', them: 'คนอื่
 let meetingDir: string | null = null
 
 /** Claude is the default (spec §3); the rest are one dropdown away. */
-let settings: Settings = { provider: 'claude', models: {}, mcp: false, tunnel: false }
+let settings: Settings = { provider: 'claude', models: {}, mcp: false, tunnel: false, workerUrl: '' }
 let providers: Record<Provider, ProviderInfo> | null = null
 const current = (): ProviderInfo => providers?.[settings.provider] ?? { label: settings.provider, model: '', price: [0, 0] }
 
@@ -230,6 +234,26 @@ async function renderSummaryBar(): Promise<void> {
   note.className = 'hint'
   summaryBar.append(run, note)
 
+  if (settings.workerUrl) {
+    const dir = meetingDir
+    const push = document.createElement('button')
+    push.textContent = 'ส่งขึ้นคลาวด์'
+    push.onclick = async () => {
+      push.disabled = true
+      push.textContent = 'กำลังส่ง…'
+      try {
+        const { segments } = await window.api.syncToCloud(dir)
+        push.textContent = `ส่งแล้ว ${segments} ท่อน`
+      } catch (err) {
+        push.textContent = 'ส่งขึ้นคลาวด์'
+        note.textContent = reason(err)
+      } finally {
+        push.disabled = false
+      }
+    }
+    summaryBar.insertBefore(push, note)
+  }
+
   run.textContent = `สรุปด้วย ${current().label}`
   if (!(await window.api.hasKey(settings.provider))) {
     run.disabled = true
@@ -353,6 +377,10 @@ async function loadSettings(): Promise<void> {
   )
   providerSelect.value = settings.provider
   syncProviderFields()
+  workerUrlInput.value = settings.workerUrl
+  syncStateEl.textContent = (await window.api.hasKey('worker-sync'))
+    ? 'มี sync token แล้ว'
+    : 'ยังไม่มี sync token — ปุ่มส่งขึ้นคลาวด์จะยังใช้ไม่ได้'
   showMcpState(await window.api.mcpState())
 }
 
@@ -475,6 +503,21 @@ mcpToggle.onchange = () => void flip(mcpToggle, mcpStateEl, () => window.api.tog
 tunnelToggle.onchange = () => {
   if (tunnelToggle.checked) tunnelStateEl.textContent = 'กำลังเปิด tunnel…'
   void flip(tunnelToggle, tunnelStateEl, () => window.api.toggleTunnel(tunnelToggle.checked))
+}
+
+saveSyncButton.onclick = async () => {
+  saveSyncButton.disabled = true
+  try {
+    settings = await window.api.setSettings({ workerUrl: workerUrlInput.value.trim() })
+    if (syncTokenInput.value) await window.api.setKey('worker-sync', syncTokenInput.value)
+    syncTokenInput.value = ''
+    syncStateEl.textContent = 'บันทึกแล้ว'
+    await renderSummaryBar()
+  } catch (err) {
+    syncStateEl.textContent = reason(err)
+  } finally {
+    saveSyncButton.disabled = false
+  }
 }
 
 providerSelect.onchange = async () => {

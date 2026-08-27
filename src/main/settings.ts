@@ -9,9 +9,11 @@ export type Settings = {
   mcp: boolean
   /** Off by default: on means meeting transcripts are reachable from the internet. */
   tunnel: boolean
+  /** Cloudflare Worker base URL. Empty until the user deploys one. */
+  workerUrl: string
 }
 
-const DEFAULTS: Settings = { provider: 'claude', models: {}, mcp: false, tunnel: false }
+const DEFAULTS: Settings = { provider: 'claude', models: {}, mcp: false, tunnel: false, workerUrl: '' }
 const FILE = () => join(app.getPath('userData'), 'settings.json')
 
 export async function getSettings(): Promise<Settings> {

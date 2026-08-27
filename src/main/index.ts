@@ -286,6 +286,26 @@ function registerIpc(): void {
     return mcpState()
   })
 
+  /**
+   * One meeting at a time, on an explicit press. Auto-uploading everything would
+   * quietly undo spec §10's point that putting transcripts online is a decision.
+   */
+  ipcMain.handle('cloud:sync', async (_e, dir: string) => {
+    const { workerUrl } = await getSettings()
+    const token = await getKey('worker-sync')
+    if (!workerUrl || !token) throw new Error('ยังไม่ได้ตั้ง Worker URL หรือ sync token')
+
+    const transcript = await readTranscript(dir)
+    const summary = await readFile(join(dir, 'summary.md'), 'utf8').catch(() => undefined)
+    const res = await fetch(`${workerUrl.replace(/\/+$/, '')}/sync/${transcript.id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ transcript, summary }),
+    })
+    if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`)
+    return (await res.json()) as { id: string; segments: number }
+  })
+
   ipcMain.handle('summary:providers', () => PROVIDERS)
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => setSettings(patch))
