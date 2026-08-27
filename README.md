@@ -34,9 +34,27 @@ Open the .dmg and drag Meeting Inspector to Applications.
 
 **3. First launch**
 
-The app is not signed with an Apple Developer certificate, so macOS will refuse
-to open it on a double-click. **Right-click the app → Open → Open**. You only do
-this once.
+The app is not notarized by Apple, so macOS blocks it outright: *"Meeting
+Inspector" Not Opened — Apple could not verify…*, offering only **Move to Trash**
+and **Done**. On macOS 15 and later the old right-click → Open trick no longer
+works — Apple removed it.
+
+Press **Done**, then run this once in Terminal:
+
+```
+xattr -dr com.apple.quarantine "/Applications/Meeting Inspector.app"
+```
+
+That removes the "downloaded from the internet" flag macOS attaches to the file.
+It leaves the app's signature intact and nothing else is changed. The app opens
+normally from then on.
+
+You can also try **System Settings → Privacy & Security**, scroll to Security,
+and press **Open Anyway** next to the blocked app. That is Apple's documented
+path, but for apps without a Developer ID the button does not always appear —
+the Terminal command is the one that reliably works.
+
+Only a paid Apple Developer ID and notarization would remove this step for good.
 
 **4. Grant two permissions**
 
@@ -124,8 +142,24 @@ done.
 
 **3. เปิดครั้งแรก**
 
-แอปไม่ได้เซ็นด้วยใบรับรอง Apple Developer macOS จะไม่ยอมเปิดถ้าดับเบิลคลิก
-**ให้คลิกขวาที่แอป → Open → Open** ทำครั้งเดียวพอ
+แอปไม่ได้ผ่านการ notarize ของ Apple macOS จะบล็อกทันทีพร้อมข้อความ
+*"Meeting Inspector" Not Opened — Apple could not verify…* และมีให้เลือกแค่
+**Move to Trash** กับ **Done** — บน macOS 15 ขึ้นไป Apple เอาวิธีคลิกขวา → Open ออกไปแล้ว
+
+กด **Done** แล้วรันคำสั่งนี้ใน Terminal ครั้งเดียว
+
+```
+xattr -dr com.apple.quarantine "/Applications/Meeting Inspector.app"
+```
+
+คำสั่งนี้ลบแค่ป้าย "ดาวน์โหลดมาจากอินเทอร์เน็ต" ที่ macOS ติดไว้กับไฟล์
+ลายเซ็นของแอปยังอยู่ครบและไม่มีอะไรอื่นถูกแก้ หลังจากนั้นเปิดได้ตามปกติ
+
+อีกทางคือ **System Settings → Privacy & Security** เลื่อนลงไปที่ Security แล้วกด
+**Open Anyway** ข้างชื่อแอปที่ถูกบล็อก — เป็นวิธีที่ Apple บอกไว้ แต่กับแอปที่ไม่มี
+Developer ID ปุ่มนั้นไม่ได้ขึ้นเสมอไป คำสั่งใน Terminal เชื่อถือได้กว่า
+
+ทางเดียวที่จะตัดขั้นตอนนี้ออกถาวรคือซื้อ Apple Developer ID แล้ว notarize
 
 **4. ให้สิทธิ์ 2 อย่าง**
 
