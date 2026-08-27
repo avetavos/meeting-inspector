@@ -28,6 +28,9 @@ const en = {
   micTestDropped: 'ignoring this',
   micTestNothing: 'Nothing survived the filter.',
   micVerdictQuiet: 'The microphone barely picked anything up. This is not the filter — check the input device, or speak closer.',
+  micLevelNow: (pct: number) => `input level ${pct}%`,
+  micTooQuiet: 'Barely any input — check the input device in System Settings › Sound, or move closer to the mic.',
+  micListening: 'listening…',
   micVerdictTooStrict: (pct: number) =>
     `Your voice registered only ${pct}% of the time and nothing reached the transcript. This level is too strict for this room.`,
   micVerdictPatchy: (pct: number) =>
@@ -110,6 +113,9 @@ const th: typeof en = {
   micTestDropped: 'กำลังทิ้งเสียงนี้',
   micTestNothing: 'ไม่มีอะไรรอดผ่านตัวกรอง',
   micVerdictQuiet: 'ไมค์แทบไม่ได้ยินอะไรเลย อันนี้ไม่ใช่เรื่องระดับกรอง ลองเช็คว่าเลือกไมค์ถูกตัวไหม หรือพูดใกล้ขึ้น',
+  micLevelNow: (pct: number) => `ระดับเสียงเข้า ${pct}%`,
+  micTooQuiet: 'เสียงเข้าเบามาก — เช็คว่าเลือกไมค์ถูกตัวไหมใน System Settings › Sound หรือขยับเข้าใกล้ไมค์',
+  micListening: 'กำลังฟัง…',
   micVerdictTooStrict: (pct: number) =>
     `เสียงคุณถูกนับเป็นเสียงพูดแค่ ${pct}% ของเวลา และไม่มีอะไรถึง transcript เลย ระดับนี้เข้มเกินไปสำหรับห้องนี้`,
   micVerdictPatchy: (pct: number) =>
@@ -638,20 +644,55 @@ function setMicLevel(rms: number): void {
   micLevel.style.width = `${Math.min(100, Math.sqrt(rms) * 180)}%`
 }
 
-/** Asks main, every second, whether the last two seconds count as speech right now. */
+const toPcm = (frames: Float32Array[]): Int16Array => {
+  const total = frames.reduce((n, f) => n + f.length, 0)
+  const pcm = new Int16Array(total)
+  let at = 0
+  for (const f of frames) for (const v of f) pcm[at++] = Math.max(-1, Math.min(1, v)) * 32767
+  return pcm
+}
+
+/**
+ * Twice a second for the verdict and the bar; every few seconds it also transcribes
+ * what was just said, because waiting until stop to find out whether your words
+ * survived makes the setting impossible to tune by ear.
+ */
 async function probeLoop(): Promise<void> {
+  let ticks = 0
+  let transcribing = false
   while (micStop) {
+    ticks += 1
     const recent = micFrames.slice(-20)
     const total = recent.reduce((n, f) => n + f.length, 0)
+
+    // Say it while it is still fixable, rather than in the summary afterwards.
+    if (ticks > 6 && micProbes.loudest < 0.01) micHeard.textContent = t().micTooQuiet
+
+    // Every four seconds, show what the last few seconds actually transcribed to.
+    if (ticks % 8 === 0 && !transcribing && micProbes.heard > 0) {
+      const recentPcm = toPcm(micFrames.slice(-40))
+      if (recentPcm.length > 16000) {
+        transcribing = true
+        void window.api
+          .transcribeMic(recentPcm.buffer as ArrayBuffer)
+          .then((said) => {
+            if (micStop && said.trim()) micHeard.textContent = `${t().micTestGot}: ${said.trim()}`
+          })
+          .catch(() => {})
+          .finally(() => {
+            transcribing = false
+          })
+      }
+    }
+
     if (total > 16000) {
-      const pcm = new Int16Array(total)
-      let at = 0
-      for (const f of recent) for (const v of f) pcm[at++] = Math.max(-1, Math.min(1, v)) * 32767
+      const pcm = toPcm(recent)
       const speech = await window.api.probeMic(pcm.buffer as ArrayBuffer).catch(() => false)
       if (!micStop) break
       micProbes.checks += 1
       if (speech) micProbes.heard += 1
-      micVerdictEl.textContent = speech ? t().micTestSpeech : t().micTestDropped
+      const level = Math.round(Math.min(1, Math.sqrt(micProbes.loudest) * 1.8) * 100)
+      micVerdictEl.textContent = `${speech ? t().micTestSpeech : t().micTestDropped} · ${t().micLevelNow(level)}`
       micVerdictEl.className = speech ? 'speech' : 'dropped'
       // The bar itself says whether this is counted, so the level and the verdict
       // are one thing to watch rather than two.
