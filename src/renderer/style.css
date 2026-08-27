@@ -269,7 +269,9 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 }
 
 /* known voices — one row per person the app has learned to recognise */
-#voices { margin-top: 18px; font-size: 13px; }
+/* No margin-top: this is the only child of its settings card, so a margin here is
+   just dead space inside the card, not separation from anything. */
+#voices { font-size: 13px; }
 #voices .voice { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-top: 6px; }
 #voices button { padding: 2px 10px; font-size: 12px; }
 
@@ -355,6 +357,10 @@ select:disabled { opacity: 0.4; cursor: default; }
    override every category's panel would render at once, stacked, the moment
    .settings-panel got a `display` of its own. */
 .settings-panel[hidden] { display: none; }
+/* #models is a bare wrapper whose .warn child carries the shared 14px margin-top.
+   As a .settings-panel child that margin stacks on the panel's own 18px gap, so the
+   download panel sat 32px below the model picker while every other pair sat at 18. */
+.settings-panel #models > .warn { margin-top: 0; }
 .settings-panel-title { font-size: 20px; font-weight: 700; margin: 0 0 2px 4px; }
 
 .settings-card {
