@@ -60,6 +60,11 @@ exists. The whole transcript goes out in one request.
 
 ### MCP server
 
+The MCP server starts with the app, so leaving Meeting Inspector open is all a
+client needs. It holds `http://127.0.0.1:8787/`; if something else has that port
+it waits a few seconds before moving, since every client config names it, and
+says so in the panel when it has to move.
+
 Under ตั้งค่า, "เปิด MCP server" serves `list_meetings`, `get_transcript`,
 `get_summary` and `search_transcripts` over Streamable HTTP on
 `http://127.0.0.1:8787/` (any free port if that one is taken), behind a bearer

@@ -6,7 +6,7 @@ import { Chunker, type Chunk } from './chunker.ts'
 import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
 import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { getKey, hasKey, setKey } from './keys.ts'
-import { startMcp, startTunnel, type McpHandle } from './mcp.ts'
+import { PREFERRED_PORT, startMcp, startTunnel, type McpHandle } from './mcp.ts'
 import { getSettings, setSettings, type Settings } from './settings.ts'
 import { PROVIDERS, estimate, modelFor, summarize } from './summarize.ts'
 import { NOTES_ROOT, createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
@@ -123,6 +123,8 @@ async function mcpState() {
     token: mcp ? await mcpToken() : null,
     tunnelOn,
     tunnelUrl: tunnel?.url ?? null,
+    // Anything else means the saved client configs are pointing at the wrong place.
+    portMoved: mcp !== null && mcp.port !== PREFERRED_PORT,
   }
 }
 

@@ -323,6 +323,11 @@ function showMcpState(state: McpState): void {
   tunnelToggle.disabled = !state.enabled
 
   mcpStateEl.replaceChildren()
+  if (state.portMoved) {
+    const moved = document.createElement('div')
+    moved.textContent = '⚠️ port 8787 ไม่ว่าง ต้องย้ายไป port อื่น — config ที่ตั้งไว้เดิมจะต่อไม่ติด ใช้บรรทัดข้างล่างตั้งใหม่'
+    mcpStateEl.append(moved)
+  }
   if (state.url && state.token) {
     mcpStateEl.append(
       copyRow('URL', state.url),

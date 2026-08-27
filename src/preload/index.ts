@@ -10,6 +10,7 @@ export type McpState = {
   token: string | null
   tunnelOn: boolean
   tunnelUrl: string | null
+  portMoved: boolean
 }
 import type { Transcript } from '../main/store.ts'
 import type { Settings } from '../main/settings.ts'

@@ -18,7 +18,7 @@ import {
  * Streamable HTTP rather than stdio (spec §10): ChatGPT and Grok cannot speak stdio,
  * and one HTTP server covers every client instead of one transport per client family.
  */
-const PREFERRED_PORT = 8787
+export const PREFERRED_PORT = 8787
 
 export type McpHandle = { url: string; port: number; close: () => Promise<void> }
 
@@ -109,20 +109,31 @@ export async function startMcp(opts: {
   }
 }
 
-/** Falls back to any free port so a busy 8787 does not stop the server from starting. */
-async function listen(http: Server, preferred: number): Promise<number> {
-  for (const port of [preferred, 0]) {
-    const bound = await new Promise<number | null>((resolve) => {
-      const onError = () => resolve(null)
-      http.once('error', onError)
-      http.listen(port, '127.0.0.1', () => {
-        http.off('error', onError)
-        const address = http.address()
-        resolve(typeof address === 'object' && address ? address.port : null)
-      })
+const bind = (http: Server, port: number): Promise<number | null> =>
+  new Promise((resolve) => {
+    const onError = () => resolve(null)
+    http.once('error', onError)
+    http.listen(port, '127.0.0.1', () => {
+      http.off('error', onError)
+      const address = http.address()
+      resolve(typeof address === 'object' && address ? address.port : null)
     })
+  })
+
+/**
+ * Client configs hardcode the port, so a busy 8787 is worth waiting out — it is
+ * usually our own previous instance still letting go of it. Only after that does it
+ * fall back to any free port, and the UI says so, because every config then needs
+ * updating.
+ */
+async function listen(http: Server, preferred: number): Promise<number> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const bound = await bind(http, preferred)
     if (bound) return bound
+    await new Promise((resolve) => setTimeout(resolve, 500))
   }
+  const anyFree = await bind(http, 0)
+  if (anyFree) return anyFree
   throw new Error('เปิด MCP server ไม่ได้ — หา port ว่างไม่เจอ')
 }
 
