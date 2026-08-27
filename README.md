@@ -61,6 +61,18 @@ exists. The whole transcript goes out in one request.
 | Gemini | `gemini-3.7-flash` | 0.75 | 3.75 |
 | xAI Grok | `grok-4.6` | 2 | 6 |
 
+### MCP server
+
+Under ตั้งค่า, "เปิด MCP server" serves `list_meetings`, `get_transcript`,
+`get_summary` and `search_transcripts` over Streamable HTTP on
+`http://127.0.0.1:8787/` (any free port if that one is taken), behind a bearer
+token the panel shows. Point any MCP client at that URL with the token.
+
+Cloud clients — ChatGPT, Grok — cannot reach localhost, so there is a tunnel
+toggle that runs `cloudflared tunnel` (`brew install cloudflared`). **Turning it
+on puts your meeting transcripts on the public internet**, behind the same
+token. It is off by default and turns itself off with the server.
+
 Model ids and prices were checked 2026-08-27 and move faster than this repo
 does — the Model field overrides the default per provider without a code
 change, and the table lives in one place in `src/main/summarize.ts`. Claude

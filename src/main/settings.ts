@@ -3,9 +3,15 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Provider } from './summarize.ts'
 
-export type Settings = { provider: Provider; models: Partial<Record<Provider, string>> }
+export type Settings = {
+  provider: Provider
+  models: Partial<Record<Provider, string>>
+  mcp: boolean
+  /** Off by default: on means meeting transcripts are reachable from the internet. */
+  tunnel: boolean
+}
 
-const DEFAULTS: Settings = { provider: 'claude', models: {} }
+const DEFAULTS: Settings = { provider: 'claude', models: {}, mcp: false, tunnel: false }
 const FILE = () => join(app.getPath('userData'), 'settings.json')
 
 export async function getSettings(): Promise<Settings> {

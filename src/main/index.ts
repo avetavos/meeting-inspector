@@ -1,12 +1,14 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
+import { randomBytes } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
 import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
 import { getKey, hasKey, setKey } from './keys.ts'
+import { startMcp, startTunnel, type McpHandle } from './mcp.ts'
 import { getSettings, setSettings, type Settings } from './settings.ts'
 import { PROVIDERS, estimate, modelFor, summarize } from './summarize.ts'
-import { createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
+import { NOTES_ROOT, createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
 
@@ -74,6 +76,42 @@ async function enqueue(wc: WebContents, track: Track, chunk: Chunk): Promise<voi
     ;(await transcription(wc)).enqueue(track, chunk)
   } catch {
     // transcription() already pushed the error to the renderer
+  }
+}
+
+let mcp: McpHandle | null = null
+let tunnel: { url: string; stop: () => void } | null = null
+
+/** Generated once and kept with the API keys — it is the only thing guarding the transcripts. */
+async function mcpToken(): Promise<string> {
+  const existing = await getKey('mcp')
+  if (existing) return existing
+  const token = randomBytes(24).toString('base64url')
+  await setKey('mcp', token)
+  return token
+}
+
+async function restartMcp(): Promise<void> {
+  await mcp?.close()
+  mcp = null
+  if (!(await getSettings()).mcp) return
+  mcp = await startMcp({
+    token: await mcpToken(),
+    root: NOTES_ROOT,
+    // A tunnelled request arrives with the tunnel's Host header, so it has to be
+    // allowed explicitly; the loopback default exists to block DNS rebinding.
+    allowHosts: tunnel ? [new URL(tunnel.url).hostname] : [],
+  })
+}
+
+async function mcpState() {
+  const { mcp: enabled, tunnel: tunnelOn } = await getSettings()
+  return {
+    enabled,
+    url: mcp?.url ?? null,
+    token: mcp ? await mcpToken() : null,
+    tunnelOn,
+    tunnelUrl: tunnel?.url ?? null,
   }
 }
 
@@ -187,6 +225,29 @@ function registerIpc(): void {
 
   // Sent over IPC rather than imported by the renderer: importing it would drag the
   // Anthropic SDK into the sandboxed preload bundle.
+  ipcMain.handle('mcp:state', () => mcpState())
+
+  ipcMain.handle('mcp:toggle', async (_e, on: boolean) => {
+    await setSettings({ mcp: on, ...(on ? {} : { tunnel: false }) })
+    if (!on) {
+      tunnel?.stop()
+      tunnel = null
+    }
+    await restartMcp()
+    return mcpState()
+  })
+
+  // Flipping this publishes the transcripts (spec §10) — it stays a deliberate press,
+  // never something that follows from turning the server on.
+  ipcMain.handle('mcp:tunnel', async (_e, on: boolean) => {
+    if (on && !mcp) throw new Error('เปิด MCP server ก่อน')
+    tunnel?.stop()
+    tunnel = on ? await startTunnel(mcp!.port) : null
+    await setSettings({ tunnel: on })
+    await restartMcp()
+    return mcpState()
+  })
+
   ipcMain.handle('summary:providers', () => PROVIDERS)
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => setSettings(patch))
@@ -234,6 +295,8 @@ app.whenReady().then(() => {
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
 
+  void restartMcp().catch((err: unknown) => console.error('mcp:', err))
+
   // Warm the model now so the first chunk is not stuck behind a 3GB load.
   win.webContents.once('did-finish-load', () => void transcription(win.webContents).catch(() => {}))
 
@@ -247,6 +310,8 @@ app.whenReady().then(() => {
 // quit, so we save what already came back rather than making them wait for the tail.
 app.on('before-quit', async (e) => {
   void whisper?.then((w) => w.stop()).catch(() => {})
+  tunnel?.stop()
+  void mcp?.close()
   if (!current || current.stopping) return
   e.preventDefault()
   const s = current

@@ -33,6 +33,10 @@
       details summary { cursor: pointer; opacity: .7; }
       details .row { margin-top: 12px; }
       #keystate { font-size: 13px; opacity: .7; margin-top: 8px; }
+      #mcpstate, #tunnelstate { font-size: 13px; opacity: .7; margin-top: 8px; }
+      #mcpstate code { user-select: all; word-break: break-all; }
+      #tunnelstate.danger { opacity: 1; }
+      details label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
       select { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }
       details .label { width: 96px; }
       #transcript { margin-top: 16px; max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--line); }
@@ -69,6 +73,14 @@
         <button id="savekey">บันทึก</button>
       </div>
       <div id="keystate"></div>
+      <div class="row" style="margin-top:20px">
+        <label><input type="checkbox" id="mcp" /> เปิด MCP server ให้ AI ตัวอื่นดึง transcript</label>
+      </div>
+      <div id="mcpstate"></div>
+      <div class="row">
+        <label><input type="checkbox" id="tunnel" /> เปิด tunnel สำหรับ ChatGPT / Grok</label>
+      </div>
+      <div id="tunnelstate"></div>
     </details>
     <script type="module" src="./main.ts"></script>
   </body>

@@ -1,4 +1,4 @@
-import type { Provider, ProviderInfo, Settings, Transcript } from '../preload/index.ts'
+import type { McpState, Provider, ProviderInfo, Settings, Transcript } from '../preload/index.ts'
 import { Recorder, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -18,6 +18,10 @@ const saveKeyButton = $<HTMLButtonElement>('savekey')
 const keyState = $('keystate')
 const providerSelect = $<HTMLSelectElement>('provider')
 const modelInput = $<HTMLInputElement>('model')
+const mcpToggle = $<HTMLInputElement>('mcp')
+const mcpStateEl = $('mcpstate')
+const tunnelToggle = $<HTMLInputElement>('tunnel')
+const tunnelStateEl = $('tunnelstate')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 
 let recorder: Recorder | null = null
@@ -32,7 +36,7 @@ let speakers: Record<string, string> = { me: 'คุณ', them: 'คนอื่
 let meetingDir: string | null = null
 
 /** Claude is the default (spec §3); the rest are one dropdown away. */
-let settings: Settings = { provider: 'claude', models: {} }
+let settings: Settings = { provider: 'claude', models: {}, mcp: false, tunnel: false }
 let providers: Record<Provider, ProviderInfo> | null = null
 const current = (): ProviderInfo => providers?.[settings.provider] ?? { label: settings.provider, model: '', price: [0, 0] }
 
@@ -190,6 +194,35 @@ function syncProviderFields(): void {
   void showKeyState()
 }
 
+function showMcpState(state: McpState): void {
+  mcpToggle.checked = state.enabled
+  tunnelToggle.checked = state.tunnelOn
+  tunnelToggle.disabled = !state.enabled
+
+  mcpStateEl.replaceChildren()
+  if (state.url && state.token) {
+    const url = document.createElement('div')
+    url.append('URL: ', code(state.url))
+    const token = document.createElement('div')
+    token.append('Bearer token: ', code(state.token))
+    mcpStateEl.append(url, token)
+  }
+
+  tunnelStateEl.className = state.tunnelOn ? 'danger' : ''
+  tunnelStateEl.replaceChildren()
+  if (state.tunnelUrl) {
+    tunnelStateEl.append('⚠️ transcript เข้าถึงได้จากอินเทอร์เน็ตแล้ว: ', code(state.tunnelUrl))
+  } else if (state.enabled) {
+    tunnelStateEl.textContent = 'ปิดอยู่ — cloud client อย่าง ChatGPT/Grok ต่อ localhost ไม่ได้ เปิดเมื่อไหร่เท่ากับ transcript ออกอินเทอร์เน็ต'
+  }
+}
+
+const code = (text: string) => {
+  const el = document.createElement('code')
+  el.textContent = text
+  return el
+}
+
 async function loadSettings(): Promise<void> {
   ;[settings, providers] = await Promise.all([window.api.getSettings(), window.api.providers()])
   providerSelect.replaceChildren(
@@ -202,6 +235,7 @@ async function loadSettings(): Promise<void> {
   )
   providerSelect.value = settings.provider
   syncProviderFields()
+  showMcpState(await window.api.mcpState())
 }
 
 function setLevel(track: Track, rms: number): void {
@@ -306,6 +340,24 @@ window.api.onSummaryDelta((text) => {
   summaryOut.textContent += text
   summaryOut.scrollTop = summaryOut.scrollHeight
 })
+
+async function flip(el: HTMLInputElement, status: HTMLElement, run: () => Promise<McpState>): Promise<void> {
+  el.disabled = true
+  try {
+    showMcpState(await run())
+  } catch (err) {
+    el.checked = !el.checked
+    status.textContent = err instanceof Error ? err.message : String(err)
+  } finally {
+    el.disabled = false
+  }
+}
+
+mcpToggle.onchange = () => void flip(mcpToggle, mcpStateEl, () => window.api.toggleMcp(mcpToggle.checked))
+tunnelToggle.onchange = () => {
+  if (tunnelToggle.checked) tunnelStateEl.textContent = 'กำลังเปิด tunnel…'
+  void flip(tunnelToggle, tunnelStateEl, () => window.api.toggleTunnel(tunnelToggle.checked))
+}
 
 providerSelect.onchange = async () => {
   settings = await window.api.setSettings({ provider: providerSelect.value as Provider })

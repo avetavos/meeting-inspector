@@ -3,6 +3,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 export type { Transcript } from '../main/store.ts'
 export type { Cost, Provider, ProviderInfo } from '../main/summarize.ts'
 export type { Settings } from '../main/settings.ts'
+export type McpState = {
+  enabled: boolean
+  url: string | null
+  token: string | null
+  tunnelOn: boolean
+  tunnelUrl: string | null
+}
 import type { Transcript } from '../main/store.ts'
 import type { Settings } from '../main/settings.ts'
 import type { Cost, Provider, ProviderInfo } from '../main/summarize.ts'
@@ -30,6 +37,9 @@ const api = {
 
   setKey: (provider: string, key: string): Promise<void> => ipcRenderer.invoke('keys:set', provider, key),
   hasKey: (provider: string): Promise<boolean> => ipcRenderer.invoke('keys:has', provider),
+  mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
+  toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),
+  toggleTunnel: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:tunnel', on),
   providers: (): Promise<Record<Provider, ProviderInfo>> => ipcRenderer.invoke('summary:providers'),
   getSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke('settings:set', patch),
