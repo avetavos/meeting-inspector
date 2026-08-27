@@ -1,0 +1,31 @@
+# จำลองประชุม: refinement งานใน backlog
+# อ่านออกเสียงปกติ ความเร็วเท่าที่คุยประชุมจริง
+# TERMS: ศัพท์ที่ต้องออกมาเป็นภาษาอังกฤษ ถ้าถอดมาเป็นไทยถือว่าพลาด
+
+TERMS: refinement, backlog, story point, acceptance criteria, edge case, dependency, mock, stub, integration test, unit test, API, payload, response, validation, schema, migration, feature flag, rollout, estimate, spike, ticket, requirement, scope
+
+วันนี้เรามา refinement งานที่จะเข้า sprint หน้ากันนะครับ มีอยู่ห้า ticket
+
+ใบแรกคือเรื่องหน้า checkout ที่ต้องรองรับการจ่ายแบบผ่อน อันนี้ requirement ยังไม่ชัดเท่าไหร่
+
+acceptance criteria ที่เขียนมามีแค่สองข้อ ผมว่ายังไม่พอ เพราะมี edge case เยอะมาก
+
+เช่นถ้าผู้ใช้กดผ่อนแล้วยกเลิกกลางทาง หรือถ้ายอดต่ำกว่าขั้นต่ำที่กำหนดไว้ อันนี้ยังไม่มีใครเขียนไว้เลย
+
+ผมเสนอว่าอันนี้ยังไม่ควรให้ estimate ควรทำ spike ก่อนสักสองวันแล้วค่อยกลับมาคุยกันใหม่
+
+ใบที่สองคือเพิ่ม field ใหม่ใน API response ซึ่งตรงไปตรงมา น่าจะสัก สาม story point
+
+แต่มันมี dependency กับทีม data นะครับ เพราะ schema ต้องแก้ก่อน แล้วต้องมี migration ด้วย
+
+ถ้าทีม data ยังไม่เสร็จ เราก็เริ่มไม่ได้ ผมเลยอยากให้ ticket นี้ผูกไว้กับของเขาให้ชัดเจน
+
+ใบที่สามคือเขียน integration test ให้ flow สมัครสมาชิก อันนี้ผมให้ห้า point
+
+เพราะต้องทำ mock ของ service ภายนอกด้วย ตอนนี้เรามีแค่ stub แบบง่ายๆ ซึ่งไม่พอสำหรับเคสที่ผิดพลาด
+
+ใบที่สี่กับใบที่ห้าเป็นงาน validation ของ payload ทั้งคู่ ผมว่ารวมเป็นใบเดียวได้เลย scope มันซ้อนกันเกือบทั้งหมด
+
+แล้วเรื่องการปล่อยของ ผมอยากให้ทุกอันขึ้นหลัง feature flag นะครับ จะได้ rollout ทีละกลุ่มได้
+
+ถ้าไม่มีใครเสริมอะไร ผมจะอัปเดต ticket ทั้งหมดในบ่ายนี้ แล้วเราไป planning กันพรุ่งนี้เช้าครับ
