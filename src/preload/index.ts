@@ -13,6 +13,9 @@ export type McpState = {
   enabled: boolean
   url: string | null
   token: string | null
+  requestedPort: number
+  port: number | null
+  defaultPort: number
   portMoved: boolean
 }
 
@@ -62,6 +65,7 @@ const api = {
 
   mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
   toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),
+  setMcpPort: (port: number): Promise<McpState> => ipcRenderer.invoke('mcp:port', port),
 }
 
 export type Api = typeof api

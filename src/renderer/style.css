@@ -267,3 +267,6 @@ select { font: inherit; color: inherit; padding: 7px 10px; border-radius: var(--
 
 #mictest-heard .rowlabel { color: var(--text-dim); }
 #mictest-heard > div { margin-top: 6px; line-height: 1.7; }
+
+#port { max-width: 8em; }
+#mcpstate .warn { margin: 0 0 10px; }

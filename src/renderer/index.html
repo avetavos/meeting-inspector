@@ -39,6 +39,11 @@
             <div class="row">
               <label><input type="checkbox" id="mcp" /> <span id="mcp-label">Turn on the MCP server so a local AI assistant can pull the transcript to summarize it</span></label>
             </div>
+            <div class="row">
+              <span class="label" id="port-label"></span>
+              <input id="port" type="number" min="1024" max="65535" />
+              <button id="port-save"></button>
+            </div>
             <div id="mcpstate"></div>
             <div class="row" style="margin-top:20px">
               <span class="label" id="noise-label"></span>

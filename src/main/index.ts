@@ -5,7 +5,7 @@ import { assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './dia
 import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { mcpToken } from './token.ts'
-import { getSettings, setSettings, type Language, type Settings } from './settings.ts'
+import { getSettings, setSettings, validPort, type Language, type Settings } from './settings.ts'
 import { hasSpeech } from './vad.ts'
 import { forget, identify, knownVoices, remember } from './voices.ts'
 import {
@@ -126,21 +126,48 @@ let downloads: AbortController | null = null
 
 let mcp: McpHandle | null = null
 
-async function restartMcp(): Promise<void> {
+// startMcp's retry ladder can take a few hundred ms. Three IPC handlers can call
+// restartMcp() close together (toggle, port change, the un-awaited call at startup),
+// and without serializing them a slower call's assignment could overwrite a faster
+// one's, orphaning a bound server nothing can ever close. Chaining onto this promise
+// (and always resolving it, even on failure, so one failed restart doesn't wedge every
+// restart after it) makes restarts run one at a time.
+let restartChain: Promise<void> = Promise.resolve()
+
+function restartMcp(): Promise<void> {
+  const run = restartChain.catch(() => {}).then(doRestart)
+  restartChain = run.catch(() => {})
+  return run
+}
+
+async function doRestart(): Promise<void> {
   await mcp?.close()
   mcp = null
   if (!(await getSettings()).mcp) return
-  mcp = await startMcp({ token: await mcpToken(), root: NOTES_ROOT })
+  const handle = await startMcp({ token: await mcpToken(), root: NOTES_ROOT, port: (await getSettings()).mcpPort })
+  // Settings can change while startMcp() was retrying — e.g. the user flipped MCP
+  // off during those few hundred ms. Since restarts are serialized, nothing else
+  // could have already reassigned `mcp` out from under us, so this check is only
+  // about whether we're still meant to be on; if not, close what we just opened
+  // rather than leave it listening with the toggle off.
+  if (!(await getSettings()).mcp) {
+    await handle.close()
+    return
+  }
+  mcp = handle
 }
 
 async function mcpState() {
-  const { mcp: enabled } = await getSettings()
+  const { mcp: enabled, mcpPort } = await getSettings()
   return {
     enabled,
     url: mcp?.url ?? null,
     token: mcp ? await mcpToken() : null,
+    requestedPort: mcpPort,
+    port: mcp?.port ?? null,
+    defaultPort: PREFERRED_PORT,
     // Anything else means the saved client configs are pointing at the wrong place.
-    portMoved: mcp !== null && mcp.port !== PREFERRED_PORT,
+    portMoved: mcp !== null && mcp.port !== mcpPort,
   }
 }
 
@@ -305,6 +332,15 @@ function registerIpc(): void {
 
   ipcMain.handle('mcp:toggle', async (_e, on: boolean) => {
     await setSettings({ mcp: on })
+    await restartMcp()
+    return mcpState()
+  })
+
+  ipcMain.handle('mcp:port', async (_e, port: number) => {
+    // The renderer's range check is only a UX nicety — an IPC caller can send
+    // anything, so this is the check that actually protects settings.json.
+    if (!validPort(port)) throw new Error('port must be an integer between 1024 and 65535')
+    await setSettings({ mcpPort: port })
     await restartMcp()
     return mcpState()
   })

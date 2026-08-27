@@ -40,6 +40,18 @@ const en = {
   micVerdictTryStricter: 'If the room still produces lines when nobody talks, move up one and test again.',
   micLower: 'Lower it one step',
   micRaise: 'Raise it one step',
+  portLabel: 'MCP port',
+  portSave: 'Apply',
+  portInvalid: 'Pick a port between 1024 and 65535.',
+  portTakenUsingDefault: (wanted: number, actual: number) =>
+    `Port ${wanted} is already in use by something else, so the server is on ${actual}. Pick a free port, or point your clients at ${actual}.`,
+  portTakenUsingAny: (wanted: number, actual: number) =>
+    `Port ${wanted} is in use, and so is the default, so the server took ${actual}. Pick a free port — this one changes every launch.`,
+  // The requested port IS the default here, so there was only one failed attempt,
+  // not two — portTakenUsingAny's "and so is the default" would be redundant and
+  // misleading.
+  portTakenUsingAnyIsDefault: (wanted: number, actual: number) =>
+    `Port ${wanted} is already in use, so the server took ${actual}. Pick a free port — this one changes every launch.`,
   noiseLabel: 'Ignore noise',
   noiseLow: 'Keep everything',
   noiseMedium: 'Balanced',
@@ -79,8 +91,6 @@ const en = {
   speakerMergeHint: 'If someone got split into two speakers, give them the same name to merge them.',
   copy: 'Copy',
   copied: 'Copied',
-  portMoved:
-    "⚠️ Port 8787 was taken, so a different one was used — any config you'd already set up won't connect. Use the lines below to set it up again.",
   speakerDefaults: { me: 'You', them: 'Others' },
   modelNames: {
     'ggml-large-v3.bin': 'Whisper large-v3 — transcribes speech',
@@ -125,6 +135,15 @@ const th: typeof en = {
   micVerdictTryStricter: 'ถ้ายังมีบรรทัดโผล่ตอนไม่มีใครพูด ลองเพิ่มอีกขั้นแล้วทดสอบใหม่',
   micLower: 'ลดลงหนึ่งขั้น',
   micRaise: 'เพิ่มขึ้นหนึ่งขั้น',
+  portLabel: 'MCP port',
+  portSave: 'ใช้ค่านี้',
+  portInvalid: 'เลือก port ระหว่าง 1024 ถึง 65535',
+  portTakenUsingDefault: (wanted: number, actual: number) =>
+    `port ${wanted} มีแอปอื่นใช้อยู่ ระบบจึงเปิดที่ ${actual} แทน — เลือก port ที่ว่าง หรือชี้ client มาที่ ${actual}`,
+  portTakenUsingAny: (wanted: number, actual: number) =>
+    `port ${wanted} ไม่ว่าง และ port เริ่มต้นก็ไม่ว่าง ระบบจึงใช้ ${actual} — ควรเลือก port ที่ว่าง เพราะเลขนี้จะเปลี่ยนทุกครั้งที่เปิดแอป`,
+  portTakenUsingAnyIsDefault: (wanted: number, actual: number) =>
+    `port ${wanted} มีแอปอื่นใช้อยู่ ระบบจึงใช้ ${actual} แทน — ควรเลือก port ที่ว่าง เพราะเลขนี้จะเปลี่ยนทุกครั้งที่เปิดแอป`,
   noiseLabel: 'กรองเสียงรบกวน',
   noiseLow: 'เก็บทุกอย่าง',
   noiseMedium: 'สมดุล',
@@ -163,7 +182,6 @@ const th: typeof en = {
   speakerMergeHint: 'ถ้าแยกคนพูดผิด ตั้งชื่อเดียวกันให้สองคน = รวมเป็นคนเดียว',
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
-  portMoved: '⚠️ port 8787 ไม่ว่าง ต้องย้ายไป port อื่น — config ที่ตั้งไว้เดิมจะต่อไม่ติด ใช้บรรทัดข้างล่างตั้งใหม่',
   speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
   modelNames: {
     'ggml-large-v3.bin': 'Whisper large-v3 — ถอดเสียง',
@@ -197,6 +215,9 @@ const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('
 const meterLabels: Record<Track, HTMLElement> = { loopback: $('meter-others-label'), mic: $('meter-us-label') }
 const settingsSummary = $('settings-summary')
 const voicesEl = $('voices')
+const portInput = $<HTMLInputElement>('port')
+const portSave = $<HTMLButtonElement>('port-save')
+const portLabel = $('port-label')
 const noiseSelect = $<HTMLSelectElement>('noise')
 const noiseLabel = $('noise-label')
 const noiseHint = $('noisehint')
@@ -457,10 +478,22 @@ function copyRow(label: string, value: string): HTMLElement {
 
 function showMcpState(state: McpState): void {
   mcpToggle.checked = state.enabled
+  portInput.value = String(state.requestedPort)
   mcpStateEl.replaceChildren()
-  if (state.portMoved) {
+  if (state.portMoved && state.port !== null) {
     const moved = document.createElement('div')
-    moved.textContent = t().portMoved
+    moved.className = 'warn'
+    // Three ways this can land: the requested port was busy and we stepped down to
+    // the default (stable, just point clients at it); the requested port WAS the
+    // default and busy, so there was only one failed attempt before an ephemeral
+    // port (no second "default" to blame); or the requested port and the default
+    // were both busy, landing on an ephemeral port after two failed attempts.
+    moved.textContent =
+      state.port === state.defaultPort
+        ? t().portTakenUsingDefault(state.requestedPort, state.port)
+        : state.requestedPort === state.defaultPort
+          ? t().portTakenUsingAnyIsDefault(state.requestedPort, state.port)
+          : t().portTakenUsingAny(state.requestedPort, state.port)
     mcpStateEl.append(moved)
   }
   if (!state.url || !state.token) return
@@ -482,6 +515,21 @@ function showMcpState(state: McpState): void {
       }),
     ),
   )
+}
+
+/**
+ * Renders into a dedicated child node rather than `mcpStateEl.textContent = …`, which
+ * would wipe the URL / Bearer token / Claude Code / Claude Desktop rows — the user
+ * would then have no way to get them back short of a relaunch or a language switch.
+ */
+function showMcpError(message: string): void {
+  let box = mcpStateEl.querySelector<HTMLElement>('.mcperror')
+  if (!box) {
+    box = document.createElement('div')
+    box.className = 'warn mcperror'
+    mcpStateEl.prepend(box)
+  }
+  box.textContent = message
 }
 
 /**
@@ -805,13 +853,29 @@ window.api.onModelProgress(({ file, received: bytes }) => {
   updateOverallBar()
 })
 
+portSave.onclick = async () => {
+  const port = Number(portInput.value)
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    showMcpError(t().portInvalid)
+    return
+  }
+  portSave.disabled = true
+  try {
+    showMcpState(await window.api.setMcpPort(port))
+  } catch (err) {
+    showMcpError(reason(err))
+  } finally {
+    portSave.disabled = false
+  }
+}
+
 mcpToggle.onchange = async () => {
   mcpToggle.disabled = true
   try {
     showMcpState(await window.api.toggleMcp(mcpToggle.checked))
   } catch (err) {
     mcpToggle.checked = !mcpToggle.checked
-    mcpStateEl.textContent = reason(err)
+    showMcpError(reason(err))
   } finally {
     mcpToggle.disabled = false
   }
@@ -830,6 +894,8 @@ function applyLanguage(l: Language): void {
   meterLabels.mic.textContent = t().meterUs
   settingsSummary.textContent = t().settingsSummary
   noiseLabel.textContent = t().noiseLabel
+  portLabel.textContent = t().portLabel
+  portSave.textContent = t().portSave
   const options = noiseSelect.options
   options[0]!.textContent = t().noiseLow
   options[1]!.textContent = t().noiseMedium

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { PREFERRED_PORT } from './mcp.ts'
 export type Language = 'en' | 'th'
 
 /** How hard to work at ignoring everything that is not speech. Rooms differ. */
@@ -12,9 +13,20 @@ export type Settings = {
   /** UI language. English by default; Thai is one switch away in settings. */
   language: Language
   noiseFilter: NoiseFilter
+  /** Port the MCP server should hold. Client configs name it, so it is worth keeping. */
+  mcpPort: number
 }
 
-const DEFAULTS: Settings = { mcp: true, language: 'en', noiseFilter: 'medium' }
+/** Below 1024 needs root; the app has no business asking for that. Exported so the
+ * main-process write path can reject garbage instead of trusting the renderer's copy
+ * of this same check. */
+export const validPort = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n >= 1024 && n <= 65535
+
+// mcp.ts's PREFERRED_PORT is the single source of truth for 8787 — a second literal
+// here would silently disagree with it if either one moved, and portMoved would start
+// lying.
+const DEFAULTS: Settings = { mcp: true, language: 'en', noiseFilter: 'medium', mcpPort: PREFERRED_PORT }
 const FILE = () => join(app.getPath('userData'), 'settings.json')
 
 /**
@@ -31,6 +43,7 @@ export async function getSettings(): Promise<Settings> {
       noiseFilter: ['low', 'medium', 'high'].includes(stored.noiseFilter as string)
         ? (stored.noiseFilter as NoiseFilter)
         : DEFAULTS.noiseFilter,
+      mcpPort: validPort(stored.mcpPort) ? stored.mcpPort : DEFAULTS.mcpPort,
     }
   } catch {
     return DEFAULTS
