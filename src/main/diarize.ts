@@ -15,7 +15,7 @@ const SEGMENTATION = model('pyannote-segmentation-3-0.onnx')
 const EMBEDDING = model('campplus-sv-zh_en.onnx')
 
 export async function diarize(wavPath: string): Promise<Turn[]> {
-  await requireFiles([SEGMENTATION, EMBEDDING], 'กดปุ่มโหลดโมเดลในแอป')
+  await requireFiles([SEGMENTATION, EMBEDDING], 'use the download button in the app')
   // Required late: this pulls in a ~30MB native addon nobody needs until a meeting ends.
   // It is CommonJS, so depending on who does the loading the class arrives either as a
   // named export or hidden under `default`.
@@ -62,16 +62,20 @@ export function assignSpeakers(
   })
 }
 
+/** What an unnamed speaker is called, in whichever language the UI is set to. */
+export type SpeakerLabels = { me: string; them: string; speaker: (n: number) => string }
+
 /** Keeps names the user already typed; new speakers get a placeholder worth replacing. */
 export function speakerNames(
   segments: Transcript['segments'],
   existing: Record<string, string>,
+  labels: SpeakerLabels,
 ): Record<string, string> {
-  const names: Record<string, string> = { me: existing['me'] ?? 'คุณ' }
+  const names: Record<string, string> = { me: existing['me'] ?? labels.me }
   let n = 0
   for (const { speaker } of segments) {
     if (speaker === 'me' || names[speaker]) continue
-    names[speaker] = existing[speaker] ?? (speaker === UNKNOWN ? 'คนอื่น' : `ผู้พูด ${++n}`)
+    names[speaker] = existing[speaker] ?? (speaker === UNKNOWN ? labels.them : labels.speaker(++n))
   }
   return names
 }

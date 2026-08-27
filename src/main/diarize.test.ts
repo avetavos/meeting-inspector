@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { assignSpeakers, speakerNames, type Turn } from './diarize.ts'
+import { assignSpeakers, speakerNames, type SpeakerLabels, type Turn } from './diarize.ts'
+
+const EN: SpeakerLabels = { me: 'You', them: 'Others', speaker: (n) => `Speaker ${n}` }
 
 const seg = (t0: number, t1: number, speaker = 'them') => ({ t0, t1, speaker, text: `${t0}-${t1}` })
 const turn = (start: number, end: number, speaker: number): Turn => ({ start, end, speaker })
@@ -38,18 +40,18 @@ test('speaker names: placeholders follow first appearance, typed names survive',
     seg(9, 12, 'SPEAKER_00'),
     seg(12, 15, 'SPEAKER_01'),
   ]
-  assert.deepEqual(speakerNames(segments, { me: 'คุณ' }), {
-    me: 'คุณ',
-    SPEAKER_01: 'ผู้พูด 1',
-    SPEAKER_00: 'ผู้พูด 2',
+  assert.deepEqual(speakerNames(segments, { me: 'You' }, EN), {
+    me: 'You',
+    SPEAKER_01: 'Speaker 1',
+    SPEAKER_00: 'Speaker 2',
   })
-  assert.deepEqual(speakerNames(segments, { me: 'ผม', SPEAKER_01: 'พี่โจ้' }), {
+  assert.deepEqual(speakerNames(segments, { me: 'ผม', SPEAKER_01: 'พี่โจ้' }, EN), {
     me: 'ผม',
     SPEAKER_01: 'พี่โจ้',
-    SPEAKER_00: 'ผู้พูด 1',
+    SPEAKER_00: 'Speaker 1',
   })
 })
 
 test('speaker names: an unattributed segment keeps its own label', () => {
-  assert.deepEqual(speakerNames([seg(0, 5)], {}), { me: 'คุณ', them: 'คนอื่น' })
+  assert.deepEqual(speakerNames([seg(0, 5)], {}, EN), { me: 'You', them: 'Others' })
 })

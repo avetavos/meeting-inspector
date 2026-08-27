@@ -1,7 +1,7 @@
 import { mkdir, open, rename, stat } from 'node:fs/promises'
 import { MODELS_DIR, model } from './models.ts'
 
-export type ModelSpec = { file: string; label: string; url: string; bytes: number }
+export type ModelSpec = { file: string; url: string; bytes: number }
 export type ModelStatus = ModelSpec & { present: boolean; resumeFrom: number }
 export type Progress = { file: string; received: number; total: number }
 
@@ -13,25 +13,26 @@ export type Progress = { file: string; received: number; total: number }
 export const MODELS: ModelSpec[] = [
   {
     file: 'ggml-large-v3.bin',
-    label: 'Whisper large-v3 — ถอดเสียง',
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin',
     bytes: 3_095_033_483,
   },
   {
     file: 'ggml-silero-v5.1.2.bin',
-    label: 'Silero VAD — กันหลอนตอนเงียบ',
     url: 'https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin',
     bytes: 885_098,
   },
   {
+    file: 'silero_vad.onnx',
+    url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx',
+    bytes: 643_854,
+  },
+  {
     file: 'pyannote-segmentation-3-0.onnx',
-    label: 'pyannote — แบ่งช่วงคนพูด',
     url: 'https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx',
     bytes: 5_992_913,
   },
   {
     file: 'campplus-sv-zh_en.onnx',
-    label: 'CAM++ — จำแนกว่าใครเป็นใคร',
     url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx',
     bytes: 28_281_164,
   },
@@ -87,7 +88,7 @@ export async function downloadModel(
 
   // Guards the rename: a short file must never end up looking like a complete one.
   // The .part it leaves behind is a valid prefix, so the next attempt resumes from it.
-  if (received !== total) throw new Error(`${spec.file}: ได้ ${received} ไบต์ จาก ${total}`)
+  if (received !== total) throw new Error(`${spec.file}: got ${received} bytes of ${total}`)
   await rename(part, target)
   onProgress({ file: spec.file, received, total })
 }

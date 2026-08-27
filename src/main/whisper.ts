@@ -2,8 +2,9 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
-import { SAMPLE_RATE, hasSignal, type Chunk } from './chunker.ts'
+import { SAMPLE_RATE, type Chunk } from './chunker.ts'
 import { model, requireFiles } from './models.ts'
+import { hasSpeech } from './vad.ts'
 import { wavHeader } from './wav.ts'
 
 export type Segment = { t0: number; t1: number; text: string }
@@ -79,8 +80,8 @@ export class Whisper {
 
   static async start(opts: WhisperOptions): Promise<Whisper> {
     const { language } = opts
-    await requireFiles([BIN], 'รัน `npm run build:whisper` หรือ `brew install whisper-cpp`')
-    await requireFiles([MODEL, VAD_MODEL], 'กดปุ่มโหลดโมเดลในแอป')
+    await requireFiles([BIN], 'run `npm run build:whisper` or `brew install whisper-cpp`')
+    await requireFiles([MODEL, VAD_MODEL], 'use the download button in the app')
     const port = await freePort()
     const proc = spawn(
       BIN,
@@ -111,8 +112,6 @@ export class Whisper {
 
   /** FIFO, nothing dropped (spec §7). The server handles one request at a time anyway. */
   enqueue(track: string, chunk: Chunk): void {
-    // Silence has nothing to transcribe and can take the server down with it.
-    if (!hasSignal(chunk.pcm)) return
     this.queue.push({ track, ...chunk })
     this.opts.onDepth(this.depth)
     void this.pump()
@@ -123,6 +122,12 @@ export class Whisper {
     this.pumping = true
     try {
       for (let job = this.queue.shift(); job; job = this.queue.shift()) {
+        // Silence has nothing to transcribe, invites a hallucination, and can take
+        // the server down with it (spec §7.3).
+        if (!(await hasSpeech(job.pcm))) {
+          this.opts.onDepth(this.queue.length)
+          continue
+        }
         try {
           const segments = await this.transcribe(job)
           if (segments.length > 0) this.opts.onSegments(job.track, segments)
@@ -141,6 +146,11 @@ export class Whisper {
     const body = new FormData()
     body.set('file', new Blob([toWav(job.pcm)], { type: 'audio/wav' }), 'chunk.wav')
     body.set('response_format', 'verbose_json')
+    // whisper-server caps a segment at 60 characters and chops mid-word to do it —
+    // and `max_len=0` does not mean "no cap", it means "use 60" (server.cpp:933), so
+    // the cap has to be raised out of the way instead of switched off. Segments are
+    // already bounded by the chunk length; this just lets a sentence stay whole.
+    body.set('max_len', '100000')
     // Whisper conditions on this as if it were the text just before the chunk, which
     // is how a team's own jargon gets a chance against a phonetically similar word.
     if (this.opts.prompt) body.set('prompt', this.opts.prompt)
@@ -180,7 +190,7 @@ async function waitUntilUp(
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const failed = spawnError()
-    if (failed) throw new Error(`เปิด whisper-server ไม่ได้: ${failed.message}`)
+    if (failed) throw new Error(`could not start whisper-server: ${failed.message}`)
     if (proc.exitCode !== null) throw new Error(`whisper-server exited with ${proc.exitCode}`)
     try {
       await fetch(url, { signal: AbortSignal.timeout(1000) })

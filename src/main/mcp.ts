@@ -133,5 +133,5 @@ async function listen(http: Server, preferred: number): Promise<number> {
   }
   const anyFree = await bind(http, 0)
   if (anyFree) return anyFree
-  throw new Error('เปิด MCP server ไม่ได้ — หา port ว่างไม่เจอ')
+  throw new Error('could not start the MCP server — no free port')
 }

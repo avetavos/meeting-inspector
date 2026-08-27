@@ -15,6 +15,31 @@ declare module 'sherpa-onnx-node' {
     process(samples: Float32Array): SpeakerTurn[]
   }
 
-  const cjs: { OfflineSpeakerDiarization: typeof OfflineSpeakerDiarization }
+  export type VadConfig = {
+    sileroVad: {
+      model: string
+      threshold?: number
+      minSilenceDuration?: number
+      minSpeechDuration?: number
+      maxSpeechDuration?: number
+    }
+    sampleRate?: number
+    numThreads?: number
+  }
+
+  /** Streaming detector: push windows in, pop a segment out whenever one closes. */
+  export class Vad {
+    constructor(config: VadConfig, bufferSizeInSeconds: number)
+    acceptWaveform(samples: Float32Array): void
+    isEmpty(): boolean
+    pop(): void
+    reset(): void
+    flush(): void
+  }
+
+  const cjs: {
+    OfflineSpeakerDiarization: typeof OfflineSpeakerDiarization
+    Vad: typeof Vad
+  }
   export default cjs
 }

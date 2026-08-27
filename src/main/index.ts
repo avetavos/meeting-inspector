@@ -1,11 +1,11 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
-import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
+import { assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
 import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { mcpToken } from './token.ts'
-import { getSettings, setSettings, type Settings } from './settings.ts'
+import { getSettings, setSettings, type Language, type Settings } from './settings.ts'
 import {
   NOTES_ROOT,
   assertMeetingDir,
@@ -38,14 +38,17 @@ const TRACKS = ['loopback', 'mic'] as const
  * Written into transcript.json, so they follow the UI language at the time of the
  * meeting. Diarization replaces `them`; the user can rename either afterwards.
  */
-const DEFAULT_SPEAKERS = {
-  en: { me: 'You', them: 'Others' },
-  th: { me: 'คุณ', them: 'คนอื่น' },
-} as const
+const SPEAKER_LABELS: Record<Language, SpeakerLabels> = {
+  en: { me: 'You', them: 'Others', speaker: (n) => `Speaker ${n}` },
+  th: { me: 'คุณ', them: 'คนอื่น', speaker: (n) => `ผู้พูด ${n}` },
+}
 
-const defaultSpeakers = async (): Promise<Record<string, string>> => ({
-  ...DEFAULT_SPEAKERS[(await getSettings()).language],
-})
+const speakerLabels = async (): Promise<SpeakerLabels> => SPEAKER_LABELS[(await getSettings()).language]
+
+const defaultSpeakers = async (): Promise<Record<string, string>> => {
+  const { me, them } = await speakerLabels()
+  return { me, them }
+}
 
 /** The mic track is us by construction (spec §4.1); `them` is replaced by diarization. */
 const SPEAKER: Record<Track, string> = { mic: 'me', loopback: 'them' }
@@ -82,7 +85,7 @@ async function diarizeMeeting(wc: WebContents, dir: string): Promise<void> {
     const turns = await diarize(join(dir, 'loopback.wav'))
     const previous = await readTranscript(dir)
     const segments = assignSpeakers(previous.segments, turns)
-    const updated: Transcript = { ...previous, segments, speakers: speakerNames(segments, previous.speakers) }
+    const updated: Transcript = { ...previous, segments, speakers: speakerNames(segments, previous.speakers, await speakerLabels()) }
     await writeTranscript(dir, updated)
     wc.send('meeting:transcript', dir, updated)
   } catch (err) {
@@ -242,7 +245,7 @@ function registerIpc(): void {
   // Downloads run one at a time so the progress the user sees matches what is
   // actually moving, and a failure names the file that failed.
   ipcMain.handle('models:download', async (e) => {
-    if (downloads) throw new Error('กำลังโหลดอยู่แล้ว')
+    if (downloads) throw new Error('a download is already running')
     downloads = new AbortController()
     try {
       for (const spec of MODELS) {
