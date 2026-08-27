@@ -132,7 +132,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 #done a { color: var(--accent); }
 
 /* ---------- models panel ------------------------------------------------ */
-#models .file { display: grid; grid-template-columns: 1fr 88px; gap: 8px 12px; align-items: center; margin-top: 10px; font-size: 13px; }
+#models .file { display: grid; grid-template-columns: 1fr 128px; gap: 8px 12px; align-items: center; margin-top: 10px; font-size: 13px; }
 #models .bar { grid-column: 1 / -1; height: 6px; border-radius: var(--radius-pill); background: var(--track-bg); overflow: hidden; }
 #models .bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); }
 #models .size { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }

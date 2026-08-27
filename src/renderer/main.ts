@@ -1,4 +1,5 @@
-import type { Language, McpState, ModelStatus, Transcript } from '../preload/index.ts'
+import type { Language, McpState, Transcript } from '../preload/index.ts'
+import { titleOf } from '../shared/meetings.ts'
 import { Recorder, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -44,6 +45,12 @@ const en = {
   portMoved:
     "⚠️ Port 8787 was taken, so a different one was used — any config you'd already set up won't connect. Use the lines below to set it up again.",
   speakerDefaults: { me: 'You', them: 'Others' },
+  modelNames: {
+    'ggml-large-v3.bin': 'Whisper large-v3 — transcribes speech',
+    'ggml-silero-v5.1.2.bin': 'Silero VAD — keeps silence from sounding like speech',
+    'pyannote-segmentation-3-0.onnx': 'pyannote — splits the audio by who is talking',
+    'campplus-sv-zh_en.onnx': 'CAM++ — tells speakers apart',
+  } as Record<string, string>,
 }
 
 const th: typeof en = {
@@ -84,6 +91,12 @@ const th: typeof en = {
   copied: 'คัดลอกแล้ว',
   portMoved: '⚠️ port 8787 ไม่ว่าง ต้องย้ายไป port อื่น — config ที่ตั้งไว้เดิมจะต่อไม่ติด ใช้บรรทัดข้างล่างตั้งใหม่',
   speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
+  modelNames: {
+    'ggml-large-v3.bin': 'Whisper large-v3 — ถอดเสียง',
+    'ggml-silero-v5.1.2.bin': 'Silero VAD — กันหลอนตอนเงียบ',
+    'pyannote-segmentation-3-0.onnx': 'pyannote — แบ่งช่วงคนพูด',
+    'campplus-sv-zh_en.onnx': 'CAM++ — จำแนกว่าใครเป็นใคร',
+  } as Record<string, string>,
 }
 
 const STR: Record<Language, typeof en> = { en, th }
@@ -174,17 +187,38 @@ function fmt(sec: number): string {
 const size = (bytes: number) =>
   bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`
 
+/** Falls back to the raw filename so an unrecognized model never crashes the panel. */
+const modelName = (file: string) => t().modelNames[file] ?? file
+
 /**
  * Three gigabytes of models are fetched on first run rather than shipped in the
  * installer (spec §12). The app records fine without them; only transcription and
  * diarization wait, so this panel informs rather than blocks.
+ *
+ * One bar covers every missing file rather than one per file — the large-v3 weights
+ * alone are 3.0 of the 3.1 GB total, so four bars would mostly sit empty. `received`
+ * is a running per-file byte count (seeded from each file's resumeFrom) that
+ * `onModelProgress` updates as events arrive; the bar shows their sum over the total
+ * across all missing files.
  */
-const bars = new Map<string, { fill: HTMLElement; size: HTMLElement; total: number }>()
+let overallTotal = 0
+const received = new Map<string, number>()
+let overallFill: HTMLElement | null = null
+let overallName: HTMLElement | null = null
+let overallSize: HTMLElement | null = null
+
+function updateOverallBar(): void {
+  if (!overallFill || !overallSize) return
+  const sum = [...received.values()].reduce((a, b) => a + b, 0)
+  overallFill.style.width = `${overallTotal ? (sum / overallTotal) * 100 : 0}%`
+  overallSize.textContent = `${size(sum)} / ${size(overallTotal)}`
+}
 
 async function renderModels(note = ''): Promise<void> {
   const missing = (await window.api.modelStatus()).filter((m) => !m.present)
   modelsEl.replaceChildren()
-  bars.clear()
+  overallFill = overallName = overallSize = null
+  received.clear()
   if (missing.length === 0) {
     if (note) modelsEl.textContent = note
     return
@@ -192,13 +226,26 @@ async function renderModels(note = ''): Promise<void> {
 
   const box = document.createElement('div')
   box.className = 'warn'
-  const total = missing.reduce((sum, m) => sum + m.bytes, 0)
+  overallTotal = missing.reduce((sum, m) => sum + m.bytes, 0)
   const resumable = missing.filter((m) => m.resumeFrom > 0)
   box.textContent =
-    t().modelsMissing(missing.length, size(total)) +
+    t().modelsMissing(missing.length, size(overallTotal)) +
     (resumable.length > 0 ? t().modelsResumable(size(resumable.reduce((s, m) => s + m.resumeFrom, 0))) : '')
 
-  for (const spec of missing) box.append(modelRow(spec))
+  for (const spec of missing) received.set(spec.file, spec.resumeFrom)
+
+  const barRow = document.createElement('div')
+  barRow.className = 'file'
+  overallName = document.createElement('span')
+  overallSize = document.createElement('span')
+  overallSize.className = 'size'
+  const bar = document.createElement('span')
+  bar.className = 'bar'
+  overallFill = document.createElement('i')
+  bar.append(overallFill)
+  barRow.append(overallName, overallSize, bar)
+  box.append(barRow)
+  updateOverallBar()
 
   const button = document.createElement('button')
   button.textContent = t().downloadModels
@@ -232,22 +279,19 @@ async function renderModels(note = ''): Promise<void> {
   modelsEl.append(box)
 }
 
-function modelRow(spec: ModelStatus): HTMLElement {
-  const row = document.createElement('div')
-  row.className = 'file'
-  const name = document.createElement('span')
-  name.textContent = spec.label
-  const sizeEl = document.createElement('span')
-  sizeEl.className = 'size'
-  sizeEl.textContent = size(spec.bytes)
-  const bar = document.createElement('span')
-  bar.className = 'bar'
-  const fill = document.createElement('i')
-  fill.style.width = `${(spec.resumeFrom / spec.bytes) * 100}%`
-  bar.append(fill)
-  row.append(name, sizeEl, bar)
-  bars.set(spec.file, { fill, size: sizeEl, total: spec.bytes })
-  return row
+const content = $('content')
+
+/**
+ * The transcript is not its own scroller — the whole content column is, with the
+ * capsule sticky on top of it — so scrolling `#transcript` did nothing at all.
+ *
+ * Only follows when the reader is already at the bottom. Yanking the view back down
+ * while someone is reading an earlier line is worse than not following.
+ */
+function followTranscript(): void {
+  const distanceFromBottom = content.scrollHeight - content.scrollTop - content.clientHeight
+  if (distanceFromBottom > 120) return
+  content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' })
 }
 
 function renderTranscript(): void {
@@ -267,7 +311,7 @@ function renderTranscript(): void {
       return row
     }),
   )
-  transcript.scrollTop = transcript.scrollHeight
+  followTranscript()
 }
 
 function renderSpeakerPanel(): void {
@@ -419,7 +463,7 @@ async function stop(): Promise<void> {
   done.textContent = t().saved(fmt(result.durationSec), result.segments)
   const open = document.createElement('a')
   open.href = '#'
-  open.textContent = result.id
+  open.textContent = titleOf(result.id)
   open.onclick = () => void window.api.reveal(result.dir)
   done.append(open)
 }
@@ -453,11 +497,11 @@ window.api.onDiarizeError((message) => {
   warnings.textContent = t().diarizeError(message)
 })
 
-window.api.onModelProgress(({ file, received, total }) => {
-  const bar = bars.get(file)
-  if (!bar) return
-  bar.fill.style.width = `${(received / total) * 100}%`
-  bar.size.textContent = `${size(received)} / ${size(total)}`
+window.api.onModelProgress(({ file, received: bytes }) => {
+  if (!overallFill) return
+  received.set(file, bytes)
+  if (overallName) overallName.textContent = modelName(file)
+  updateOverallBar()
 })
 
 mcpToggle.onchange = async () => {

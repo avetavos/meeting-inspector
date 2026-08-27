@@ -29,8 +29,18 @@ export interface MeetingStore {
   transcript(id: string): Promise<Transcript | null>
 }
 
-/** The id is `<date>-<time>-<title>`; the title is whatever follows the stamp. */
-export const titleOf = (id: string): string => id.replace(/^\d{4}-\d{2}-\d{2}-\d{4}-/, '')
+const STAMPED = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(?:-(.+))?$/
+
+/**
+ * The id is `<date>-<time>` with an optional title after it. An untitled meeting
+ * shows the time it happened, as `DD-MM-YYYY HH:mm`, rather than a placeholder word.
+ */
+export const titleOf = (id: string): string => {
+  const stamped = STAMPED.exec(id)
+  if (!stamped) return id
+  const [, year, month, day, hour, minute, title] = stamped
+  return title ?? `${day}-${month}-${year} ${hour}:${minute}`
+}
 
 /**
  * Meeting ids address storage keys, so refuse anything that could climb out — and
