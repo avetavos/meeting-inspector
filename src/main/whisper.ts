@@ -66,7 +66,8 @@ export class Whisper {
 
   static async start(opts: WhisperOptions): Promise<Whisper> {
     const { language } = opts
-    await requireFiles([BIN, MODEL, VAD_MODEL], 'ดูขั้นตอนติดตั้งใน README')
+    await requireFiles([BIN], 'ติดตั้งด้วย `brew install whisper-cpp`')
+    await requireFiles([MODEL, VAD_MODEL], 'กดปุ่มโหลดโมเดลในแอป')
     const port = await freePort()
     const proc = spawn(
       BIN,

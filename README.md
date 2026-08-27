@@ -4,24 +4,15 @@ Meeting transcription + summarization desktop app (macOS first, Electron).
 
 Design spec: `~/Journal/2026-08-27-meeting-inspector-design.md`
 
-Needs whisper.cpp on PATH plus two models (override paths with `WHISPER_SERVER`
-and `WHISPER_MODELS`):
+Needs whisper.cpp on PATH:
 
 ```
 brew install whisper-cpp
-mkdir -p ~/whisper-models && cd ~/whisper-models
-curl -LO https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
-curl -LO https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
-
-# speaker diarization
-R=https://github.com/k2-fsa/sherpa-onnx/releases/download
-curl -sL $R/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 \
-  | tar xj -O sherpa-onnx-pyannote-segmentation-3-0/model.onnx > pyannote-segmentation-3-0.onnx
-curl -Lo campplus-sv-zh_en.onnx \
-  $R/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
 ```
 
-`MODELS_DIR` overrides where all four are looked up.
+The four models (~3.1 GB) download themselves on first run — the app shows a
+panel with a progress bar per file. Cancelling keeps what arrived and resumes
+from there. `MODELS_DIR` overrides where they land (default `~/whisper-models`).
 
 ```
 npm install
@@ -32,10 +23,9 @@ npm run dist       # release/Meeting Inspector-<version>-arm64.dmg
 ```
 
 The .dmg is unsigned and unnotarized, so the first launch needs right-click →
-Open → Open Anyway. It bundles the app only: whisper.cpp and the four models
-above still have to be installed on the target machine (spec §12 wants that
-done in-app with a progress bar; it is not built yet). Without them the app
-runs and records, and says which file is missing when it needs one.
+Open → Open Anyway. It bundles the app only: whisper.cpp still has to be
+installed on the target machine, and the models download on first run. Without
+either, the app still records and says exactly which file is missing.
 
 Each meeting is a folder in `~/Documents/MeetingNotes/<yyyy-mm-dd-HHMM-title>/`:
 

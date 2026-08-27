@@ -15,7 +15,7 @@ const SEGMENTATION = model('pyannote-segmentation-3-0.onnx')
 const EMBEDDING = model('campplus-sv-zh_en.onnx')
 
 export async function diarize(wavPath: string): Promise<Turn[]> {
-  await requireFiles([SEGMENTATION, EMBEDDING], 'ดูขั้นตอนติดตั้งใน README')
+  await requireFiles([SEGMENTATION, EMBEDDING], 'กดปุ่มโหลดโมเดลในแอป')
   // Required late: this pulls in a ~30MB native addon nobody needs until a meeting ends.
   // It is CommonJS, so depending on who does the loading the class arrives either as a
   // named export or hidden under `default`.

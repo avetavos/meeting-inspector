@@ -1,7 +1,11 @@
-import type { McpState, Provider, ProviderInfo, Settings, Transcript } from '../preload/index.ts'
+import type { McpState, ModelStatus, Provider, ProviderInfo, Settings, Transcript } from '../preload/index.ts'
 import { Recorder, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
+
+/** Electron prefixes every rejected invoke with its own plumbing; users do not need it. */
+const reason = (err: unknown) =>
+  (err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']+': \w*Error: /, '')
 
 const title = $<HTMLInputElement>('title')
 const toggle = $<HTMLButtonElement>('toggle')
@@ -22,6 +26,7 @@ const mcpToggle = $<HTMLInputElement>('mcp')
 const mcpStateEl = $('mcpstate')
 const tunnelToggle = $<HTMLInputElement>('tunnel')
 const tunnelStateEl = $('tunnelstate')
+const modelsEl = $('models')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 
 let recorder: Recorder | null = null
@@ -65,6 +70,87 @@ async function showPermissionWarnings(includeScreen = false): Promise<void> {
     box.append(document.createElement('br'), open)
     warnings.append(box)
   }
+}
+
+const size = (bytes: number) =>
+  bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`
+
+/**
+ * Three gigabytes of models are fetched on first run rather than shipped in the
+ * installer (spec §12). The app records fine without them; only transcription and
+ * diarization wait, so this panel informs rather than blocks.
+ */
+const bars = new Map<string, { fill: HTMLElement; size: HTMLElement; total: number }>()
+
+async function renderModels(note = ''): Promise<void> {
+  const missing = (await window.api.modelStatus()).filter((m) => !m.present)
+  modelsEl.replaceChildren()
+  bars.clear()
+  if (missing.length === 0) {
+    if (note) modelsEl.textContent = note
+    return
+  }
+
+  const box = document.createElement('div')
+  box.className = 'warn'
+  const total = missing.reduce((sum, m) => sum + m.bytes, 0)
+  const resumable = missing.filter((m) => m.resumeFrom > 0)
+  box.textContent =
+    `ยังไม่มีโมเดล ${missing.length} ไฟล์ (${size(total)}) — อัดเสียงได้ แต่ยังถอดเสียงไม่ได้` +
+    (resumable.length > 0 ? ` · โหลดค้างไว้ ${size(resumable.reduce((s, m) => s + m.resumeFrom, 0))} จะโหลดต่อจากเดิม` : '')
+
+  for (const spec of missing) box.append(modelRow(spec))
+
+  const button = document.createElement('button')
+  button.textContent = 'โหลดโมเดล'
+  const cancel = document.createElement('button')
+  cancel.textContent = 'ยกเลิก'
+  cancel.hidden = true
+  const status = document.createElement('div')
+  status.className = 'hint'
+  if (note) status.textContent = note
+
+  button.onclick = async () => {
+    button.hidden = true
+    cancel.hidden = false
+    status.textContent = 'กำลังโหลด…'
+    let outcome: string
+    try {
+      outcome = (await window.api.downloadModels()).cancelled
+        ? 'ยกเลิกแล้ว — ครั้งหน้าจะโหลดต่อจากเดิม'
+        : 'โหลดครบแล้ว'
+    } catch (err) {
+      outcome = reason(err)
+    }
+    // Re-rendering replaces this panel, so the outcome has to be handed forward
+    // rather than written into an element that is about to be thrown away.
+    await renderModels(outcome)
+  }
+  cancel.onclick = () => void window.api.cancelModels()
+
+  const row = document.createElement('div')
+  row.className = 'row'
+  row.append(button, cancel, status)
+  box.append(row)
+  modelsEl.append(box)
+}
+
+function modelRow(spec: ModelStatus): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'file'
+  const name = document.createElement('span')
+  name.textContent = spec.label
+  const sizeEl = document.createElement('span')
+  sizeEl.className = 'size'
+  sizeEl.textContent = size(spec.bytes)
+  const bar = document.createElement('span')
+  bar.className = 'bar'
+  const fill = document.createElement('i')
+  fill.style.width = `${(spec.resumeFrom / spec.bytes) * 100}%`
+  bar.append(fill)
+  row.append(name, sizeEl, bar)
+  bars.set(spec.file, { fill, size: sizeEl, total: spec.bytes })
+  return row
 }
 
 function fmt(sec: number): string {
@@ -171,7 +257,7 @@ async function renderSummaryBar(): Promise<void> {
       const cost = await window.api.runSummary(dir)
       note.textContent = `${cost.inputTokens.toLocaleString()} เข้า / ${cost.outputTokens.toLocaleString()} ออก · ${usd(cost.usd)} · เขียนลง summary.md แล้ว`
     } catch (err) {
-      note.textContent = `สรุปไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`
+      note.textContent = `สรุปไม่สำเร็จ: ${reason(err)}`
     } finally {
       run.disabled = false
       run.textContent = `สรุปอีกครั้งด้วย ${current().label}`
@@ -264,7 +350,7 @@ async function start(): Promise<void> {
     recorder = started.recorder
   } catch (err) {
     await showPermissionWarnings(true)
-    warnings.prepend(`เริ่มอัดไม่ได้: ${err instanceof Error ? err.message : String(err)}`)
+    warnings.prepend(`เริ่มอัดไม่ได้: ${reason(err)}`)
     return
   } finally {
     toggle.disabled = false
@@ -347,7 +433,7 @@ async function flip(el: HTMLInputElement, status: HTMLElement, run: () => Promis
     showMcpState(await run())
   } catch (err) {
     el.checked = !el.checked
-    status.textContent = err instanceof Error ? err.message : String(err)
+    status.textContent = reason(err)
   } finally {
     el.disabled = false
   }
@@ -380,12 +466,20 @@ saveKeyButton.onclick = async () => {
     await showKeyState()
     await renderSummaryBar()
   } catch (err) {
-    keyState.textContent = err instanceof Error ? err.message : String(err)
+    keyState.textContent = reason(err)
   } finally {
     saveKeyButton.disabled = false
   }
 }
 
+window.api.onModelProgress(({ file, received, total }) => {
+  const bar = bars.get(file)
+  if (!bar) return
+  bar.fill.style.width = `${(received / total) * 100}%`
+  bar.size.textContent = `${size(received)} / ${size(total)}`
+})
+
 toggle.onclick = () => void (recorder ? stop() : start())
 void showPermissionWarnings()
 void loadSettings()
+void renderModels()
