@@ -289,9 +289,18 @@ app.whenReady().then(() => {
   registerIpc()
 
   const win = new BrowserWindow({
-    width: 720,
-    height: 540,
+    width: 760,
+    height: 660,
     title: 'Meeting Inspector',
+    // Liquid Glass is a real material, not a CSS approximation: the window gets the
+    // system's own vibrancy layer and the page sits on it with a transparent body.
+    // `active` keeps it lit while the window is in the background, so a meeting the
+    // user is watching in another app does not go flat.
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    backgroundColor: '#00000000',
+    // Traffic lights inset over the page's own draggable strip.
+    titleBarStyle: 'hiddenInset',
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
 

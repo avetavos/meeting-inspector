@@ -13,9 +13,18 @@ export type Settings = {
 const DEFAULTS: Settings = { mcp: true, language: 'en' }
 const FILE = () => join(app.getPath('userData'), 'settings.json')
 
+/**
+ * Reads only the keys this version knows about. Spreading the file wholesale kept
+ * settings from removed features alive forever — a stale `provider` and `workerUrl`
+ * outlived the code that used them — and let a corrupt value through unchecked.
+ */
 export async function getSettings(): Promise<Settings> {
   try {
-    return { ...DEFAULTS, ...(JSON.parse(await readFile(FILE(), 'utf8')) as Settings) }
+    const stored = JSON.parse(await readFile(FILE(), 'utf8')) as Partial<Settings>
+    return {
+      mcp: typeof stored.mcp === 'boolean' ? stored.mcp : DEFAULTS.mcp,
+      language: stored.language === 'th' || stored.language === 'en' ? stored.language : DEFAULTS.language,
+    }
   } catch {
     return DEFAULTS
   }

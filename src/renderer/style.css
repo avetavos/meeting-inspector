@@ -1,0 +1,245 @@
+/* ---------- tokens ---------------------------------------------------- */
+:root {
+  color-scheme: light dark;
+
+  /* concentric radius scale: nesting a control inside a container = parent - padding */
+  --radius-xl: 28px; /* capsule, big glass surfaces */
+  --radius-lg: 20px; /* secondary cards (models, warnings, speakers, settings) */
+  --radius-md: 14px; /* controls nested in the capsule (28 - 14 pad) */
+  --radius-sm: 10px; /* controls nested in a card (20 - 10 pad) */
+  --radius-pill: 999px; /* capsule buttons, meter tracks */
+
+  --text: #1d1d1f;
+  --text-dim: rgba(29, 29, 31, 0.62);
+  --line-hi: rgba(255, 255, 255, 0.8);
+  --line-lo: rgba(0, 0, 0, 0.12);
+  --glass-fill: rgba(255, 255, 255, 0.5);
+  --glass-fill-strong: rgba(255, 255, 255, 0.66);
+  --shadow-color: rgba(0, 0, 0, 0.16);
+  --opaque-bg: #ececec;
+  --track-bg: rgba(0, 0, 0, 0.07);
+
+  --accent: #0a84ff;
+  --accent-rec: #ff453a;
+  --meter-loopback: #0a84ff;
+  --meter-mic: #ff9f0a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #f5f5f7;
+    --text-dim: rgba(245, 245, 247, 0.62);
+    --line-hi: rgba(255, 255, 255, 0.2);
+    --line-lo: rgba(0, 0, 0, 0.6);
+    --glass-fill: rgba(42, 42, 48, 0.44);
+    --glass-fill-strong: rgba(54, 54, 62, 0.6);
+    --shadow-color: rgba(0, 0, 0, 0.5);
+    --opaque-bg: #1e1e22;
+    --track-bg: rgba(255, 255, 255, 0.1);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: transparent; /* native vibrancy shows through */
+  color: var(--text);
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* ---------- window chrome: draggable title-bar strip ------------------ */
+.titlebar {
+  height: 28px;
+  flex: 0 0 28px;
+  -webkit-app-region: drag;
+}
+
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---------- scrolling content layer ------------------------------------ */
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-app-region: no-drag;
+  padding: 0 20px 28px;
+}
+
+.content-inner { padding-top: 4px; }
+
+h1.app-title {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 14px;
+}
+
+/* ---------- secondary glass cards (warnings, models, speakers, settings) - */
+.warn, #speakers, details {
+  padding: 14px 16px;
+  margin-top: 14px;
+  background: var(--glass-fill);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 1px 0 var(--line-hi),
+    inset 0 -1px 0 var(--line-lo),
+    0 10px 26px -12px var(--shadow-color);
+}
+
+#models:empty, #warnings:empty, #speakers:empty { margin: 0; padding: 0; box-shadow: none; background: none; }
+
+input, button { font: inherit; color: inherit; -webkit-app-region: no-drag; }
+input[type='checkbox'], input[type='radio'] { width: auto; flex: none; accent-color: var(--accent); margin: 0; }
+
+/* Text fields only. A checkbox or radio caught by this stretches across the row,
+   which is what it did to the MCP toggle. */
+input:not([type='checkbox']):not([type='radio']) {
+  padding: 9px 12px;
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: rgba(127, 127, 127, 0.12);
+  box-shadow: inset 0 1px 3px var(--line-lo);
+  color: inherit;
+}
+
+button {
+  padding: 9px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background: rgba(127, 127, 127, 0.14);
+  box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 150ms ease;
+}
+button:hover:not(:disabled) { transform: translateY(-1px) scale(1.01); box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo), 0 6px 14px -8px var(--shadow-color); }
+button:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+button:disabled { opacity: 0.4; cursor: default; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: inherit; }
+
+.row { display: flex; gap: 12px; align-items: center; margin-top: 14px; }
+.hint { font-size: 13px; line-height: 1.6; color: var(--text-dim); margin-top: 10px; }
+
+#queue, #done { margin-top: 12px; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+#done a { color: var(--accent); }
+
+/* ---------- models panel ------------------------------------------------ */
+#models .file { display: grid; grid-template-columns: 1fr 88px; gap: 8px 12px; align-items: center; margin-top: 10px; font-size: 13px; }
+#models .bar { grid-column: 1 / -1; height: 6px; border-radius: var(--radius-pill); background: var(--track-bg); overflow: hidden; }
+#models .bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); }
+#models .size { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* ---------- speaker naming ------------------------------------------------ */
+#speakers .who { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+#speakers .who code { font-size: 12px; color: var(--text-dim); width: 90px; }
+#speakers input { flex: 1; }
+
+/* ---------- transcript --------------------------------------------------- */
+#transcript { margin-top: 18px; }
+#transcript p { margin: 14px 0 0; display: grid; grid-template-columns: 52px 68px 1fr; gap: 10px; line-height: 1.65; }
+#transcript .t { color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 13px; }
+#transcript .who { color: var(--text-dim); font-size: 13px; }
+#transcript .me .who { color: var(--text); font-weight: 600; }
+
+/* ---------- settings disclosure ------------------------------------------ */
+details summary { cursor: pointer; color: var(--text-dim); font-size: 14px; }
+details label { display: flex; gap: 8px; align-items: center; cursor: pointer; margin-top: 4px; font-size: 14px; }
+#mcpstate { font-size: 13px; line-height: 1.6; color: var(--text-dim); margin-top: 10px; }
+#mcpstate code { user-select: all; word-break: break-all; }
+.copyrow { margin-top: 8px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
+.copyrow button { padding: 3px 10px; font-size: 12px; }
+a { color: inherit; -webkit-app-region: no-drag; }
+
+/* ---------- the signature element: the recording capsule ----------------- */
+.capsule {
+  position: sticky;
+  top: 10px;
+  z-index: 5;
+  -webkit-app-region: no-drag;
+  padding: 16px;
+  margin-bottom: 18px;
+  background: var(--glass-fill-strong);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    inset 0 1px 0 var(--line-hi),
+    inset 0 -1px 0 var(--line-lo),
+    0 16px 32px -14px var(--shadow-color);
+  transition: box-shadow 200ms ease;
+}
+
+.capsule-top { display: flex; gap: 10px; align-items: center; }
+.capsule-top input { flex: 1; border-radius: var(--radius-md); }
+
+#elapsed { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 44px; text-align: right; }
+
+#toggle {
+  flex: 0 0 auto;
+  padding: 10px 22px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px -4px rgba(10, 132, 255, 0.6);
+}
+#toggle:hover:not(:disabled) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 18px -6px rgba(10, 132, 255, 0.7); }
+
+/* one instrument, two channels */
+.meters {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--track-bg);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  box-shadow: inset 0 1px 3px var(--line-lo);
+}
+.meter-channel { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.meter-channel + .meter-channel { border-top: 1px solid var(--line-lo); }
+.label { width: 60px; flex: 0 0 auto; font-size: 13px; color: var(--text-dim); }
+.meter { flex: 1; height: 8px; border-radius: var(--radius-pill); background: rgba(127, 127, 127, 0.2); overflow: hidden; }
+.meter > i { display: block; height: 100%; width: 0; border-radius: inherit; transition: width 80ms linear; }
+#m-loopback { background: var(--meter-loopback); }
+#m-mic { background: var(--meter-mic); }
+
+@keyframes rec-pulse {
+  0%, 100% { box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo), 0 16px 32px -14px var(--shadow-color), 0 0 0 3px rgba(255, 69, 58, 0.22); }
+  50% { box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo), 0 16px 32px -14px var(--shadow-color), 0 0 0 6px rgba(255, 69, 58, 0.1); }
+}
+body.recording .capsule { animation: rec-pulse 2.2s ease-in-out infinite; }
+body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px -4px rgba(255, 69, 58, 0.6); }
+
+/* ---------- reduced transparency: opaque, no blur ------------------------- */
+@media (prefers-reduced-transparency: reduce) {
+  .capsule, .warn, #speakers, details {
+    background: var(--opaque-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* ---------- reduced motion: no transforms/transitions --------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  button:hover:not(:disabled), button:active:not(:disabled) { transform: none; }
+}
+
+/* ---------- more contrast: stronger borders + text --------------------------- */
+@media (prefers-contrast: more) {
+  :root { --line-hi: rgba(0, 0, 0, 0.9); --line-lo: rgba(0, 0, 0, 0.9); --text-dim: var(--text); }
+  @media (prefers-color-scheme: dark) {
+    :root { --line-hi: rgba(255, 255, 255, 0.9); --line-lo: rgba(255, 255, 255, 0.9); }
+  }
+  .capsule, .warn, #speakers, details, input, button, .meters {
+    border: 1.5px solid var(--text);
+  }
+}
