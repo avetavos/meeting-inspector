@@ -1,0 +1,72 @@
+<!doctype html><meta charset="utf-8">
+<body style="font:16px system-ui;padding:24px">
+<h2 id="s">starting…</h2>
+<p id="hint"></p>
+<script>
+const s = document.getElementById('s'), hint = document.getElementById('hint')
+
+// Measure loopback in two windows:
+//   A: we play our own 440Hz tone  -> tests loopback at all
+//   B: we are silent, user plays audio -> tests whether our own audio is excluded
+// Distinguishing these matters: a PASS on B but FAIL on A means loopback works
+// but self-audio is filtered out, which is fine for real meetings.
+async function measure(stream, ms) {
+  const ctx = new AudioContext()
+  const an = ctx.createAnalyser()
+  an.fftSize = 2048
+  ctx.createMediaStreamSource(stream).connect(an)
+  const buf = new Float32Array(an.fftSize)
+  let peak = 0, sumSq = 0, n = 0
+  const t0 = performance.now()
+  while (performance.now() - t0 < ms) {
+    an.getFloatTimeDomainData(buf)
+    for (const v of buf) { const a = Math.abs(v); if (a > peak) peak = a; sumSq += v * v; n++ }
+    await new Promise(r => setTimeout(r, 40))
+  }
+  await ctx.close()
+  return { peak, rms: Math.sqrt(sumSq / n) }
+}
+
+function tone() {
+  const ctx = new AudioContext()
+  const osc = ctx.createOscillator(), g = ctx.createGain()
+  osc.frequency.value = 440; g.gain.value = 0.25
+  osc.connect(g).connect(ctx.destination); osc.start()
+  return () => { osc.stop(); ctx.close() }
+}
+
+;(async () => {
+  let stream
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+  } catch (e) {
+    console.log(`getDisplayMedia threw: ${e.name}: ${e.message}`)
+    console.log('VERDICT: FAIL — could not open a display-media stream at all')
+    return
+  }
+  const at = stream.getAudioTracks()
+  console.log(`audio tracks: ${at.length}${at[0] ? ` | label="${at[0].label}"` : ''}`)
+  if (!at.length) { console.log('VERDICT: FAIL — stream has no audio track'); return }
+
+  s.textContent = 'A) playing our own 440Hz tone…'
+  const stop = tone()
+  const a = await measure(stream, 5000)
+  stop()
+  console.log(`A self-tone   peak=${a.peak.toFixed(5)} rms=${a.rms.toFixed(5)}`)
+
+  s.textContent = 'B) external audio (afplay) — 8s'
+  hint.textContent = 'we are silent; main process plays a system sound'
+  console.log('PHASE:B')
+  await new Promise(r => setTimeout(r, 300))
+  const b = await measure(stream, 8000)
+  console.log(`B other-audio peak=${b.peak.toFixed(5)} rms=${b.rms.toFixed(5)}`)
+
+  // 1e-4 RMS is comfortably above float noise and far below any real audio.
+  const LIVE = 1e-4
+  const verdict = b.rms > LIVE ? 'PASS — loopback delivers real audio'
+    : a.rms > LIVE ? 'PARTIAL — only our own audio came through; external audio was silent'
+    : 'FAIL — loopback is silent'
+  s.textContent = verdict
+  console.log(`VERDICT: ${verdict}`)
+})()
+</script>
