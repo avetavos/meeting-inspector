@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 export type { Transcript } from '../main/store.ts'
+export type { Cost } from '../main/summarize.ts'
 import type { Transcript } from '../main/store.ts'
+import type { Cost } from '../main/summarize.ts'
 
 export type Track = 'loopback' | 'mic'
 export type Segment = { t0: number; t1: number; text: string }
@@ -23,6 +25,13 @@ const api = {
     ipcRenderer.on('transcript:queue', (_e, depth: number) => fn(depth)),
   onTranscriptError: (fn: (message: string) => void) =>
     ipcRenderer.on('transcript:error', (_e, message: string) => fn(message)),
+
+  setKey: (provider: string, key: string): Promise<void> => ipcRenderer.invoke('keys:set', provider, key),
+  hasKey: (provider: string): Promise<boolean> => ipcRenderer.invoke('keys:has', provider),
+  estimateSummary: (dir: string): Promise<Cost> => ipcRenderer.invoke('summary:estimate', dir),
+  runSummary: (dir: string): Promise<Cost> => ipcRenderer.invoke('summary:run', dir),
+  onSummaryDelta: (fn: (text: string) => void) =>
+    ipcRenderer.on('summary:delta', (_e, text: string) => fn(text)),
 
   renameSpeakers: (dir: string, speakers: Record<string, string>): Promise<Transcript> =>
     ipcRenderer.invoke('meeting:rename', dir, speakers),

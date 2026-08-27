@@ -1,7 +1,10 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
 import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
+import { getKey, hasKey, setKey } from './keys.ts'
+import { estimate, summarize } from './summarize.ts'
 import { createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
@@ -176,6 +179,31 @@ function registerIpc(): void {
     const updated: Transcript = { ...previous, speakers: { ...previous.speakers, ...speakers } }
     await writeTranscript(dir, updated)
     return updated
+  })
+
+  ipcMain.handle('keys:set', (_e, provider: string, key: string) => setKey(provider, key.trim()))
+  ipcMain.handle('keys:has', (_e, provider: string) => hasKey(provider))
+
+  // transcript.md already carries the speaker names the user typed, so it is what the
+  // model should read — no second renderer of the same data.
+  const readForSummary = async (dir: string) => {
+    const key = await getKey('claude')
+    if (!key) throw new Error('ยังไม่ได้ใส่ Anthropic API key')
+    return { key, transcript: await readFile(join(dir, 'transcript.md'), 'utf8') }
+  }
+
+  ipcMain.handle('summary:estimate', async (_e, dir: string) => {
+    const { key, transcript } = await readForSummary(dir)
+    return estimate(transcript, key)
+  })
+
+  ipcMain.handle('summary:run', async (e, dir: string) => {
+    const { key, transcript } = await readForSummary(dir)
+    const { text, cost } = await summarize(transcript, key, (delta) =>
+      e.sender.send('summary:delta', delta),
+    )
+    await writeFile(join(dir, 'summary.md'), text.endsWith('\n') ? text : `${text}\n`)
+    return cost
   })
 
   ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(dir))

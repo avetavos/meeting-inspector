@@ -11,6 +11,11 @@ const done = $('done')
 const queue = $('queue')
 const speakerPanel = $('speakers')
 const transcript = $('transcript')
+const summaryBar = $('summarybar')
+const summaryOut = $('summary')
+const apiKeyInput = $<HTMLInputElement>('apikey')
+const saveKeyButton = $<HTMLButtonElement>('savekey')
+const keyState = $('keystate')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 
 let recorder: Recorder | null = null
@@ -116,6 +121,53 @@ function renderSpeakerPanel(): void {
   speakerPanel.append(save, hint)
 }
 
+const usd = (n: number) => `$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`
+
+async function renderSummaryBar(): Promise<void> {
+  summaryBar.replaceChildren()
+  if (!meetingDir) return
+
+  const run = document.createElement('button')
+  run.textContent = 'สรุปด้วย Claude'
+  const note = document.createElement('span')
+  note.className = 'hint'
+  summaryBar.append(run, note)
+
+  if (!(await window.api.hasKey('claude'))) {
+    run.disabled = true
+    note.textContent = 'ต้องใส่ Anthropic API key ในหน้าตั้งค่าก่อน'
+    return
+  }
+
+  const dir = meetingDir
+  // Priced from the real transcript before spending anything (spec §9).
+  window.api
+    .estimateSummary(dir)
+    .then((c) => (note.textContent = `~${c.inputTokens.toLocaleString()} token เข้า ≈ ${usd(c.usd)}`))
+    .catch(() => {})
+
+  run.onclick = async () => {
+    run.disabled = true
+    run.textContent = 'กำลังสรุป…'
+    summaryOut.textContent = ''
+    try {
+      const cost = await window.api.runSummary(dir)
+      note.textContent = `${cost.inputTokens.toLocaleString()} เข้า / ${cost.outputTokens.toLocaleString()} ออก · ${usd(cost.usd)} · เขียนลง summary.md แล้ว`
+    } catch (err) {
+      note.textContent = `สรุปไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`
+    } finally {
+      run.disabled = false
+      run.textContent = 'สรุปอีกครั้ง'
+    }
+  }
+}
+
+async function showKeyState(): Promise<void> {
+  keyState.textContent = (await window.api.hasKey('claude'))
+    ? 'มี Anthropic API key แล้ว (เก็บเข้ารหัสไว้ในเครื่อง ไม่เคยส่งเข้าหน้าจอ)'
+    : 'ยังไม่มี API key — ใส่ของคุณเองเพื่อใช้สรุป'
+}
+
 function setLevel(track: Track, rms: number): void {
   // sqrt curve: speech sits low on a linear scale and the bar would look dead.
   meters[track].style.width = `${Math.min(100, Math.sqrt(rms) * 180)}%`
@@ -124,6 +176,8 @@ function setLevel(track: Track, rms: number): void {
 async function start(): Promise<void> {
   done.replaceChildren()
   speakerPanel.replaceChildren()
+  summaryBar.replaceChildren()
+  summaryOut.textContent = ''
   transcript.replaceChildren()
   segments = []
   speakers = { me: 'คุณ', them: 'คนอื่น' }
@@ -179,6 +233,7 @@ async function stop(): Promise<void> {
   open.textContent = result.id
   open.onclick = () => void window.api.reveal(result.dir)
   done.append(open)
+  void renderSummaryBar()
 }
 
 window.api.onSegments((track, incoming) => {
@@ -204,11 +259,32 @@ window.api.onDiarized((dir, updated) => {
   speakers = updated.speakers
   renderTranscript()
   renderSpeakerPanel()
+  void renderSummaryBar()
 })
 window.api.onDiarizeError((message) => {
   queue.textContent = ''
   warnings.textContent = `แยกคนพูดไม่สำเร็จ: ${message} (transcript ยังอยู่ครบ)`
 })
 
+window.api.onSummaryDelta((text) => {
+  summaryOut.textContent += text
+  summaryOut.scrollTop = summaryOut.scrollHeight
+})
+
+saveKeyButton.onclick = async () => {
+  saveKeyButton.disabled = true
+  try {
+    await window.api.setKey('claude', apiKeyInput.value)
+    apiKeyInput.value = ''
+    await showKeyState()
+    await renderSummaryBar()
+  } catch (err) {
+    keyState.textContent = err instanceof Error ? err.message : String(err)
+  } finally {
+    saveKeyButton.disabled = false
+  }
+}
+
 toggle.onclick = () => void (recorder ? stop() : start())
 void showPermissionWarnings()
+void showKeyState()

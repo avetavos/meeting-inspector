@@ -26,6 +26,13 @@
       #speakers .who code { font-size: 12px; opacity: .5; width: 90px; }
       #speakers input { flex: 1; }
       #speakers .hint { font-size: 13px; opacity: .7; margin-top: 10px; }
+      #summarybar { margin-top: 16px; }
+      #summary { margin-top: 12px; white-space: pre-wrap; font: inherit; max-height: 40vh; overflow-y: auto; }
+      #summary:empty { display: none; }
+      details { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 14px; }
+      details summary { cursor: pointer; opacity: .7; }
+      details .row { margin-top: 12px; }
+      #keystate { font-size: 13px; opacity: .7; margin-top: 8px; }
       #transcript { margin-top: 16px; max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--line); }
       #transcript p { margin: 12px 0 0; display: grid; grid-template-columns: 52px 64px 1fr; gap: 10px; }
       #transcript .t { opacity: .45; font-variant-numeric: tabular-nums; font-size: 13px; }
@@ -48,6 +55,16 @@
     <div id="done"></div>
     <div id="speakers"></div>
     <div id="transcript"></div>
+    <div class="row" id="summarybar"></div>
+    <pre id="summary"></pre>
+    <details>
+      <summary>ตั้งค่า</summary>
+      <div class="row">
+        <input id="apikey" type="password" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off" />
+        <button id="savekey">บันทึก</button>
+      </div>
+      <div id="keystate"></div>
+    </details>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

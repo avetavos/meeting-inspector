@@ -38,6 +38,7 @@ Each meeting is a folder in `~/Documents/MeetingNotes/<yyyy-mm-dd-HHMM-title>/`:
 | `mic.wav` | you, 16kHz mono |
 | `transcript.json` | the data — segments sorted by time, speaker per segment |
 | `transcript.md` | the same thing to read |
+| `summary.md` | the LLM summary, once you ask for one |
 
 When a meeting ends the loopback track is diarized and every segment picks up the
 speaker it overlaps most; the mic track is always you, so it is never guessed at.
@@ -47,6 +48,12 @@ how you merge a voice that got split in two.
 Stopping waits for the queued tail chunks before writing, so the transcript
 reaches the end of the meeting. Quitting mid-meeting saves what came back
 rather than nothing.
+
+Summarizing needs your own Anthropic API key — paste it under ตั้งค่า. It is
+encrypted with `safeStorage` (Keychain-backed on macOS) and stays in the main
+process; the renderer can only ask whether a key exists. The whole transcript
+goes to `claude-opus-5` in one request, and the button shows what the input
+costs before you spend anything.
 
 Live transcription runs at ~5x realtime on an M3 Pro, so a 30s chunk comes back
 in about 6s. Language is fixed to Thai for now.
