@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+release/
+models/
+*.wav
+*.dmg
+.DS_Store
+.env
