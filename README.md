@@ -1,109 +1,242 @@
-# meeting-inspector
+# Meeting Inspector
 
-Meeting transcription desktop app (macOS first, Electron). Fully offline: it
-records, transcribes and separates speakers on this machine and makes no
-outbound requests of its own once the models are downloaded. Summarizing is the
-job of whichever assistant you connect over MCP on loopback.
+Records a meeting, transcribes it, and works out who said what — entirely on your
+own Mac. No transcription service, no summarizer, no upload. Whichever AI
+assistant you already use reads the transcript over a local connection and
+summarizes it there.
 
-Design spec: `~/Journal/2026-08-27-meeting-inspector-design.md`
+บันทึกการประชุม ถอดเสียง และแยกว่าใครพูด — ทำงานในเครื่องคุณทั้งหมด ไม่มีบริการถอดเสียง
+ไม่มีการอัปโหลด ให้ AI ที่คุณใช้อยู่แล้วอ่าน transcript ผ่านการเชื่อมต่อในเครื่องแล้วสรุปให้
 
-The four models (~3.1 GB) download themselves on first run — the app shows a
-panel with a progress bar per file. Cancelling keeps what arrived and resumes
-from there. `MODELS_DIR` overrides where they land (default `~/whisper-models`).
-That download is the only time the app reaches the network.
+**[English](#install-macos) · [ภาษาไทย](#ติดตั้ง-macos)**
+
+---
+
+## Install (macOS)
+
+**Requirements**
+
+| | |
+|---|---|
+| Mac | Apple Silicon (M1 or later) |
+| macOS | 13 Ventura or later — built and tested on macOS 26 |
+| Disk | ~3.5 GB (the app is 120 MB; the speech models are the rest) |
+| Memory | 8 GB works for short meetings, 16 GB is comfortable |
+
+**1. Download**
+
+Get `Meeting Inspector-<version>-arm64.dmg` from
+[the latest release](https://github.com/avetavos/meeting-inspector/releases/latest).
+
+**2. Install**
+
+Open the .dmg and drag Meeting Inspector to Applications.
+
+**3. First launch**
+
+The app is not signed with an Apple Developer certificate, so macOS will refuse
+to open it on a double-click. **Right-click the app → Open → Open**. You only do
+this once.
+
+**4. Grant two permissions**
+
+The app asks the first time you record:
+
+- **Microphone** — records your own voice
+- **Screen Recording** — macOS ties system audio to this permission, which is how
+  the app hears everyone else. It never records your screen; the video stream is
+  discarded the moment it opens.
+
+Quit and reopen the app after granting Screen Recording — macOS does not apply it
+to a running app.
+
+**5. Download the speech models**
+
+On first launch a panel offers four model files, about 3.1 GB in total. Press
+**Download models**. Cancelling keeps what already arrived and resumes later. You
+can record without them; only transcription waits.
+
+### Using it
+
+Type a meeting title, press **Start recording**, and run your meeting as usual.
+The transcript appears as you go, about half a minute behind. Press **End meeting**
+and the app works out who was speaking, then lets you put real names to them.
+
+Everything is saved in `~/Documents/MeetingNotes/`, one folder per meeting, with
+the audio and the transcript as plain files you own.
+
+### Connecting an AI assistant
+
+Meeting Inspector does not summarize anything itself. Instead it serves your
+meetings over MCP at `http://127.0.0.1:8787/`, on your machine only, so an
+assistant can read them and answer questions like *what did we decide this
+morning?*
+
+Turn on the MCP server under **Settings** and copy the line for your client:
+
+**Claude Code** — paste the command the panel shows.
+
+**Claude Desktop / ChatGPT Desktop** — paste the JSON the panel shows into the
+client's MCP config, then restart it.
+
+The server answers only while Meeting Inspector is open. Clients that fetch the
+address from their own servers — ChatGPT on the web, Gemini's connected apps —
+cannot reach an address on your machine, and are not supported.
+
+---
+
+## Windows and Linux
+
+**Not supported.** Not "coming soon" — the parts that would make it work are not
+written yet:
+
+- The shipped `whisper-server` is an Apple Silicon binary compiled against Metal.
+  Windows and Linux need their own build.
+- The installer only produces a macOS .dmg.
+- System-audio capture, the permission flow, and the window's glass appearance
+  all use macOS APIs.
+
+The speaker-separation library already ships Windows and Linux builds, and
+Electron itself is cross-platform, so a port is possible — it just has not been
+done.
+
+---
+
+## ติดตั้ง (macOS)
+
+**เครื่องที่ใช้ได้**
+
+| | |
+|---|---|
+| Mac | Apple Silicon (M1 ขึ้นไป) |
+| macOS | 13 Ventura ขึ้นไป — พัฒนาและทดสอบบน macOS 26 |
+| พื้นที่ | ~3.5 GB (ตัวแอป 120 MB ที่เหลือคือโมเดลถอดเสียง) |
+| แรม | 8 GB พอสำหรับประชุมสั้น 16 GB สบายกว่า |
+
+**1. ดาวน์โหลด**
+
+โหลด `Meeting Inspector-<version>-arm64.dmg` จาก
+[release ล่าสุด](https://github.com/avetavos/meeting-inspector/releases/latest)
+
+**2. ติดตั้ง**
+
+เปิดไฟล์ .dmg แล้วลาก Meeting Inspector ไปไว้ใน Applications
+
+**3. เปิดครั้งแรก**
+
+แอปไม่ได้เซ็นด้วยใบรับรอง Apple Developer macOS จะไม่ยอมเปิดถ้าดับเบิลคลิก
+**ให้คลิกขวาที่แอป → Open → Open** ทำครั้งเดียวพอ
+
+**4. ให้สิทธิ์ 2 อย่าง**
+
+แอปจะขอตอนกดอัดครั้งแรก
+
+- **Microphone** — อัดเสียงของคุณ
+- **Screen Recording** — macOS ผูกเสียงระบบไว้กับสิทธิ์นี้ ซึ่งเป็นทางเดียวที่แอปจะได้ยินเสียงคนอื่น
+  แอปไม่ได้อัดหน้าจอ วิดีโอถูกทิ้งทันทีที่เปิดสตรีม
+
+หลังให้สิทธิ์ Screen Recording **ต้องปิดแล้วเปิดแอปใหม่** เพราะ macOS ไม่ให้ผลกับแอปที่เปิดค้างอยู่
+
+**5. โหลดโมเดลถอดเสียง**
+
+เปิดครั้งแรกจะมีแผงให้โหลดไฟล์โมเดล 4 ไฟล์ รวมประมาณ 3.1 GB กด **โหลดโมเดล**
+ถ้ากดยกเลิกกลางทาง ส่วนที่โหลดไปแล้วจะถูกเก็บไว้และโหลดต่อจากเดิม
+ระหว่างยังไม่มีโมเดลก็อัดเสียงได้ แค่ยังถอดเสียงไม่ได้
+
+### วิธีใช้
+
+พิมพ์ชื่อการประชุม กด **เริ่มอัด** แล้วประชุมตามปกติ transcript จะขึ้นระหว่างประชุม
+ช้ากว่าเสียงจริงประมาณครึ่งนาที พอกด **จบประชุม** แอปจะแยกว่าใครพูดช่วงไหน
+แล้วให้คุณตั้งชื่อจริงให้แต่ละคน
+
+ทุกอย่างเก็บใน `~/Documents/MeetingNotes/` แยกโฟลเดอร์ต่อการประชุม
+ทั้งไฟล์เสียงและ transcript เป็นไฟล์ธรรมดาที่เป็นของคุณ
+
+### เชื่อมต่อ AI
+
+Meeting Inspector ไม่สรุปให้เอง แต่เปิดให้ AI ดึงข้อมูลการประชุมผ่าน MCP ที่
+`http://127.0.0.1:8787/` ซึ่งเข้าถึงได้จากเครื่องคุณเท่านั้น เพื่อให้ถามได้ว่า
+*เมื่อเช้าประชุมสรุปว่าอะไร*
+
+เปิด MCP server ในหน้า **ตั้งค่า** แล้วคัดลอกบรรทัดของ client ที่คุณใช้
+
+**Claude Code** — วางคำสั่งที่แผงแสดงให้
+
+**Claude Desktop / ChatGPT Desktop** — วาง JSON ที่แผงแสดงลงใน config ของ client
+แล้วปิดเปิดโปรแกรมใหม่
+
+server จะตอบเฉพาะตอนที่เปิด Meeting Inspector ค้างไว้ ส่วน client ที่ยิงเข้าหา address
+จากเซิร์ฟเวอร์ตัวเอง — ChatGPT บนเว็บ หรือ connected apps ของ Gemini — เข้าถึง address
+ในเครื่องคุณไม่ได้ จึงใช้ไม่ได้
+
+### Windows กับ Linux
+
+**ยังใช้ไม่ได้** และไม่ใช่ "เร็วๆ นี้" — ส่วนที่ต้องมียังไม่ได้เขียน
+
+- `whisper-server` ที่แถมมาเป็น binary ของ Apple Silicon ที่ compile กับ Metal
+  Windows และ Linux ต้อง build ของตัวเอง
+- ตัวติดตั้งสร้างได้แค่ .dmg ของ macOS
+- การดักเสียงระบบ ขั้นตอนขอสิทธิ์ และหน้าตากระจกของหน้าต่าง ใช้ API ของ macOS ทั้งหมด
+
+ไลบรารีแยกเสียงผู้พูดมี build ของ Windows และ Linux อยู่แล้ว และ Electron เองก็ข้ามแพลตฟอร์มได้
+ดังนั้นพอร์ตได้ — แค่ยังไม่ได้ทำ
+
+---
+
+## Build from source
 
 ```
+brew install cmake
 npm install
-npm run dev        # electron-vite dev
-npm test           # chunker, wav, store, merge, download, mcp
+npm run dev        # run it
+npm test           # chunker, wav, store, merge, download, ipc, mcp
 npm run typecheck
 npm run dist       # release/Meeting Inspector-<version>-arm64.dmg
-npm run icon       # redraw build/icon.icns from build/icon.mjs
+npm run icon       # redraw build/icon.icns
 ```
 
-`dist` builds a static `whisper-server` from source first (`brew install cmake`,
-a few minutes the first time, cached after). Homebrew's `whisper-cpp` cannot be
-bundled — its ggml loads backends by dlopen from a path fixed at compile time —
-but it still works as a fallback for a checkout you have not built.
+`dist` compiles a static `whisper-server` from source first — a few minutes the
+first time, cached afterwards. Homebrew's `whisper-cpp` cannot be bundled (its
+ggml loads backends by dlopen from a path fixed at compile time), but it works as
+a fallback for a checkout you have not built.
 
-The .dmg is unsigned and unnotarized, so the first launch needs right-click →
-Open → Open Anyway. It carries its own `whisper-server`, so the only thing the
-target machine fetches is the models. Without them the app still records and
-says exactly which file is missing.
+### How it works
 
-Each meeting is a folder in `~/Documents/MeetingNotes/<yyyy-mm-dd-HHMM-title>/`:
+Two audio tracks are recorded and never mixed: `loopback.wav` is everyone else,
+`mic.wav` is you. That means "who said this" is free for your own speech, and
+speaker separation only has to run on the cleaner of the two.
 
 | file | what |
 |---|---|
 | `loopback.wav` | everyone else, 16kHz mono |
 | `mic.wav` | you, 16kHz mono |
-| `transcript.json` | the data — segments sorted by time, speaker per segment |
+| `transcript.json` | segments sorted by time, speaker per segment |
 | `transcript.md` | the same thing to read |
 
-When a meeting ends the loopback track is diarized and every segment picks up the
-speaker it overlaps most; the mic track is always you, so it is never guessed at.
-Name the speakers in the panel that appears — giving two of them the same name is
-how you merge a voice that got split in two.
+Audio is cut into ~30s chunks at the quietest moment near the mark rather than on
+a fixed clock, so no word straddles a boundary and nothing has to be deduplicated.
+Silent chunks are never sent. Transcription runs at about 5x realtime on an M3
+Pro, so a chunk comes back in roughly six seconds.
 
 Stopping waits for the queued tail chunks before writing, so the transcript
-reaches the end of the meeting. Quitting mid-meeting saves what came back
-rather than nothing.
-
-Live transcription runs at ~5x realtime on an M3 Pro, so a 30s chunk comes back
-in about 6s. Language is fixed to Thai for now.
-
-### MCP server
-
-The MCP server starts with the app, so leaving Meeting Inspector open is all a
-client needs. It serves `list_meetings`, `get_transcript` and
-`search_transcripts` over Streamable HTTP on `http://127.0.0.1:8787/`, behind a
-bearer token the panel shows. It binds loopback and accepts loopback `Host`
-values only — nothing off this machine can reach it.
-
-If something else holds 8787 it waits a few seconds before moving, since every
-client config names that port, and says so in the panel when it has to move.
-
-The panel gives you the line to paste, per client:
-
-```
-# Claude Code — speaks HTTP directly
-claude mcp add --scope user --transport http meeting-inspector \
-  http://127.0.0.1:8787/ --header "Authorization: Bearer <token>"
-```
-
-Claude Desktop and ChatGPT Desktop load local servers over stdio, so they reach
-it through a bridge — Claude Desktop in
-`~/Library/Application Support/Claude/claude_desktop_config.json`, ChatGPT
-Desktop in the MCP config it shares with Codex CLI:
-
-```json
-{ "mcpServers": { "meeting-inspector": {
-  "command": "npx",
-  "args": ["-y", "mcp-remote", "http://127.0.0.1:8787/<token>"]
-} } }
-```
-
-Restart the client after editing it. The token may ride in the URL like that
-because it never leaves loopback; quoting a header inside JSON is the usual way
-this setup fails silently.
-
-Clients that fetch the URL from their own servers — ChatGPT on the web, Gemini's
-custom connected apps — cannot reach a loopback address, and reaching them would
-mean publishing the transcripts. They are out of scope by design.
-
-The server only answers while the app is open.
+reaches the end of the meeting. Quitting mid-meeting saves what came back rather
+than nothing.
 
 ### Measuring transcription accuracy
 
 `npm run asr:read`, record yourself reading it in the app, stop, then
-`npm run asr:score`. The scorer runs the app's own Chunker and Whisper over
-`mic.wav`, so it measures the shipping pipeline. It scores the same audio twice,
-with and without the seed vocabulary, so the prompt's effect is visible on one
+`npm run asr:score`. The scorer runs the app's own chunker and whisper over
+`mic.wav`, so it measures the shipping pipeline, and scores the same audio twice —
+with and without the seed vocabulary — so the prompt's effect is visible on one
 recording.
 
 Measured on 125s of read Thai dev-meeting speech: term recall 21/27 without a
-prompt, 26/27 with one (CER 15.1% -> 11.4%). The vocabulary lives in
-`DEFAULT_PROMPT` in `src/main/whisper.ts` — edit it to match your team's jargon.
+prompt, 26/27 with one (CER 15.1% → 11.4%). The vocabulary is `DEFAULT_PROMPT` in
+`src/main/whisper.ts` — edit it to match your team's jargon.
 
 **Electron is pinned to 38.8.6.** 39+ returns a silent loopback audio track on
 macOS 26 (electron#49607). Re-run `spike/electron-loopback` before bumping it.
+
+## License
+
+MIT

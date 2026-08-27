@@ -30,5 +30,10 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "hono": "^4.13.5",
     "sherpa-onnx-node": "^1.13.6"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/avetavos/meeting-inspector.git"
   }
 }
