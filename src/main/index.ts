@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
 import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
 import { getKey, hasKey, setKey } from './keys.ts'
-import { estimate, summarize } from './summarize.ts'
+import { getSettings, setSettings, type Settings } from './settings.ts'
+import { PROVIDERS, estimate, modelFor, summarize } from './summarize.ts'
 import { createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
@@ -184,22 +185,35 @@ function registerIpc(): void {
   ipcMain.handle('keys:set', (_e, provider: string, key: string) => setKey(provider, key.trim()))
   ipcMain.handle('keys:has', (_e, provider: string) => hasKey(provider))
 
+  // Sent over IPC rather than imported by the renderer: importing it would drag the
+  // Anthropic SDK into the sandboxed preload bundle.
+  ipcMain.handle('summary:providers', () => PROVIDERS)
+  ipcMain.handle('settings:get', () => getSettings())
+  ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => setSettings(patch))
+
   // transcript.md already carries the speaker names the user typed, so it is what the
   // model should read — no second renderer of the same data.
   const readForSummary = async (dir: string) => {
-    const key = await getKey('claude')
-    if (!key) throw new Error('ยังไม่ได้ใส่ Anthropic API key')
-    return { key, transcript: await readFile(join(dir, 'transcript.md'), 'utf8') }
+    const { provider, models } = await getSettings()
+    const key = await getKey(provider)
+    if (!key) throw new Error(`ยังไม่ได้ใส่ API key ของ ${provider}`)
+    return {
+      provider,
+      key,
+      model: modelFor(provider, models[provider]),
+      transcript: await readFile(join(dir, 'transcript.md'), 'utf8'),
+    }
   }
 
   ipcMain.handle('summary:estimate', async (_e, dir: string) => {
-    const { key, transcript } = await readForSummary(dir)
-    return estimate(transcript, key)
+    const { provider, key, model, transcript } = await readForSummary(dir)
+    // Only Claude can price ahead of the run; the others report after.
+    return provider === 'claude' ? estimate(transcript, key, model) : null
   })
 
   ipcMain.handle('summary:run', async (e, dir: string) => {
-    const { key, transcript } = await readForSummary(dir)
-    const { text, cost } = await summarize(transcript, key, (delta) =>
+    const { provider, key, model, transcript } = await readForSummary(dir)
+    const { text, cost } = await summarize(provider, model, transcript, key, (delta) =>
       e.sender.send('summary:delta', delta),
     )
     await writeFile(join(dir, 'summary.md'), text.endsWith('\n') ? text : `${text}\n`)

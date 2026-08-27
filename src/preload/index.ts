@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 export type { Transcript } from '../main/store.ts'
-export type { Cost } from '../main/summarize.ts'
+export type { Cost, Provider, ProviderInfo } from '../main/summarize.ts'
+export type { Settings } from '../main/settings.ts'
 import type { Transcript } from '../main/store.ts'
-import type { Cost } from '../main/summarize.ts'
+import type { Settings } from '../main/settings.ts'
+import type { Cost, Provider, ProviderInfo } from '../main/summarize.ts'
 
 export type Track = 'loopback' | 'mic'
 export type Segment = { t0: number; t1: number; text: string }
@@ -28,7 +30,10 @@ const api = {
 
   setKey: (provider: string, key: string): Promise<void> => ipcRenderer.invoke('keys:set', provider, key),
   hasKey: (provider: string): Promise<boolean> => ipcRenderer.invoke('keys:has', provider),
-  estimateSummary: (dir: string): Promise<Cost> => ipcRenderer.invoke('summary:estimate', dir),
+  providers: (): Promise<Record<Provider, ProviderInfo>> => ipcRenderer.invoke('summary:providers'),
+  getSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke('settings:set', patch),
+  estimateSummary: (dir: string): Promise<Cost | null> => ipcRenderer.invoke('summary:estimate', dir),
   runSummary: (dir: string): Promise<Cost> => ipcRenderer.invoke('summary:run', dir),
   onSummaryDelta: (fn: (text: string) => void) =>
     ipcRenderer.on('summary:delta', (_e, text: string) => fn(text)),

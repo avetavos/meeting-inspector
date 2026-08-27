@@ -49,11 +49,23 @@ Stopping waits for the queued tail chunks before writing, so the transcript
 reaches the end of the meeting. Quitting mid-meeting saves what came back
 rather than nothing.
 
-Summarizing needs your own Anthropic API key — paste it under ตั้งค่า. It is
-encrypted with `safeStorage` (Keychain-backed on macOS) and stays in the main
-process; the renderer can only ask whether a key exists. The whole transcript
-goes to `claude-opus-5` in one request, and the button shows what the input
-costs before you spend anything.
+Summarizing needs your own API key — pick a provider under ตั้งค่า and paste
+one. Keys are per provider, encrypted with `safeStorage` (Keychain-backed on
+macOS), and stay in the main process; the renderer can only ask whether a key
+exists. The whole transcript goes out in one request.
+
+| Provider | Default model | $/1M in | out |
+|---|---|---|---|
+| Claude (default) | `claude-opus-5` | 5 | 25 |
+| OpenAI | `gpt-5.6` | 4 | 20 |
+| Gemini | `gemini-3.7-flash` | 0.75 | 3.75 |
+| xAI Grok | `grok-4.6` | 2 | 6 |
+
+Model ids and prices were checked 2026-08-27 and move faster than this repo
+does — the Model field overrides the default per provider without a code
+change, and the table lives in one place in `src/main/summarize.ts`. Claude
+prices the request before you run it (`count_tokens`); the others report what
+the run actually cost.
 
 Live transcription runs at ~5x realtime on an M3 Pro, so a 30s chunk comes back
 in about 6s. Language is fixed to Thai for now.

@@ -1,4 +1,4 @@
-import type { Transcript } from '../preload/index.ts'
+import type { Provider, ProviderInfo, Settings, Transcript } from '../preload/index.ts'
 import { Recorder, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -16,6 +16,8 @@ const summaryOut = $('summary')
 const apiKeyInput = $<HTMLInputElement>('apikey')
 const saveKeyButton = $<HTMLButtonElement>('savekey')
 const keyState = $('keystate')
+const providerSelect = $<HTMLSelectElement>('provider')
+const modelInput = $<HTMLInputElement>('model')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 
 let recorder: Recorder | null = null
@@ -28,6 +30,11 @@ let ticker: number | undefined
 let segments: Transcript['segments'] = []
 let speakers: Record<string, string> = { me: 'คุณ', them: 'คนอื่น' }
 let meetingDir: string | null = null
+
+/** Claude is the default (spec §3); the rest are one dropdown away. */
+let settings: Settings = { provider: 'claude', models: {} }
+let providers: Record<Provider, ProviderInfo> | null = null
+const current = (): ProviderInfo => providers?.[settings.provider] ?? { label: settings.provider, model: '', price: [0, 0] }
 
 const PERMISSION_LABEL = {
   screen: ['Screen Recording', 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)'],
@@ -133,17 +140,23 @@ async function renderSummaryBar(): Promise<void> {
   note.className = 'hint'
   summaryBar.append(run, note)
 
-  if (!(await window.api.hasKey('claude'))) {
+  run.textContent = `สรุปด้วย ${current().label}`
+  if (!(await window.api.hasKey(settings.provider))) {
     run.disabled = true
-    note.textContent = 'ต้องใส่ Anthropic API key ในหน้าตั้งค่าก่อน'
+    note.textContent = `ต้องใส่ API key ของ ${current().label} ในหน้าตั้งค่าก่อน`
     return
   }
 
   const dir = meetingDir
-  // Priced from the real transcript before spending anything (spec §9).
+  // Priced from the real transcript before spending anything (spec §9). Only Claude
+  // can do that; the others report what the run actually cost.
   window.api
     .estimateSummary(dir)
-    .then((c) => (note.textContent = `~${c.inputTokens.toLocaleString()} token เข้า ≈ ${usd(c.usd)}`))
+    .then((c) => {
+      note.textContent = c
+        ? `~${c.inputTokens.toLocaleString()} token เข้า ≈ ${usd(c.usd)}`
+        : 'รู้ราคาหลังสรุปเสร็จ'
+    })
     .catch(() => {})
 
   run.onclick = async () => {
@@ -157,15 +170,38 @@ async function renderSummaryBar(): Promise<void> {
       note.textContent = `สรุปไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`
     } finally {
       run.disabled = false
-      run.textContent = 'สรุปอีกครั้ง'
+      run.textContent = `สรุปอีกครั้งด้วย ${current().label}`
     }
   }
 }
 
 async function showKeyState(): Promise<void> {
-  keyState.textContent = (await window.api.hasKey('claude'))
-    ? 'มี Anthropic API key แล้ว (เก็บเข้ารหัสไว้ในเครื่อง ไม่เคยส่งเข้าหน้าจอ)'
-    : 'ยังไม่มี API key — ใส่ของคุณเองเพื่อใช้สรุป'
+  const { label } = current()
+  keyState.textContent = (await window.api.hasKey(settings.provider))
+    ? `มี API key ของ ${label} แล้ว (เก็บเข้ารหัสไว้ในเครื่อง ไม่เคยส่งเข้าหน้าจอ)`
+    : `ยังไม่มี API key ของ ${label} — ใส่ของคุณเองเพื่อใช้สรุป`
+}
+
+/** Blank model means "whatever this provider currently ships" — the placeholder shows it. */
+function syncProviderFields(): void {
+  modelInput.value = settings.models[settings.provider] ?? ''
+  modelInput.placeholder = current().model
+  apiKeyInput.placeholder = `${current().label} API key`
+  void showKeyState()
+}
+
+async function loadSettings(): Promise<void> {
+  ;[settings, providers] = await Promise.all([window.api.getSettings(), window.api.providers()])
+  providerSelect.replaceChildren(
+    ...Object.entries(providers).map(([id, info]) => {
+      const option = document.createElement('option')
+      option.value = id
+      option.textContent = info.label
+      return option
+    }),
+  )
+  providerSelect.value = settings.provider
+  syncProviderFields()
 }
 
 function setLevel(track: Track, rms: number): void {
@@ -271,10 +307,23 @@ window.api.onSummaryDelta((text) => {
   summaryOut.scrollTop = summaryOut.scrollHeight
 })
 
+providerSelect.onchange = async () => {
+  settings = await window.api.setSettings({ provider: providerSelect.value as Provider })
+  syncProviderFields()
+  await renderSummaryBar()
+}
+
+modelInput.onchange = async () => {
+  settings = await window.api.setSettings({
+    models: { ...settings.models, [settings.provider]: modelInput.value.trim() },
+  })
+  await renderSummaryBar()
+}
+
 saveKeyButton.onclick = async () => {
   saveKeyButton.disabled = true
   try {
-    await window.api.setKey('claude', apiKeyInput.value)
+    await window.api.setKey(settings.provider, apiKeyInput.value)
     apiKeyInput.value = ''
     await showKeyState()
     await renderSummaryBar()
@@ -287,4 +336,4 @@ saveKeyButton.onclick = async () => {
 
 toggle.onclick = () => void (recorder ? stop() : start())
 void showPermissionWarnings()
-void showKeyState()
+void loadSettings()

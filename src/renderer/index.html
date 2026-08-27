@@ -33,6 +33,8 @@
       details summary { cursor: pointer; opacity: .7; }
       details .row { margin-top: 12px; }
       #keystate { font-size: 13px; opacity: .7; margin-top: 8px; }
+      select { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }
+      details .label { width: 96px; }
       #transcript { margin-top: 16px; max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--line); }
       #transcript p { margin: 12px 0 0; display: grid; grid-template-columns: 52px 64px 1fr; gap: 10px; }
       #transcript .t { opacity: .45; font-variant-numeric: tabular-nums; font-size: 13px; }
@@ -59,8 +61,11 @@
     <pre id="summary"></pre>
     <details>
       <summary>ตั้งค่า</summary>
+      <div class="row"><span class="label">ผู้ให้บริการ</span><select id="provider"></select></div>
+      <div class="row"><span class="label">Model</span><input id="model" autocomplete="off" /></div>
       <div class="row">
-        <input id="apikey" type="password" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off" />
+        <span class="label">API key</span>
+        <input id="apikey" type="password" autocomplete="off" />
         <button id="savekey">บันทึก</button>
       </div>
       <div id="keystate"></div>
