@@ -1,3 +1,4 @@
+import type { Segment } from '../preload/index.ts'
 import { Recorder, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -7,6 +8,8 @@ const toggle = $<HTMLButtonElement>('toggle')
 const elapsed = $('elapsed')
 const warnings = $('warnings')
 const done = $('done')
+const queue = $('queue')
+const transcript = $('transcript')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 
 let recorder: Recorder | null = null
@@ -34,6 +37,34 @@ async function showPermissionWarnings(): Promise<void> {
   }
 }
 
+// Live pass only labels "us" vs "them" (spec §4.2) — real names come from
+// diarization after the meeting ends.
+const WHO: Record<Track, string> = { mic: 'คุณ', loopback: 'คนอื่น' }
+
+let segments: (Segment & { track: Track })[] = []
+
+function addSegments(track: Track, incoming: Segment[]): void {
+  segments.push(...incoming.map((s) => ({ ...s, track })))
+  segments.sort((a, b) => a.t0 - b.t0)
+  transcript.replaceChildren(
+    ...segments.map((s) => {
+      const p = document.createElement('p')
+      if (s.track === 'mic') p.className = 'me'
+      const t = document.createElement('span')
+      t.className = 't'
+      t.textContent = fmt(s.t0)
+      const who = document.createElement('span')
+      who.className = 'who'
+      who.textContent = WHO[s.track]
+      const text = document.createElement('span')
+      text.textContent = s.text
+      p.append(t, who, text)
+      return p
+    }),
+  )
+  transcript.scrollTop = transcript.scrollHeight
+}
+
 function setLevel(track: Track, rms: number): void {
   // sqrt curve: speech sits low on a linear scale and the bar would look dead.
   meters[track].style.width = `${Math.min(100, Math.sqrt(rms) * 180)}%`
@@ -46,6 +77,8 @@ function fmt(sec: number): string {
 
 async function start(): Promise<void> {
   done.replaceChildren()
+  transcript.replaceChildren()
+  segments = []
   await window.api.requestPermissions()
   toggle.disabled = true
   try {
@@ -91,6 +124,15 @@ async function stop(): Promise<void> {
   open.onclick = () => void window.api.reveal(result.dir)
   done.append(open)
 }
+
+window.api.onSegments(addSegments)
+window.api.onQueue((depth) => {
+  // Nothing is dropped; a deep queue just means the transcript lags further behind.
+  queue.textContent = depth > 3 ? `ถอดเสียงตามไม่ทัน — ค้างอยู่ ${depth} ท่อน` : ''
+})
+window.api.onTranscriptError((message) => {
+  warnings.textContent = `whisper-server ไม่ขึ้น: ${message}`
+})
 
 toggle.onclick = () => void (recorder ? stop() : start())
 void showPermissionWarnings()

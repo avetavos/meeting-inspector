@@ -20,6 +20,12 @@
       .warn button { padding: 4px 10px; font-size: 13px; margin-top: 8px; }
       #elapsed { font-variant-numeric: tabular-nums; opacity: .7; }
       #done { margin-top: 16px; font-size: 14px; }
+      #queue { margin-top: 12px; font-size: 13px; opacity: .8; }
+      #transcript { margin-top: 16px; max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--line); }
+      #transcript p { margin: 12px 0 0; display: grid; grid-template-columns: 52px 64px 1fr; gap: 10px; }
+      #transcript .t { opacity: .45; font-variant-numeric: tabular-nums; font-size: 13px; }
+      #transcript .who { opacity: .7; font-size: 13px; }
+      #transcript .me .who { opacity: 1; font-weight: 600; }
       a { color: inherit; }
     </style>
   </head>
@@ -33,7 +39,9 @@
     <div class="row"><span class="label">คนอื่น</span><span class="meter"><i id="m-loopback"></i></span></div>
     <div class="row"><span class="label">เรา</span><span class="meter"><i id="m-mic"></i></span></div>
     <div id="warnings"></div>
+    <div id="queue"></div>
     <div id="done"></div>
+    <div id="transcript"></div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
