@@ -137,6 +137,13 @@ const en = {
   mcpLabel: 'Turn on the MCP server so a local AI assistant can pull the transcript to summarize it',
   mcpUrlLabel: 'URL',
   mcpTokenLabel: 'Bearer token',
+  mcpTokenReveal: 'Show',
+  mcpTokenHide: 'Hide',
+  mcpConnectTitle: 'Connect an app',
+  mcpConnectOff: 'Turn on the server above to get connection details for your app.',
+  mcpConnectAppLabel: 'Pick your app, then copy what it needs.',
+  mcpConnectStepsCode: 'Run this in a terminal:',
+  mcpConnectStepsDesktop: "Add this to the app's MCP config:",
   permWhy: {
     screen: 'Needed to record system audio — everyone else in the meeting',
     microphone: 'Needed to record your microphone',
@@ -366,6 +373,13 @@ const th: typeof en = {
   mcpLabel: 'เปิด MCP server ให้ AI ในเครื่องดึง transcript ไปสรุป',
   mcpUrlLabel: 'URL',
   mcpTokenLabel: 'Bearer token',
+  mcpTokenReveal: 'แสดง',
+  mcpTokenHide: 'ซ่อน',
+  mcpConnectTitle: 'เชื่อมต่อแอป',
+  mcpConnectOff: 'เปิดเซิร์ฟเวอร์ด้านบนก่อน เพื่อดูรายละเอียดการเชื่อมต่อสำหรับแอปของคุณ',
+  mcpConnectAppLabel: 'เลือกแอปของคุณ แล้วคัดลอกสิ่งที่ต้องใช้',
+  mcpConnectStepsCode: 'รันคำสั่งนี้ในเทอร์มินัล:',
+  mcpConnectStepsDesktop: 'เพิ่มข้อความนี้ในไฟล์ตั้งค่า MCP ของแอป:',
   permWhy: {
     screen: 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)',
     microphone: 'ต้องมีเพื่ออัดเสียงเรา',
@@ -474,6 +488,9 @@ const transcript = $('transcript')
 const modelsEl = $('models')
 const mcpToggle = $<HTMLInputElement>('mcp')
 const mcpStateEl = $('mcpstate')
+const mcpConnectTitleEl = $('mcp-connect-title')
+const mcpConnectOffEl = $('mcp-connect-off')
+const mcpConnectEl = $('mcpconnect')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 const meterLabels: Record<Track, HTMLElement> = { loopback: $('meter-others-label'), mic: $('meter-us-label') }
 const voicesEl = $('voices')
@@ -1437,22 +1454,174 @@ function renderSpeakerPanel(
   container.append(save, hint, scopeHint)
 }
 
-function copyRow(label: string, value: string): HTMLElement {
-  const row = document.createElement('div')
-  row.className = 'copyrow'
-  const name = document.createElement('span')
-  name.textContent = `${label}: `
-  const el = document.createElement('code')
-  el.textContent = value
-  const copy = document.createElement('button')
-  copy.textContent = t().copy
-  copy.onclick = async () => {
+/** A button that copies a fixed value and gives the existing copy → copied feedback. */
+function copyButton(value: string): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.textContent = t().copy
+  btn.onclick = async () => {
     await navigator.clipboard.writeText(value)
-    copy.textContent = t().copied
-    setTimeout(() => (copy.textContent = t().copy), 1500)
+    btn.textContent = t().copied
+    setTimeout(() => (btn.textContent = t().copy), 1500)
   }
-  row.append(name, el, copy)
-  return row
+  return btn
+}
+
+/** A labelled, code-styled value with its own copy button — the URL row, and the
+ * shape every other MCP field below is built from. */
+function mcpField(labelText: string, displayText: string, copyValue: string): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'mcp-field'
+  const label = document.createElement('span')
+  label.className = 'mcp-field-label'
+  label.textContent = labelText
+  const row = document.createElement('div')
+  row.className = 'mcp-code-row'
+  const code = document.createElement('code')
+  code.className = 'mcp-code'
+  code.textContent = displayText
+  const actions = document.createElement('div')
+  actions.className = 'mcp-code-actions'
+  actions.append(copyButton(copyValue))
+  row.append(code, actions)
+  wrap.append(label, row)
+  return wrap
+}
+
+const TOKEN_MASK = '••••••••••••'
+// Persists across re-renders (language switch, port apply) the same way
+// permissionsIncludeScreen does above — an explicit remembered variable rather than
+// resetting the user's reveal choice or app pick every time showMcpState re-runs.
+let mcpTokenRevealed = false
+let mcpConnectApp: 'code' | 'desktop' = 'code'
+
+/** The token never sits on screen in plain text by default — masked here, and
+ * everywhere else it appears (the per-app snippets below), until explicitly shown.
+ * The copy button always copies the real token regardless of reveal state. */
+function mcpTokenField(token: string): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'mcp-field'
+  const label = document.createElement('span')
+  label.className = 'mcp-field-label'
+  label.textContent = t().mcpTokenLabel
+  const row = document.createElement('div')
+  row.className = 'mcp-code-row'
+  const code = document.createElement('code')
+  code.className = 'mcp-code'
+  code.textContent = mcpTokenRevealed ? token : TOKEN_MASK
+  const actions = document.createElement('div')
+  actions.className = 'mcp-code-actions'
+  const reveal = document.createElement('button')
+  reveal.textContent = mcpTokenRevealed ? t().mcpTokenHide : t().mcpTokenReveal
+  reveal.onclick = () => {
+    mcpTokenRevealed = !mcpTokenRevealed
+    code.textContent = mcpTokenRevealed ? token : TOKEN_MASK
+    reveal.textContent = mcpTokenRevealed ? t().mcpTokenHide : t().mcpTokenReveal
+  }
+  actions.append(reveal, copyButton(token))
+  row.append(code, actions)
+  wrap.append(label, row)
+  return wrap
+}
+
+/** Claude Code speaks HTTP and can send a header; Claude Desktop and ChatGPT Desktop
+ * load local servers over stdio, so they go through a bridge with the token in the
+ * URL instead (saves quoting a header inside JSON). One app shown at a time, picked
+ * with the same segmented control used elsewhere for a short set of choices — one
+ * obvious copy button for whichever app is selected, instead of every app's snippet
+ * stacked down the page at once. */
+function mcpAppPicker(url: string, token: string): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'mcp-field'
+
+  const label = document.createElement('span')
+  label.className = 'mcp-field-label'
+  label.textContent = t().mcpConnectAppLabel
+
+  const picker = document.createElement('div')
+  picker.className = 'segmented'
+  picker.setAttribute('role', 'radiogroup')
+  picker.setAttribute('aria-label', t().mcpConnectAppLabel)
+
+  const apps: { key: 'code' | 'desktop'; name: string; steps: () => string; snippet: string }[] = [
+    {
+      key: 'code',
+      name: 'Claude Code',
+      steps: () => t().mcpConnectStepsCode,
+      snippet: `claude mcp add --scope user --transport http meeting-inspector ${url} --header "Authorization: Bearer ${token}"`,
+    },
+    {
+      key: 'desktop',
+      name: 'Claude Desktop / ChatGPT Desktop',
+      steps: () => t().mcpConnectStepsDesktop,
+      snippet: JSON.stringify(
+        { 'meeting-inspector': { command: 'npx', args: ['-y', 'mcp-remote', `${url}${token}`] } },
+        null,
+        2,
+      ),
+    },
+  ]
+
+  const stepsEl = document.createElement('span')
+  stepsEl.className = 'mcp-field-label'
+  const row = document.createElement('div')
+  row.className = 'mcp-code-row'
+  const snippetCode = document.createElement('code')
+  snippetCode.className = 'mcp-code'
+  const actions = document.createElement('div')
+  actions.className = 'mcp-code-actions'
+  const copyBtn = document.createElement('button')
+  actions.append(copyBtn)
+  row.append(snippetCode, actions)
+
+  function renderActive(): void {
+    const active = apps.find((a) => a.key === mcpConnectApp) ?? apps[0]!
+    stepsEl.textContent = active.steps()
+    snippetCode.textContent = mcpTokenRevealed ? active.snippet : active.snippet.split(token).join(TOKEN_MASK)
+    copyBtn.textContent = t().copy
+    copyBtn.onclick = async () => {
+      await navigator.clipboard.writeText(active.snippet)
+      copyBtn.textContent = t().copied
+      setTimeout(() => (copyBtn.textContent = t().copy), 1500)
+    }
+  }
+
+  for (const app of apps) {
+    const opt = document.createElement('label')
+    opt.className = 'segmented-opt'
+    const input = document.createElement('input')
+    input.type = 'radio'
+    input.name = 'mcp-connect-app'
+    input.checked = app.key === mcpConnectApp
+    input.onchange = () => {
+      mcpConnectApp = app.key
+      renderActive()
+    }
+    const span = document.createElement('span')
+    span.textContent = app.name
+    opt.append(input, span)
+    picker.append(opt)
+  }
+  renderActive()
+
+  wrap.append(label, picker, stepsEl, row)
+  return wrap
+}
+
+/** The connecting side of the MCP panel — separate from the server card above it,
+ * since turning the server on and wiring up a particular app are different concerns
+ * (spec item 3). Hidden behind a plain hint until the server actually has a URL and
+ * token to hand out. */
+function renderMcpConnect(state: McpState): void {
+  mcpConnectEl.replaceChildren()
+  const ready = Boolean(state.url && state.token)
+  mcpConnectOffEl.hidden = ready
+  mcpConnectEl.hidden = !ready
+  if (!ready || !state.url || !state.token) return
+  mcpConnectEl.append(
+    mcpField(t().mcpUrlLabel, state.url, state.url),
+    mcpTokenField(state.token),
+    mcpAppPicker(state.url, state.token),
+  )
 }
 
 function showMcpState(state: McpState): void {
@@ -1475,31 +1644,13 @@ function showMcpState(state: McpState): void {
           : t().portTakenUsingAny(state.requestedPort, state.port)
     mcpStateEl.append(moved)
   }
-  if (!state.url || !state.token) return
-
-  mcpStateEl.append(
-    copyRow(t().mcpUrlLabel, state.url),
-    copyRow(t().mcpTokenLabel, state.token),
-    // Claude Code speaks HTTP and can send a header.
-    copyRow(
-      'Claude Code',
-      `claude mcp add --scope user --transport http meeting-inspector ${state.url} --header "Authorization: Bearer ${state.token}"`,
-    ),
-    // Claude Desktop and ChatGPT Desktop load local servers over stdio, so they go
-    // through a bridge. Token in the URL, which saves quoting a header inside JSON.
-    copyRow(
-      'Claude Desktop / ChatGPT Desktop',
-      JSON.stringify({
-        'meeting-inspector': { command: 'npx', args: ['-y', 'mcp-remote', `${state.url}${state.token}`] },
-      }),
-    ),
-  )
+  renderMcpConnect(state)
 }
 
 /**
  * Renders into a dedicated child node rather than `mcpStateEl.textContent = …`, which
- * would wipe the URL / Bearer token / Claude Code / Claude Desktop rows — the user
- * would then have no way to get them back short of a relaunch or a language switch.
+ * would wipe the port-conflict warning — the user would then have no way to get it
+ * back short of a relaunch or a language switch.
  */
 function showMcpError(message: string): void {
   let box = mcpStateEl.querySelector<HTMLElement>('.mcperror')
@@ -2533,6 +2684,8 @@ function applyLanguage(l: Language): void {
   void renderVoices()
   void renderPendingVoices()
   mcpLabel.textContent = t().mcpLabel
+  mcpConnectTitleEl.textContent = t().mcpConnectTitle
+  mcpConnectOffEl.textContent = t().mcpConnectOff
   onboardingRerunLabelEl.textContent = t().onboardingRerunLabel
   onboardingRerunBtn.textContent = t().onboardingRerun
 

@@ -9,6 +9,35 @@
   --radius-sm: 10px; /* controls nested in a card (20 - 10 pad) */
   --radius-pill: 999px; /* capsule buttons, meter tracks */
 
+  /* spacing scale: constant 2px steps while spacing is doing fine UI-chrome work
+     (padding, small gaps), widening to 4px jumps once it is doing bigger structural
+     work (card-to-card, page outer edges) — the same "steps change size with the
+     job" idea the radius scale above already uses, just growing instead of shrinking.
+     Replaces 14 ad-hoc pixel values (several of them one-off nudges — 3, 7, 9, 22px)
+     that had accumulated with no stated reasoning. */
+  --space-3xs: 2px; /* hairline: pill-badge vertical padding, segmented control's own padding */
+  --space-2xs: 4px; /* tight: icon/label gaps, small margins under a label */
+  --space-xs: 6px; /* compact: list-row padding, meter-row padding */
+  --space-sm: 8px; /* cozy: secondary-button padding, grid/list gaps */
+  --space-md: 10px; /* standard: default control padding — the app's baseline rhythm */
+  --space-lg: 12px; /* roomy: horizontal control padding, header/settings-row gaps */
+  --space-xl: 14px; /* card: card inner padding, row spacing inside a card */
+  --space-2xl: 16px; /* wide card: capsule padding */
+  --space-3xl: 18px; /* section: card-to-card gap, capsule margin */
+  --space-4xl: 20px; /* generous: page/onboarding outer padding */
+  --space-5xl: 24px; /* outermost: page bottom padding, onboarding card padding */
+
+  /* type scale: five named jobs, each a clearly distinct step (22/18/15/13/12 — gaps
+     of 4/3/2/1px, narrowing toward the body size). Replaces four sizes (12/13/14/15px)
+     that were one pixel apart with no stated reason, plus two headings (20/22px) that
+     were two pixels apart despite doing different jobs (a page title vs. a section
+     title inside it). Do not add a sixth step — collapse into the nearest job instead. */
+  --text-title: 22px; /* page title: Settings / onboarding-step / detail / all-meetings header */
+  --text-section: 18px; /* section title: one settings category's own heading */
+  --text-body: 15px; /* body: the default reading size, set once on <body> */
+  --text-secondary: 13px; /* secondary: hints, row labels, list rows, buttons */
+  --text-caption: 12px; /* caption: badges, small code, uppercase eyebrow labels */
+
   --text: #1d1d1f;
   --text-dim: rgba(29, 29, 31, 0.62);
   --line-hi: rgba(255, 255, 255, 0.8);
@@ -47,7 +76,7 @@ body {
   margin: 0;
   background: transparent; /* native vibrancy shows through */
   color: var(--text);
-  font: 15px/1.6 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font: var(--text-body)/1.6 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 
 /* ---------- window chrome: draggable title-bar strip ------------------ */
@@ -65,14 +94,14 @@ body {
   min-height: 0;
   overflow-y: auto;
   -webkit-app-region: no-drag;
-  padding: 0 20px 28px;
+  padding: 0 var(--space-4xl) var(--space-5xl);
 }
 
-.content-inner { padding-top: 4px; }
+.content-inner { padding-top: var(--space-2xs); }
 
 h1.app-title {
-  padding: 0 4px;
-  font-size: 13px;
+  padding: 0 var(--space-2xs);
+  font-size: var(--text-caption);
   font-weight: 600;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -80,14 +109,14 @@ h1.app-title {
 }
 
 /* ---------- main-view header: title + settings entry point -------------- */
-.view-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.view-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); margin-bottom: var(--space-xl); }
 .view-header .app-title { flex: 1; min-width: 0; }
-.settings-open { flex: 0 0 auto; padding: 7px 14px; font-size: 13px; }
+.settings-open { flex: 0 0 auto; padding: var(--space-sm) var(--space-xl); font-size: var(--text-secondary); }
 
 /* ---------- secondary glass cards (warnings, models, speakers, settings) - */
 .warn, #speakers, #detail-speakers, #meetings {
-  padding: 14px 16px;
-  margin-top: 14px;
+  padding: var(--space-xl) var(--space-2xl);
+  margin-top: var(--space-xl);
   background: var(--glass-fill);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -106,7 +135,7 @@ input[type='checkbox'], input[type='radio'] { width: auto; flex: none; accent-co
 /* Text fields only. A checkbox or radio caught by this stretches across the row,
    which is what it did to the MCP toggle. */
 input:not([type='checkbox']):not([type='radio']) {
-  padding: 9px 12px;
+  padding: var(--space-md) var(--space-lg);
   width: 100%;
   border: none;
   border-radius: var(--radius-sm);
@@ -116,7 +145,7 @@ input:not([type='checkbox']):not([type='radio']) {
 }
 
 button {
-  padding: 9px 16px;
+  padding: var(--space-md) var(--space-2xl);
   border-radius: var(--radius-pill);
   border: 1px solid transparent;
   background: rgba(127, 127, 127, 0.14);
@@ -130,27 +159,27 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: inherit; }
 
-.row { display: flex; gap: 12px; align-items: center; margin-top: 14px; }
-.hint { font-size: 13px; line-height: 1.6; color: var(--text-dim); margin-top: 10px; }
+.row { display: flex; gap: var(--space-lg); align-items: center; margin-top: var(--space-xl); }
+.hint { font-size: var(--text-secondary); line-height: 1.6; color: var(--text-dim); margin-top: var(--space-md); }
 
-#queue, #done { margin-top: 12px; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+#queue, #done { margin-top: var(--space-lg); font-size: var(--text-secondary); line-height: 1.6; color: var(--text-dim); }
 #done a { color: var(--accent); }
 
 /* ---------- models panel ------------------------------------------------ */
-#models .file { display: grid; grid-template-columns: 1fr 128px; gap: 8px 12px; align-items: center; margin-top: 10px; font-size: 13px; }
+#models .file { display: grid; grid-template-columns: 1fr 128px; gap: var(--space-sm) var(--space-lg); align-items: center; margin-top: var(--space-md); font-size: var(--text-secondary); }
 #models .bar { grid-column: 1 / -1; height: 6px; border-radius: var(--radius-pill); background: var(--track-bg); overflow: hidden; }
 #models .bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); }
 #models .size { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 /* ---------- ASR model picker: one .option-row per model (see below), state ---- */
 /* + detail beneath — layout/checkmark come from the shared .option-row rules. -- */
-#asr-model .asr-state { font-size: 13px; color: var(--text-dim); }
+#asr-model .asr-state { font-size: var(--text-secondary); color: var(--text-dim); }
 
 /* ---------- meetings panel: list + batch transcription ------------------- */
 /* Shared between the main page's 5-row preview and the full All Meetings page —
    one list renderer, two containers (same reuse pattern as #models below). */
-#meetings-list, #all-meetings-list { margin-top: 10px; }
-.meeting-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
+#meetings-list, #all-meetings-list { margin-top: var(--space-md); }
+.meeting-row { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-xs) 0; font-size: var(--text-secondary); }
 .meeting-row + .meeting-row { border-top: 1px solid var(--line-lo); }
 .meeting-row .meeting-title { flex: 1; }
 /* A done meeting's title doubles as the "open its transcript" control — a real
@@ -159,51 +188,71 @@ button:disabled { opacity: 0.4; cursor: default; }
 button.meeting-title-open { background: none; box-shadow: none; padding: 0; border-radius: 0; text-align: left; color: var(--accent); font: inherit; }
 button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoration: underline; }
 .meeting-row .meeting-when, .meeting-row .meeting-dur { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.meeting-status, .meeting-lang { font-size: 12px; padding: 2px 8px; border-radius: var(--radius-pill); background: rgba(127, 127, 127, 0.14); color: var(--text-dim); white-space: nowrap; }
+.meeting-status, .meeting-lang { font-size: var(--text-caption); padding: var(--space-3xs) var(--space-sm); border-radius: var(--radius-pill); background: rgba(127, 127, 127, 0.14); color: var(--text-dim); white-space: nowrap; }
 .meeting-status.done { color: var(--accent); }
 .meeting-status.failed { color: var(--accent-rec); }
 .meeting-status.transcribing { color: var(--accent); }
 .wrap-row { flex-wrap: wrap; }
-.meetings-action-btn { padding: 7px 14px; font-size: 13px; }
-#meetings-view-all { margin-top: 10px; display: block; }
+.meetings-action-btn { padding: var(--space-sm) var(--space-xl); font-size: var(--text-secondary); }
+#meetings-view-all { margin-top: var(--space-md); display: block; }
 
 /* ---------- meeting detail page: a past meeting's transcript, read-only chrome
    aside from renaming speakers ------------------------------------------- */
-.meeting-detail-page { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; }
+.meeting-detail-page { display: flex; flex-direction: column; gap: var(--space-2xs); padding-top: var(--space-md); }
 .meeting-detail-page[hidden] { display: none; }
 .meeting-detail-page .view-header { margin-bottom: 0; }
-#detail-reveal { align-self: flex-start; margin: 4px 0 0; }
+#detail-reveal { align-self: flex-start; margin: var(--space-2xs) 0 0; }
 
 /* ---------- all meetings page: every recording, newest first ------------- */
-.all-meetings-page { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; }
+.all-meetings-page { display: flex; flex-direction: column; gap: var(--space-2xs); padding-top: var(--space-md); }
 .all-meetings-page[hidden] { display: none; }
 
 /* Both new pages reuse settings-page's header idiom (a small transparent "back"
-   button + a 22px title) but, unlike the settings sidebar, the title should take
-   the remaining row width the way main-view's own app-title does. */
+   button + a page-title-sized title) but, unlike the settings sidebar, the title
+   should take the remaining row width the way main-view's own app-title does. */
 .view-header .settings-title { flex: 1; min-width: 0; margin: 0; }
 
 /* ---------- speaker naming ------------------------------------------------ */
-#speakers .who, #detail-speakers .who { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
-#speakers .who code, #detail-speakers .who code { font-size: 12px; color: var(--text-dim); width: 90px; }
+#speakers .who, #detail-speakers .who { display: flex; gap: var(--space-md); align-items: center; margin-top: var(--space-sm); }
+#speakers .who code, #detail-speakers .who code { font-size: var(--text-caption); color: var(--text-dim); width: 90px; }
 #speakers input, #detail-speakers input { flex: 1; }
 
 /* ---------- transcript --------------------------------------------------- */
-#transcript, #detail-transcript { margin-top: 18px; }
-#transcript p, #detail-transcript p { margin: 14px 0 0; display: grid; grid-template-columns: 52px 68px 1fr; gap: 10px; line-height: 1.65; }
-#transcript .t, #detail-transcript .t { color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 13px; }
-#transcript .who, #detail-transcript .who { color: var(--text-dim); font-size: 13px; }
+#transcript, #detail-transcript { margin-top: var(--space-3xl); }
+#transcript p, #detail-transcript p { margin: var(--space-xl) 0 0; display: grid; grid-template-columns: 52px 68px 1fr; gap: var(--space-md); line-height: 1.65; }
+#transcript .t, #detail-transcript .t { color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: var(--text-secondary); }
+#transcript .who, #detail-transcript .who { color: var(--text-dim); font-size: var(--text-secondary); }
 #transcript .me .who, #detail-transcript .me .who { color: var(--text); font-weight: 600; }
 
 /* ---------- MCP connection state (settings > Connections) ---------------- */
-#mcpstate { font-size: 13px; line-height: 1.6; color: var(--text-dim); margin-top: 10px; }
-#mcpstate code { user-select: all; word-break: break-all; }
-/* Stacked (not a 2-column grid): the settings page's narrower card width made a
-   long label + a long code snippet fight for space on one row. */
-.copyrow { margin-top: 10px; }
-.copyrow > span { display: block; color: var(--text-dim); font-size: 13px; margin-bottom: 3px; }
-.copyrow > code { display: block; margin-bottom: 6px; }
-.copyrow button { padding: 3px 10px; font-size: 12px; }
+#mcpstate { font-size: var(--text-secondary); line-height: 1.6; color: var(--text-dim); margin-top: var(--space-md); }
+
+/* A value meant to be copied elsewhere (the URL, the token, or a per-app snippet).
+   Rendered as code, so it should wrap like code: `overflow-wrap: anywhere` only
+   breaks where the browser has no other choice, unlike the old `word-break:
+   break-all`, which mangled a URL/command/JSON mid-token even when a normal word
+   break would have done. `white-space: pre-wrap` keeps the JSON block's own
+   indentation intact instead of collapsing it to one line. */
+.mcp-field { margin-top: var(--space-lg); }
+.mcp-field:first-child { margin-top: 0; }
+.mcp-field-label { display: block; color: var(--text-dim); font-size: var(--text-secondary); margin-bottom: var(--space-3xs); }
+.mcp-field .segmented { margin-top: var(--space-2xs); }
+.mcp-code-row { display: flex; align-items: flex-start; gap: var(--space-xs); margin-top: var(--space-sm); }
+.mcp-field-label + .mcp-code-row { margin-top: 0; }
+.mcp-code {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(127, 127, 127, 0.12);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mcp-code-actions { display: flex; flex: none; gap: var(--space-3xs); }
+.mcp-code-actions button { padding: var(--space-3xs) var(--space-sm); font-size: var(--text-caption); }
 a { color: inherit; -webkit-app-region: no-drag; }
 
 /* ---------- the signature element: the recording capsule ----------------- */
@@ -212,8 +261,8 @@ a { color: inherit; -webkit-app-region: no-drag; }
   top: 10px;
   z-index: 5;
   -webkit-app-region: no-drag;
-  padding: 16px;
-  margin-bottom: 18px;
+  padding: var(--space-2xl);
+  margin-bottom: var(--space-3xl);
   background: var(--glass-fill-strong);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -225,14 +274,14 @@ a { color: inherit; -webkit-app-region: no-drag; }
   transition: box-shadow 200ms ease;
 }
 
-.capsule-top { display: flex; gap: 10px; align-items: center; }
+.capsule-top { display: flex; gap: var(--space-md); align-items: center; }
 .capsule-top input { flex: 1; border-radius: var(--radius-md); }
 
 #elapsed { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 44px; text-align: right; }
 
 #toggle {
   flex: 0 0 auto;
-  padding: 10px 22px;
+  padding: var(--space-md) var(--space-4xl);
   border-radius: var(--radius-pill);
   background: var(--accent);
   color: #fff;
@@ -242,18 +291,18 @@ a { color: inherit; -webkit-app-region: no-drag; }
 
 /* one instrument, two channels */
 .meters {
-  margin-top: 12px;
+  margin-top: var(--space-lg);
   display: flex;
   flex-direction: column;
   gap: 0;
   background: var(--track-bg);
   border-radius: var(--radius-md);
-  padding: 8px 12px;
+  padding: var(--space-sm) var(--space-lg);
   box-shadow: inset 0 1px 3px var(--line-lo);
 }
-.meter-channel { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.meter-channel { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-xs) 0; }
 .meter-channel + .meter-channel { border-top: 1px solid var(--line-lo); }
-.label { width: 60px; flex: 0 0 auto; font-size: 13px; color: var(--text-dim); }
+.label { width: 60px; flex: 0 0 auto; font-size: var(--text-secondary); color: var(--text-dim); }
 .meter { flex: 1; height: 8px; border-radius: var(--radius-pill); background: rgba(127, 127, 127, 0.2); overflow: hidden; }
 .meter > i { display: block; height: 100%; width: 0; border-radius: inherit; transition: width 80ms linear; }
 #m-loopback { background: var(--meter-loopback); }
@@ -295,24 +344,24 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 /* known voices — one row per person the app has learned to recognise */
 /* No margin-top: this is the only child of its settings card, so a margin here is
    just dead space inside the card, not separation from anything. */
-#voices { font-size: 13px; }
-#voices .voice { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-top: 6px; }
-#voices button { padding: 2px 10px; font-size: 12px; }
+#voices { font-size: var(--text-secondary); }
+#voices .voice { display: flex; gap: var(--space-md); align-items: center; justify-content: space-between; margin-top: var(--space-xs); }
+#voices button { padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); }
 
 /* pending voices — clustered by diarization but not yet named (spec item 1) */
-#pending-voices { font-size: 13px; }
+#pending-voices { font-size: var(--text-secondary); }
 #pending-voices .pending-voice {
-  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-lo);
+  margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px solid var(--line-lo);
 }
-#pending-voices .pending-voice:first-of-type { margin-top: 6px; padding-top: 0; border-top: none; }
-#pending-voices .who { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+#pending-voices .pending-voice:first-of-type { margin-top: var(--space-xs); padding-top: 0; border-top: none; }
+#pending-voices .who { display: flex; gap: var(--space-sm); align-items: center; margin-top: var(--space-xs); }
 #pending-voices .who input { flex: 1; min-width: 0; }
-#pending-voices button { padding: 2px 10px; font-size: 12px; }
+#pending-voices button { padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); }
 
 /* recognised-voice badge on a speaker row (spec item 3) — the rename-scope tell */
-.voice-badge { margin-left: 6px; cursor: help; }
+.voice-badge { margin-left: var(--space-xs); cursor: help; }
 
-select { font: inherit; color: inherit; padding: 7px 10px; border-radius: var(--radius-sm);
+select { font: inherit; color: inherit; padding: var(--space-sm) var(--space-md); border-radius: var(--radius-sm);
   border: 1px solid var(--line-lo); background: rgba(127, 127, 127, 0.12); -webkit-app-region: no-drag; }
 select:disabled { opacity: 0.4; cursor: default; }
 
@@ -320,22 +369,22 @@ select:disabled { opacity: 0.4; cursor: default; }
 /* #mictest's own card-to-card spacing now comes from .settings-panel's `gap` (this
    card is one of its children) — a separate margin-top here would just stack on top
    of that gap instead of matching it, uneven against every other pair of cards. */
-#mictest-line { margin-top: 10px; font-size: 15px; line-height: 1.7; }
-#mictest-verdict { font-size: 13px; width: 8em; color: var(--text-dim); }
+#mictest-line { margin-top: var(--space-md); font-size: var(--text-body); line-height: 1.7; }
+#mictest-verdict { font-size: var(--text-secondary); width: 8em; color: var(--text-dim); }
 #mictest-verdict.speech { color: var(--accent); font-weight: 600; }
 #mictest-verdict.dropped { color: var(--accent-rec); font-weight: 600; }
 
 /* the meter turns accent-coloured while the gate is counting it as speech */
 #mictest-level { background: var(--text-dim); transition: background 150ms ease; }
 #mictest-level.speech { background: var(--accent); }
-#mictest-heard > div { margin-top: 6px; }
-#mictest-heard button { margin-top: 8px; }
+#mictest-heard > div { margin-top: var(--space-xs); }
+#mictest-heard button { margin-top: var(--space-sm); }
 
 #mictest-heard .rowlabel { color: var(--text-dim); }
-#mictest-heard > div { margin-top: 6px; line-height: 1.7; }
+#mictest-heard > div { margin-top: var(--space-xs); line-height: 1.7; }
 
 #port { max-width: 8em; }
-#mcpstate .warn { margin: 0 0 10px; }
+#mcpstate .warn { margin: 0 0 var(--space-md); }
 
 /* ======================================================================= */
 /* Settings page — iPadOS-style sidebar of categories + stacked grouped    */
@@ -346,7 +395,7 @@ select:disabled { opacity: 0.4; cursor: default; }
    sat at the scrollport edge on a short category and 10px lower on a tall one —
    sticky only offsets once the container can scroll — so the top of the page moved
    depending on which category you were looking at. */
-.settings-page { display: flex; align-items: flex-start; gap: 18px; padding-top: 10px; }
+.settings-page { display: flex; align-items: flex-start; gap: var(--space-3xl); padding-top: var(--space-md); }
 /* `display: flex` above is author CSS, which always beats the UA stylesheet's
    `[hidden] { display: none }` regardless of specificity — so toggling the
    `hidden` property from main.ts silently did nothing without this override. */
@@ -356,7 +405,7 @@ select:disabled { opacity: 0.4; cursor: default; }
   position: sticky;
   top: 10px;
   flex: 0 0 200px;
-  padding: 14px;
+  padding: var(--space-xl);
   background: var(--glass-fill);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -367,19 +416,19 @@ select:disabled { opacity: 0.4; cursor: default; }
     0 10px 26px -12px var(--shadow-color);
 }
 
-.settings-back { padding: 6px 10px; font-size: 13px; background: transparent; box-shadow: none; }
-.settings-title { font-size: 22px; font-weight: 700; margin: 14px 4px 12px; }
+.settings-back { padding: var(--space-xs) var(--space-md); font-size: var(--text-secondary); background: transparent; box-shadow: none; }
+.settings-title { font-size: var(--text-title); font-weight: 700; margin: var(--space-xl) var(--space-2xs) var(--space-lg); }
 
-.settings-cats { display: flex; flex-direction: column; gap: 2px; }
+.settings-cats { display: flex; flex-direction: column; gap: var(--space-3xs); }
 .settings-cat {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 9px 12px;
+  padding: var(--space-md) var(--space-lg);
   border-radius: var(--radius-sm);
   background: transparent;
   box-shadow: none;
-  font-size: 14px;
+  font-size: var(--text-secondary);
 }
 .settings-cat[aria-current='true'] { background: var(--glass-fill-strong); box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo); font-weight: 600; }
 
@@ -387,21 +436,21 @@ select:disabled { opacity: 0.4; cursor: default; }
    since exactly one is ever unhidden at a time. The stacked look in the screenshot
    (cards flush, zero gap) was .settings-panel itself never getting a gap of its own,
    so its .settings-card children (and its own -title) had nothing between them. */
-.settings-panels { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; padding-bottom: 18px; }
-.settings-panel { display: flex; flex-direction: column; gap: 18px; }
+.settings-panels { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3xl); padding-bottom: var(--space-3xl); }
+.settings-panel { display: flex; flex-direction: column; gap: var(--space-3xl); }
 /* Same reason .settings-page[hidden] needs this above: author CSS setting `display`
    always wins over the UA stylesheet's `[hidden] { display: none }`, so without this
    override every category's panel would render at once, stacked, the moment
    .settings-panel got a `display` of its own. */
 .settings-panel[hidden] { display: none; }
-/* #models is a bare wrapper whose .warn child carries the shared 14px margin-top.
-   As a .settings-panel child that margin stacks on the panel's own 18px gap, so the
-   download panel sat 32px below the model picker while every other pair sat at 18. */
+/* #models is a bare wrapper whose .warn child carries the shared margin-top.
+   As a .settings-panel child that margin stacks on the panel's own gap, so the
+   download panel sat visibly further below the model picker than every other pair. */
 .settings-panel #models > .warn { margin-top: 0; }
-.settings-panel-title { font-size: 20px; font-weight: 700; margin: 0 0 2px 4px; }
+.settings-panel-title { font-size: var(--text-section); font-weight: 700; margin: 0 0 var(--space-3xs) var(--space-2xs); }
 
 .settings-card {
-  padding: 6px 16px 18px;
+  padding: var(--space-xs) var(--space-2xl) var(--space-3xl);
   background: var(--glass-fill);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -411,13 +460,13 @@ select:disabled { opacity: 0.4; cursor: default; }
     inset 0 -1px 0 var(--line-lo),
     0 10px 26px -12px var(--shadow-color);
 }
-.settings-card-title { font-size: 13px; font-weight: 600; text-transform: uppercase; color: var(--text-dim); margin: 14px 0 0; }
+.settings-card-title { font-size: var(--text-caption); font-weight: 600; text-transform: uppercase; color: var(--text-dim); margin: var(--space-xl) 0 0; }
 
-.settings-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
-.settings-row:first-child { margin-top: 14px; }
+.settings-row { display: flex; align-items: center; gap: var(--space-lg); margin-top: var(--space-xl); }
+.settings-row:first-child { margin-top: var(--space-xl); }
 .settings-row-label { flex: 1; min-width: 0; }
 .settings-row select, .settings-row input:not([type='checkbox']):not([type='radio']) { width: auto; flex: 0 0 auto; min-width: 8em; }
-.settings-hint { margin-top: 8px; }
+.settings-hint { margin-top: var(--space-sm); }
 
 /* ---------- toggle switch (checkbox/radio -> real on/off) ---------------- */
 input.switch {
@@ -451,17 +500,17 @@ input.switch:disabled { opacity: 0.4; cursor: default; }
 /* ---------- segmented control (short, comparable choices) ---------------- */
 .segmented {
   display: inline-flex;
-  padding: 3px;
+  padding: var(--space-3xs);
   border-radius: var(--radius-pill);
   background: var(--track-bg);
   box-shadow: inset 0 1px 3px var(--line-lo);
 }
 .segmented-opt {
   display: block;
-  padding: 6px 16px;
+  padding: var(--space-xs) var(--space-2xl);
   border-radius: var(--radius-pill);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-secondary);
   transition: background 150ms ease, box-shadow 150ms ease;
 }
 .segmented-opt input {
@@ -476,13 +525,13 @@ input.switch:disabled { opacity: 0.4; cursor: default; }
 
 /* ---------- selectable rows with a checkmark (a 3-way choice is not a     */
 /* toggle): transcribe mode, and the ASR model picker built in main.ts ----- */
-.option-rows { margin-top: 10px; }
+.option-rows { margin-top: var(--space-md); }
 .option-row {
   display: block;
   cursor: pointer;
-  padding: 10px 12px;
+  padding: var(--space-md) var(--space-lg);
   border-radius: var(--radius-sm);
-  margin-top: 8px;
+  margin-top: var(--space-sm);
   background: rgba(127, 127, 127, 0.08);
   transition: background 150ms ease;
 }
@@ -494,9 +543,9 @@ input.switch:disabled { opacity: 0.4; cursor: default; }
   opacity: 0;
   pointer-events: none;
 }
-.option-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.option-row-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
 .option-row-check { color: var(--accent); font-weight: 700; opacity: 0; flex: none; }
-.option-row .asr-state, .option-row .hint { margin-top: 4px; }
+.option-row .asr-state, .option-row .hint { margin-top: var(--space-2xs); }
 .option-row:has(input:checked) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .option-row:has(input:checked) .option-row-check { opacity: 1; }
 .option-row:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -530,13 +579,13 @@ input.switch:disabled { opacity: 0.4; cursor: default; }
 /* at a time, centered over the content column.                            */
 /* ======================================================================= */
 
-.onboarding-page { display: flex; justify-content: center; padding-top: 4px; }
+.onboarding-page { display: flex; justify-content: center; padding-top: var(--space-2xs); }
 .onboarding-page[hidden] { display: none; }
 
 .onboarding-card {
   width: 100%;
   max-width: 480px;
-  padding: 22px 24px 20px;
+  padding: var(--space-5xl) var(--space-5xl) var(--space-4xl);
   background: var(--glass-fill);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -547,21 +596,21 @@ input.switch:disabled { opacity: 0.4; cursor: default; }
     0 16px 32px -14px var(--shadow-color);
 }
 
-.onboarding-steps { display: flex; justify-content: center; gap: 6px; margin-bottom: 18px; }
+.onboarding-steps { display: flex; justify-content: center; gap: var(--space-xs); margin-bottom: var(--space-3xl); }
 .onb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--track-bg); }
 .onb-dot.done { background: color-mix(in srgb, var(--accent) 55%, transparent); }
 .onb-dot.active { background: var(--accent); }
 
-.onboarding-body h1 { font-size: 20px; font-weight: 700; margin: 0 0 10px; }
-.onboarding-body p { margin: 0 0 4px; line-height: 1.7; }
-.onboarding-body select { margin-top: 4px; }
+.onboarding-body h1 { font-size: var(--text-title); font-weight: 700; margin: 0 0 var(--space-md); }
+.onboarding-body p { margin: 0 0 var(--space-2xs); line-height: 1.7; }
+.onboarding-body select { margin-top: var(--space-2xs); }
 .onboarding-step[hidden] { display: none; }
 
-.onboarding-nav { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
+.onboarding-nav { display: flex; align-items: center; gap: var(--space-md); margin-top: var(--space-5xl); }
 .onb-skip-hint { flex: 1; min-width: 0; margin-top: 0; }
 .onb-back { background: transparent; box-shadow: none; }
 .onb-next { margin-left: auto; background: var(--accent); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px -4px rgba(10, 132, 255, 0.6); }
-.onb-skip { font-size: 13px; }
+.onb-skip { font-size: var(--text-secondary); }
 
 @media (prefers-reduced-transparency: reduce) {
   .onboarding-card { background: var(--opaque-bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
@@ -572,7 +621,7 @@ input.switch:disabled { opacity: 0.4; cursor: default; }
 }
 
 @media (max-width: 560px) {
-  .onboarding-card { max-width: 100%; padding: 18px 16px 16px; }
+  .onboarding-card { max-width: 100%; padding: var(--space-3xl) var(--space-2xl) var(--space-2xl); }
   .onboarding-nav { flex-wrap: wrap; }
   .onb-skip-hint { order: 3; flex-basis: 100%; }
   .onb-next { margin-left: 0; }
