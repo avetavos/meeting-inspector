@@ -1,7 +1,95 @@
-import type { McpState, ModelStatus, Transcript } from '../preload/index.ts'
+import type { Language, McpState, ModelStatus, Transcript } from '../preload/index.ts'
 import { Recorder, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
+
+/** Every user-visible string in the renderer. English is the default voice; Thai is kept as-is. */
+const en = {
+  titlePlaceholder: 'Meeting title',
+  start: 'Start recording',
+  stop: 'End meeting',
+  meterOthers: 'Others',
+  meterUs: 'You',
+  settingsSummary: 'Settings',
+  mcpLabel: 'Turn on the MCP server so a local AI assistant can pull the transcript to summarize it',
+  permWhy: {
+    screen: 'Needed to record system audio — everyone else in the meeting',
+    microphone: 'Needed to record your microphone',
+  },
+  permNeverAsked: (name: string, why: string) => `Never asked for ${name} access — ${why}`,
+  permDenied: (name: string, why: string) => `${name} access is off — ${why}`,
+  permGrant: (name: string) => `Allow ${name}`,
+  permOpenSettings: 'Open System Settings',
+  trackLost: (track: string) => `${track} track stopped unexpectedly — stop and start again`,
+  startFailed: (msg: string) => `Couldn't start recording: ${msg}`,
+  transcribingRest: "Transcribing what's left…",
+  saved: (dur: string, segments: number) => `Saved ${dur} · ${segments} segment${segments === 1 ? '' : 's'} — `,
+  queueBacklog: (depth: number) => `Falling behind on transcription — ${depth} chunk${depth === 1 ? '' : 's'} queued`,
+  whisperError: (msg: string) => `whisper-server didn't start: ${msg}`,
+  diarizing: "Working out who's speaking…",
+  diarizeError: (msg: string) => `Couldn't split speakers: ${msg} (the transcript is still there)`,
+  modelsMissing: (count: number, size: string) =>
+    `Missing ${count} model file${count === 1 ? '' : 's'} (${size}) — you can record, but can't transcribe yet`,
+  modelsResumable: (size: string) => ` · ${size} already downloaded, will pick up where it left off`,
+  downloadModels: 'Download models',
+  cancel: 'Cancel',
+  downloading: 'Downloading…',
+  downloadCancelled: 'Cancelled — will resume next time',
+  downloadComplete: 'Download complete',
+  speakerSave: 'Save names',
+  speakerSaved: 'Saved',
+  speakerMergeHint: 'If someone got split into two speakers, give them the same name to merge them.',
+  copy: 'Copy',
+  copied: 'Copied',
+  portMoved:
+    "⚠️ Port 8787 was taken, so a different one was used — any config you'd already set up won't connect. Use the lines below to set it up again.",
+  speakerDefaults: { me: 'You', them: 'Others' },
+}
+
+const th: typeof en = {
+  titlePlaceholder: 'ชื่อการประชุม',
+  start: 'เริ่มอัด',
+  stop: 'จบประชุม',
+  meterOthers: 'คนอื่น',
+  meterUs: 'เรา',
+  settingsSummary: 'ตั้งค่า',
+  mcpLabel: 'เปิด MCP server ให้ AI ในเครื่องดึง transcript ไปสรุป',
+  permWhy: {
+    screen: 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)',
+    microphone: 'ต้องมีเพื่ออัดเสียงเรา',
+  },
+  permNeverAsked: (name, why) => `ยังไม่เคยขอสิทธิ์ ${name} — ${why}`,
+  permDenied: (name, why) => `ไม่ได้สิทธิ์ ${name} — ${why}`,
+  permGrant: (name) => `ขอสิทธิ์ ${name}`,
+  permOpenSettings: 'เปิด System Settings',
+  trackLost: (track) => `${track} track หยุดกลางคัน — กดหยุดแล้วเริ่มใหม่`,
+  startFailed: (msg) => `เริ่มอัดไม่ได้: ${msg}`,
+  transcribingRest: 'กำลังถอดเสียงส่วนที่เหลือ…',
+  saved: (dur, segments) => `บันทึกแล้ว ${dur} · ${segments} ท่อน — `,
+  queueBacklog: (depth) => `ถอดเสียงตามไม่ทัน — ค้างอยู่ ${depth} ท่อน`,
+  whisperError: (msg) => `whisper-server ไม่ขึ้น: ${msg}`,
+  diarizing: 'กำลังแยกว่าใครพูด…',
+  diarizeError: (msg) => `แยกคนพูดไม่สำเร็จ: ${msg} (transcript ยังอยู่ครบ)`,
+  modelsMissing: (count, size) => `ยังไม่มีโมเดล ${count} ไฟล์ (${size}) — อัดเสียงได้ แต่ยังถอดเสียงไม่ได้`,
+  modelsResumable: (size) => ` · โหลดค้างไว้ ${size} จะโหลดต่อจากเดิม`,
+  downloadModels: 'โหลดโมเดล',
+  cancel: 'ยกเลิก',
+  downloading: 'กำลังโหลด…',
+  downloadCancelled: 'ยกเลิกแล้ว — ครั้งหน้าจะโหลดต่อจากเดิม',
+  downloadComplete: 'โหลดครบแล้ว',
+  speakerSave: 'บันทึกชื่อ',
+  speakerSaved: 'บันทึกแล้ว',
+  speakerMergeHint: 'ถ้าแยกคนพูดผิด ตั้งชื่อเดียวกันให้สองคน = รวมเป็นคนเดียว',
+  copy: 'คัดลอก',
+  copied: 'คัดลอกแล้ว',
+  portMoved: '⚠️ port 8787 ไม่ว่าง ต้องย้ายไป port อื่น — config ที่ตั้งไว้เดิมจะต่อไม่ติด ใช้บรรทัดข้างล่างตั้งใหม่',
+  speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
+}
+
+const STR: Record<Language, typeof en> = { en, th }
+
+let lang: Language = 'en'
+const t = () => STR[lang]
 
 /** Electron prefixes every rejected invoke with its own plumbing; users do not need it. */
 const reason = (err: unknown) =>
@@ -19,6 +107,13 @@ const modelsEl = $('models')
 const mcpToggle = $<HTMLInputElement>('mcp')
 const mcpStateEl = $('mcpstate')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
+const meterLabels: Record<Track, HTMLElement> = { loopback: $('meter-others-label'), mic: $('meter-us-label') }
+const settingsSummary = $('settings-summary')
+const mcpLabel = $('mcp-label')
+const langRadios: Record<Language, HTMLInputElement> = {
+  en: $<HTMLInputElement>('lang-en'),
+  th: $<HTMLInputElement>('lang-th'),
+}
 
 let recorder: Recorder | null = null
 let ticker: number | undefined
@@ -28,13 +123,13 @@ let ticker: number | undefined
  * replaces the `them` half with real speakers once the recording is complete.
  */
 let segments: Transcript['segments'] = []
-let speakers: Record<string, string> = { me: 'คุณ', them: 'คนอื่น' }
+let speakers: Record<string, string> = { ...en.speakerDefaults }
 let meetingDir: string | null = null
 
-const PERMISSION_LABEL = {
-  screen: ['Screen Recording', 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)'],
-  microphone: ['Microphone', 'ต้องมีเพื่ออัดเสียงเรา'],
-} as const
+const PERMISSION_NAME = { screen: 'Screen Recording', microphone: 'Microphone' } as const
+
+/** Remembered so a language switch re-renders the panel with the same screen/mic scope. */
+let permissionsIncludeScreen = false
 
 /**
  * macOS has no not-determined state for Screen Recording — never-granted reads back
@@ -42,11 +137,13 @@ const PERMISSION_LABEL = {
  * the two; the screen box appears once a capture attempt has actually failed.
  */
 async function showPermissionWarnings(includeScreen = false): Promise<void> {
+  permissionsIncludeScreen = includeScreen
   const status = await window.api.permissions()
   warnings.replaceChildren()
   for (const which of includeScreen ? (['screen', 'microphone'] as const) : (['microphone'] as const)) {
     if (status[which] === 'granted') continue
-    const [name, why] = PERMISSION_LABEL[which]
+    const name = PERMISSION_NAME[which]
+    const why = t().permWhy[which]
 
     // not-determined means macOS has never asked. Sending someone to System Settings
     // then is a dead end — an app only appears in that list once it has asked at
@@ -54,10 +151,10 @@ async function showPermissionWarnings(includeScreen = false): Promise<void> {
     const canAsk = which === 'microphone' && status[which] === 'not-determined'
     const box = document.createElement('div')
     box.className = 'warn'
-    box.textContent = canAsk ? `ยังไม่เคยขอสิทธิ์ ${name} — ${why}` : `ไม่ได้สิทธิ์ ${name} — ${why}`
+    box.textContent = canAsk ? t().permNeverAsked(name, why) : t().permDenied(name, why)
 
     const action = document.createElement('button')
-    action.textContent = canAsk ? `ขอสิทธิ์ ${name}` : 'เปิด System Settings'
+    action.textContent = canAsk ? t().permGrant(name) : t().permOpenSettings
     action.onclick = async () => {
       action.disabled = true
       if (canAsk) await window.api.requestPermissions()
@@ -98,17 +195,15 @@ async function renderModels(note = ''): Promise<void> {
   const total = missing.reduce((sum, m) => sum + m.bytes, 0)
   const resumable = missing.filter((m) => m.resumeFrom > 0)
   box.textContent =
-    `ยังไม่มีโมเดล ${missing.length} ไฟล์ (${size(total)}) — อัดเสียงได้ แต่ยังถอดเสียงไม่ได้` +
-    (resumable.length > 0
-      ? ` · โหลดค้างไว้ ${size(resumable.reduce((s, m) => s + m.resumeFrom, 0))} จะโหลดต่อจากเดิม`
-      : '')
+    t().modelsMissing(missing.length, size(total)) +
+    (resumable.length > 0 ? t().modelsResumable(size(resumable.reduce((s, m) => s + m.resumeFrom, 0))) : '')
 
   for (const spec of missing) box.append(modelRow(spec))
 
   const button = document.createElement('button')
-  button.textContent = 'โหลดโมเดล'
+  button.textContent = t().downloadModels
   const cancel = document.createElement('button')
-  cancel.textContent = 'ยกเลิก'
+  cancel.textContent = t().cancel
   cancel.hidden = true
   const status = document.createElement('div')
   status.className = 'hint'
@@ -117,12 +212,10 @@ async function renderModels(note = ''): Promise<void> {
   button.onclick = async () => {
     button.hidden = true
     cancel.hidden = false
-    status.textContent = 'กำลังโหลด…'
+    status.textContent = t().downloading
     let outcome: string
     try {
-      outcome = (await window.api.downloadModels()).cancelled
-        ? 'ยกเลิกแล้ว — ครั้งหน้าจะโหลดต่อจากเดิม'
-        : 'โหลดครบแล้ว'
+      outcome = (await window.api.downloadModels()).cancelled ? t().downloadCancelled : t().downloadComplete
     } catch (err) {
       outcome = reason(err)
     }
@@ -199,7 +292,7 @@ function renderSpeakerPanel(): void {
   }
 
   const save = document.createElement('button')
-  save.textContent = 'บันทึกชื่อ'
+  save.textContent = t().speakerSave
   save.onclick = async () => {
     if (!meetingDir) return
     save.disabled = true
@@ -208,12 +301,12 @@ function renderSpeakerPanel(): void {
     )
     speakers = (await window.api.renameSpeakers(meetingDir, named)).speakers
     save.disabled = false
-    save.textContent = 'บันทึกแล้ว'
+    save.textContent = t().speakerSaved
   }
 
   const hint = document.createElement('div')
   hint.className = 'hint'
-  hint.textContent = 'ถ้าแยกคนพูดผิด ตั้งชื่อเดียวกันให้สองคน = รวมเป็นคนเดียว'
+  hint.textContent = t().speakerMergeHint
   speakerPanel.append(save, hint)
 }
 
@@ -225,11 +318,11 @@ function copyRow(label: string, value: string): HTMLElement {
   const el = document.createElement('code')
   el.textContent = value
   const copy = document.createElement('button')
-  copy.textContent = 'คัดลอก'
+  copy.textContent = t().copy
   copy.onclick = async () => {
     await navigator.clipboard.writeText(value)
-    copy.textContent = 'คัดลอกแล้ว'
-    setTimeout(() => (copy.textContent = 'คัดลอก'), 1500)
+    copy.textContent = t().copied
+    setTimeout(() => (copy.textContent = t().copy), 1500)
   }
   row.append(name, el, copy)
   return row
@@ -240,7 +333,7 @@ function showMcpState(state: McpState): void {
   mcpStateEl.replaceChildren()
   if (state.portMoved) {
     const moved = document.createElement('div')
-    moved.textContent = '⚠️ port 8787 ไม่ว่าง ต้องย้ายไป port อื่น — config ที่ตั้งไว้เดิมจะต่อไม่ติด ใช้บรรทัดข้างล่างตั้งใหม่'
+    moved.textContent = t().portMoved
     mcpStateEl.append(moved)
   }
   if (!state.url || !state.token) return
@@ -274,7 +367,7 @@ async function start(): Promise<void> {
   speakerPanel.replaceChildren()
   transcript.replaceChildren()
   segments = []
-  speakers = { me: 'คุณ', them: 'คนอื่น' }
+  speakers = { ...t().speakerDefaults }
   meetingDir = null
   await window.api.requestPermissions()
   toggle.disabled = true
@@ -282,13 +375,13 @@ async function start(): Promise<void> {
     const started = await Recorder.start(title.value, {
       onLevel: setLevel,
       onTrackLost: (track) => {
-        warnings.textContent = `${track} track หยุดกลางคัน — กดหยุดแล้วเริ่มใหม่`
+        warnings.textContent = t().trackLost(track)
       },
     })
     recorder = started.recorder
   } catch (err) {
     await showPermissionWarnings(true)
-    warnings.prepend(`เริ่มอัดไม่ได้: ${reason(err)}`)
+    warnings.prepend(t().startFailed(reason(err)))
     return
   } finally {
     toggle.disabled = false
@@ -296,7 +389,7 @@ async function start(): Promise<void> {
 
   const t0 = Date.now()
   ticker = window.setInterval(() => (elapsed.textContent = fmt((Date.now() - t0) / 1000)), 500)
-  toggle.textContent = 'จบประชุม'
+  toggle.textContent = t().stop
   title.disabled = true
   warnings.replaceChildren()
   document.body.classList.add('recording')
@@ -309,11 +402,11 @@ async function stop(): Promise<void> {
   toggle.disabled = true
   // stop() only resolves once the queued tail chunks have come back and the
   // transcript is on disk, which can take a chunk or two.
-  done.textContent = 'กำลังถอดเสียงส่วนที่เหลือ…'
+  done.textContent = t().transcribingRest
   const result = await r?.stop()
   document.body.classList.remove('recording')
   toggle.disabled = false
-  toggle.textContent = 'เริ่มอัด'
+  toggle.textContent = t().start
   title.disabled = false
   elapsed.textContent = ''
   for (const track of ['loopback', 'mic'] as const) setLevel(track, 0)
@@ -323,7 +416,7 @@ async function stop(): Promise<void> {
   }
 
   meetingDir = result.dir
-  done.textContent = `บันทึกแล้ว ${fmt(result.durationSec)} · ${result.segments} ท่อน — `
+  done.textContent = t().saved(fmt(result.durationSec), result.segments)
   const open = document.createElement('a')
   open.href = '#'
   open.textContent = result.id
@@ -338,14 +431,14 @@ window.api.onSegments((track, incoming) => {
 })
 window.api.onQueue((depth) => {
   // Nothing is dropped; a deep queue just means the transcript lags further behind.
-  queue.textContent = depth > 3 ? `ถอดเสียงตามไม่ทัน — ค้างอยู่ ${depth} ท่อน` : ''
+  queue.textContent = depth > 3 ? t().queueBacklog(depth) : ''
 })
 window.api.onTranscriptError((message) => {
-  warnings.textContent = `whisper-server ไม่ขึ้น: ${message}`
+  warnings.textContent = t().whisperError(message)
 })
 
 window.api.onDiarizing(() => {
-  queue.textContent = 'กำลังแยกว่าใครพูด…'
+  queue.textContent = t().diarizing
 })
 window.api.onDiarized((dir, updated) => {
   queue.textContent = ''
@@ -357,7 +450,7 @@ window.api.onDiarized((dir, updated) => {
 })
 window.api.onDiarizeError((message) => {
   queue.textContent = ''
-  warnings.textContent = `แยกคนพูดไม่สำเร็จ: ${message} (transcript ยังอยู่ครบ)`
+  warnings.textContent = t().diarizeError(message)
 })
 
 window.api.onModelProgress(({ file, received, total }) => {
@@ -379,7 +472,32 @@ mcpToggle.onchange = async () => {
   }
 }
 
+/** Applies the given language to every static label and re-renders every dynamic panel. */
+function applyLanguage(l: Language): void {
+  lang = l
+  document.documentElement.lang = l
+  langRadios.en.checked = l === 'en'
+  langRadios.th.checked = l === 'th'
+
+  title.placeholder = t().titlePlaceholder
+  toggle.textContent = recorder ? t().stop : t().start
+  meterLabels.loopback.textContent = t().meterOthers
+  meterLabels.mic.textContent = t().meterUs
+  settingsSummary.textContent = t().settingsSummary
+  mcpLabel.textContent = t().mcpLabel
+
+  void showPermissionWarnings(permissionsIncludeScreen)
+  void renderModels()
+  renderSpeakerPanel()
+  void window.api.mcpState().then(showMcpState)
+}
+
+for (const [code, radio] of Object.entries(langRadios) as [Language, HTMLInputElement][]) {
+  radio.onchange = async () => {
+    if (!radio.checked) return
+    applyLanguage((await window.api.setLanguage(code)).language)
+  }
+}
+
 toggle.onclick = () => void (recorder ? stop() : start())
-void showPermissionWarnings()
-void renderModels()
-void window.api.mcpState().then(showMcpState)
+void window.api.getSettings().then((settings) => applyLanguage(settings.language))

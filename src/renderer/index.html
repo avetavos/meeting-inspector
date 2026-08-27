@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="th">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob:; script-src 'self' blob:; style-src 'self' 'unsafe-inline'" />
@@ -254,13 +254,13 @@
       <main id="content" class="content">
         <div id="capsule" class="capsule">
           <div class="capsule-top">
-            <input id="title" placeholder="ชื่อการประชุม" autocomplete="off" />
-            <button id="toggle">เริ่มอัด</button>
+            <input id="title" placeholder="Meeting title" autocomplete="off" />
+            <button id="toggle">Start recording</button>
             <span id="elapsed"></span>
           </div>
           <div class="meters">
-            <div class="meter-channel"><span class="label">คนอื่น</span><span class="meter"><i id="m-loopback"></i></span></div>
-            <div class="meter-channel"><span class="label">เรา</span><span class="meter"><i id="m-mic"></i></span></div>
+            <div class="meter-channel"><span class="label" id="meter-others-label">Others</span><span class="meter"><i id="m-loopback"></i></span></div>
+            <div class="meter-channel"><span class="label" id="meter-us-label">You</span><span class="meter"><i id="m-mic"></i></span></div>
           </div>
         </div>
 
@@ -273,9 +273,13 @@
           <div id="speakers"></div>
           <div id="transcript"></div>
           <details>
-            <summary>ตั้งค่า</summary>
+            <summary id="settings-summary">Settings</summary>
             <div class="row">
-              <label><input type="checkbox" id="mcp" /> เปิด MCP server ให้ AI ในเครื่องดึง transcript ไปสรุป</label>
+              <label><input type="radio" name="lang" id="lang-en" /> English</label>
+              <label><input type="radio" name="lang" id="lang-th" /> ไทย</label>
+            </div>
+            <div class="row">
+              <label><input type="checkbox" id="mcp" /> <span id="mcp-label">Turn on the MCP server so a local AI assistant can pull the transcript to summarize it</span></label>
             </div>
             <div id="mcpstate"></div>
           </details>
