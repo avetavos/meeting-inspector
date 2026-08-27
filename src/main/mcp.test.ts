@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -26,8 +26,6 @@ before(async () => {
       { t0: 25.0, t1: 30.0, speaker: 'SPEAKER_00', text: 'อย่าลืม rollback plan' },
     ],
   })
-  await writeFile(join(sprint, 'summary.md'), '# สรุป\n\ndeploy backend ขึ้น staging\n')
-
   const retro = join(root, '2026-08-20-1000-retro')
   await mkdir(retro, { recursive: true })
   await writeTranscript(retro, {
@@ -98,17 +96,17 @@ test('mcp: handshake and tool list', async () => {
   const list = (await rpc('tools/list')).body?.result as { tools: { name: string }[] }
   assert.deepEqual(
     list.tools.map((t) => t.name).sort(),
-    ['get_summary', 'get_transcript', 'list_meetings', 'search_transcripts'],
+    ['get_transcript', 'list_meetings', 'search_transcripts'],
   )
 })
 
-test('mcp: list_meetings is newest first and says whether a summary exists', async () => {
+test('mcp: list_meetings is newest first', async () => {
   const meetings = JSON.parse((await callTool('list_meetings')).content[0]!.text)
   assert.deepEqual(
-    meetings.map((m: { id: string; title: string; hasSummary: boolean }) => [m.id, m.title, m.hasSummary]),
+    meetings.map((m: { id: string; title: string }) => [m.id, m.title]),
     [
-      ['2026-08-27-1400-sprint-planning', 'sprint-planning', true],
-      ['2026-08-20-1000-retro', 'retro', false],
+      ['2026-08-27-1400-sprint-planning', 'sprint-planning'],
+      ['2026-08-20-1000-retro', 'retro'],
     ],
   )
 })
@@ -118,15 +116,6 @@ test('mcp: get_transcript resolves speakers to the names the user typed', async 
   assert.equal(t.segments.length, 3)
   assert.equal(t.segments[0].speakerName, 'พี่โจ้')
   assert.equal(t.segments[1].speakerName, 'ผม')
-})
-
-test('mcp: get_summary returns markdown, and says so when there is none', async () => {
-  const summary = await callTool('get_summary', { id: '2026-08-27-1400-sprint-planning' })
-  assert.match(summary.content[0]!.text, /deploy backend/)
-
-  const missing = await callTool('get_summary', { id: '2026-08-20-1000-retro' })
-  assert.equal(missing.isError, true)
-  assert.match(missing.content[0]!.text, /ยังไม่ได้สรุป/)
 })
 
 test('mcp: search spans meetings and carries context', async () => {

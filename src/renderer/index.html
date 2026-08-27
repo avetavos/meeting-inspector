@@ -16,42 +16,39 @@
       .meter { flex: 1; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
       .meter > i { display: block; height: 100%; width: 0; background: currentColor; transition: width 80ms linear; }
       .label { width: 88px; opacity: .7; font-size: 13px; }
+      .warn { margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+      .warn button { padding: 4px 10px; font-size: 13px; margin-top: 8px; }
+      .hint { font-size: 13px; opacity: .7; }
+      #elapsed { font-variant-numeric: tabular-nums; opacity: .7; }
+      #done { margin-top: 16px; font-size: 14px; }
+      #queue { margin-top: 12px; font-size: 13px; opacity: .8; }
+
       #models { margin-bottom: 20px; }
       #models .warn { margin-top: 0; }
       #models .file { display: grid; grid-template-columns: 1fr 88px; gap: 8px 12px; align-items: center; margin-top: 10px; font-size: 13px; }
       #models .bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
       #models .bar > i { display: block; height: 100%; width: 0; background: currentColor; }
       #models .size { text-align: right; opacity: .6; font-variant-numeric: tabular-nums; }
-      .warn { margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
-      .warn button { padding: 4px 10px; font-size: 13px; margin-top: 8px; }
-      #elapsed { font-variant-numeric: tabular-nums; opacity: .7; }
-      #done { margin-top: 16px; font-size: 14px; }
-      #queue { margin-top: 12px; font-size: 13px; opacity: .8; }
+
       #speakers { margin-top: 16px; }
       #speakers .who { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
       #speakers .who code { font-size: 12px; opacity: .5; width: 90px; }
       #speakers input { flex: 1; }
-      #speakers .hint { font-size: 13px; opacity: .7; margin-top: 10px; }
-      #summarybar { margin-top: 16px; }
-      #summary { margin-top: 12px; white-space: pre-wrap; font: inherit; max-height: 40vh; overflow-y: auto; }
-      #summary:empty { display: none; }
-      details { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 14px; }
-      details summary { cursor: pointer; opacity: .7; }
-      details .row { margin-top: 12px; }
-      #keystate { font-size: 13px; opacity: .7; margin-top: 8px; }
-      #mcpstate, #tunnelstate, #syncstate { font-size: 13px; opacity: .7; margin-top: 8px; }
-      #mcpstate code, #tunnelstate code { user-select: all; word-break: break-all; }
-      .copyrow { margin-top: 6px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
-      .copyrow button { padding: 2px 8px; font-size: 12px; }
-      #tunnelstate.danger { opacity: 1; }
-      details label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
-      select { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }
-      details .label { width: 96px; }
+      #speakers .hint { margin-top: 10px; }
+
       #transcript { margin-top: 16px; max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--line); }
       #transcript p { margin: 12px 0 0; display: grid; grid-template-columns: 52px 64px 1fr; gap: 10px; }
       #transcript .t { opacity: .45; font-variant-numeric: tabular-nums; font-size: 13px; }
       #transcript .who { opacity: .7; font-size: 13px; }
       #transcript .me .who { opacity: 1; font-weight: 600; }
+
+      details { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 14px; }
+      details summary { cursor: pointer; opacity: .7; }
+      details label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+      #mcpstate { font-size: 13px; opacity: .7; margin-top: 8px; }
+      #mcpstate code { user-select: all; word-break: break-all; }
+      .copyrow { margin-top: 6px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
+      .copyrow button { padding: 2px 8px; font-size: 12px; }
       a { color: inherit; }
     </style>
   </head>
@@ -70,33 +67,12 @@
     <div id="done"></div>
     <div id="speakers"></div>
     <div id="transcript"></div>
-    <div class="row" id="summarybar"></div>
-    <pre id="summary"></pre>
     <details>
       <summary>ตั้งค่า</summary>
-      <div class="row"><span class="label">ผู้ให้บริการ</span><select id="provider"></select></div>
-      <div class="row"><span class="label">Model</span><input id="model" autocomplete="off" /></div>
       <div class="row">
-        <span class="label">API key</span>
-        <input id="apikey" type="password" autocomplete="off" />
-        <button id="savekey">บันทึก</button>
-      </div>
-      <div id="keystate"></div>
-      <div class="row" style="margin-top:20px">
-        <label><input type="checkbox" id="mcp" /> เปิด MCP server ให้ AI ตัวอื่นดึง transcript</label>
+        <label><input type="checkbox" id="mcp" /> เปิด MCP server ให้ AI ในเครื่องดึง transcript ไปสรุป</label>
       </div>
       <div id="mcpstate"></div>
-      <div class="row">
-        <label><input type="checkbox" id="tunnel" /> เปิด tunnel สำหรับ ChatGPT / Grok</label>
-      </div>
-      <div id="tunnelstate"></div>
-      <div class="row" style="margin-top:20px"><span class="label">Worker URL</span><input id="workerurl" placeholder="https://meeting-inspector.xxx.workers.dev" autocomplete="off" /></div>
-      <div class="row">
-        <span class="label">Sync token</span>
-        <input id="synctoken" type="password" placeholder="SYNC_TOKEN ของ Worker" autocomplete="off" />
-        <button id="savesync">บันทึก</button>
-      </div>
-      <div id="syncstate"></div>
     </details>
     <script type="module" src="./main.ts"></script>
   </body>

@@ -9,28 +9,23 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-transform-types --test \"src/**/*.test.ts\"",
     "asr:read": "cat spike/asr-accuracy/script.th.txt",
     "asr:score": "node --experimental-transform-types spike/asr-accuracy/score.mjs",
     "dist": "npm run build:whisper && electron-vite build && electron-builder",
     "icon": "electron build/icon.mjs",
-    "build:whisper": "node build/build-whisper.mjs",
-    "worker:dev": "wrangler dev --config worker/wrangler.jsonc",
-    "worker:deploy": "wrangler deploy --config worker/wrangler.jsonc"
+    "build:whisper": "node build/build-whisper.mjs"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260827.1",
     "@types/node": "^24",
     "electron": "38.8.6",
     "electron-builder": "^26.15.3",
     "electron-vite": "^4",
     "typescript": "^5",
-    "vite": "^7",
-    "wrangler": "^4.126.0"
+    "vite": "^7"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.121.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "hono": "^4.13.5",

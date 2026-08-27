@@ -1,30 +1,27 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { ModelStatus, Progress } from '../main/download.ts'
+import type { Settings } from '../main/settings.ts'
+import type { Transcript } from '../shared/meetings.ts'
 
-export type { Transcript } from '../main/store.ts'
-export type { Cost, Provider, ProviderInfo } from '../main/summarize.ts'
+export type { Transcript } from '../shared/meetings.ts'
 export type { Settings } from '../main/settings.ts'
 export type { ModelStatus, Progress } from '../main/download.ts'
+
+export type Track = 'loopback' | 'mic'
+export type Segment = { t0: number; t1: number; text: string }
 export type McpState = {
   enabled: boolean
   url: string | null
   token: string | null
-  tunnelOn: boolean
-  tunnelUrl: string | null
   portMoved: boolean
 }
-import type { Transcript } from '../main/store.ts'
-import type { Settings } from '../main/settings.ts'
-import type { ModelStatus, Progress } from '../main/download.ts'
-import type { Cost, Provider, ProviderInfo } from '../main/summarize.ts'
 
-export type Track = 'loopback' | 'mic'
-export type Segment = { t0: number; t1: number; text: string }
-
-/** API keys stay in main (spec §5) — the renderer only ever gets these calls. */
+/** Everything here stays on this machine — the app makes no outbound calls of its own. */
 const api = {
   permissions: () => ipcRenderer.invoke('perm:check'),
   requestPermissions: () => ipcRenderer.invoke('perm:request'),
   openPrivacySettings: (which: 'screen' | 'microphone') => ipcRenderer.invoke('perm:open', which),
+
   start: (title: string) => ipcRenderer.invoke('session:start', title),
   pcm: (track: Track, pcm: ArrayBuffer) => ipcRenderer.invoke('session:pcm', track, pcm),
   stop: () => ipcRenderer.invoke('session:stop'),
@@ -33,31 +30,9 @@ const api = {
   onSegments: (fn: (track: Track, segments: Segment[]) => void) =>
     ipcRenderer.on('transcript:segments', (_e, track: Track, segments: Segment[]) => fn(track, segments)),
   /** Chunks waiting on ASR. Spec §7: nothing is dropped, the UI just warns past 3. */
-  onQueue: (fn: (depth: number) => void) =>
-    ipcRenderer.on('transcript:queue', (_e, depth: number) => fn(depth)),
+  onQueue: (fn: (depth: number) => void) => ipcRenderer.on('transcript:queue', (_e, depth: number) => fn(depth)),
   onTranscriptError: (fn: (message: string) => void) =>
     ipcRenderer.on('transcript:error', (_e, message: string) => fn(message)),
-
-  setKey: (provider: string, key: string): Promise<void> => ipcRenderer.invoke('keys:set', provider, key),
-  hasKey: (provider: string): Promise<boolean> => ipcRenderer.invoke('keys:has', provider),
-  modelStatus: (): Promise<ModelStatus[]> => ipcRenderer.invoke('models:status'),
-  downloadModels: (): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('models:download'),
-  cancelModels: (): Promise<void> => ipcRenderer.invoke('models:cancel'),
-  onModelProgress: (fn: (progress: Progress) => void) =>
-    ipcRenderer.on('models:progress', (_e, p: Progress) => fn(p)),
-
-  syncToCloud: (dir: string): Promise<{ id: string; segments: number }> => ipcRenderer.invoke('cloud:sync', dir),
-
-  mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
-  toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),
-  toggleTunnel: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:tunnel', on),
-  providers: (): Promise<Record<Provider, ProviderInfo>> => ipcRenderer.invoke('summary:providers'),
-  getSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
-  setSettings: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke('settings:set', patch),
-  estimateSummary: (dir: string): Promise<Cost | null> => ipcRenderer.invoke('summary:estimate', dir),
-  runSummary: (dir: string): Promise<Cost> => ipcRenderer.invoke('summary:run', dir),
-  onSummaryDelta: (fn: (text: string) => void) =>
-    ipcRenderer.on('summary:delta', (_e, text: string) => fn(text)),
 
   renameSpeakers: (dir: string, speakers: Record<string, string>): Promise<Transcript> =>
     ipcRenderer.invoke('meeting:rename', dir, speakers),
@@ -66,6 +41,15 @@ const api = {
     ipcRenderer.on('meeting:transcript', (_e, dir: string, t: Transcript) => fn(dir, t)),
   onDiarizeError: (fn: (message: string) => void) =>
     ipcRenderer.on('meeting:diarize-error', (_e, message: string) => fn(message)),
+
+  modelStatus: (): Promise<ModelStatus[]> => ipcRenderer.invoke('models:status'),
+  downloadModels: (): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('models:download'),
+  cancelModels: (): Promise<void> => ipcRenderer.invoke('models:cancel'),
+  onModelProgress: (fn: (progress: Progress) => void) =>
+    ipcRenderer.on('models:progress', (_e, p: Progress) => fn(p)),
+
+  mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
+  toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),
 }
 
 export type Api = typeof api

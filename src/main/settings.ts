@@ -1,20 +1,12 @@
 import { app } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Provider } from './summarize.ts'
-
 export type Settings = {
-  provider: Provider
-  models: Partial<Record<Provider, string>>
-  /** On by default: leaving the app open is how Claude Desktop reaches it. */
+  /** On by default: leaving the app open is how a connected assistant reaches it. */
   mcp: boolean
-  /** Off by default: on means meeting transcripts are reachable from the internet. */
-  tunnel: boolean
-  /** Cloudflare Worker base URL. Empty until the user deploys one. */
-  workerUrl: string
 }
 
-const DEFAULTS: Settings = { provider: 'claude', models: {}, mcp: true, tunnel: false, workerUrl: '' }
+const DEFAULTS: Settings = { mcp: true }
 const FILE = () => join(app.getPath('userData'), 'settings.json')
 
 export async function getSettings(): Promise<Settings> {

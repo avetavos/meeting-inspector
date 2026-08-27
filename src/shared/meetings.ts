@@ -17,18 +17,16 @@ export type MeetingMeta = {
   title: string
   startedAt: string
   durationSec: number
-  hasSummary: boolean
 }
 
 /**
- * The four tools are identical whether the meetings sit on the local disk or in R2;
- * only the reading differs. Keeping one implementation means the two deployments
- * cannot answer the same question differently.
+ * Reading side of a meeting archive. Summarizing is not in here on purpose: the app
+ * is offline, and whichever assistant is connected does the summarizing from the
+ * transcript it pulls through these tools.
  */
 export interface MeetingStore {
   list(): Promise<MeetingMeta[]>
   transcript(id: string): Promise<Transcript | null>
-  summary(id: string): Promise<string | null>
 }
 
 /** The id is `<date>-<time>-<title>`; the title is whatever follows the stamp. */
@@ -68,21 +66,6 @@ export function registerTools(server: McpServer, store: MeetingStore): void {
         ...transcript,
         segments: transcript.segments.map((s) => ({ ...s, speakerName: who(transcript, s.speaker) })),
       })
-    },
-  )
-
-  server.registerTool(
-    'get_summary',
-    {
-      title: 'Get summary',
-      description: 'สรุปของการประชุมหนึ่ง (markdown)',
-      inputSchema: z.object({ id: z.string() }),
-    },
-    async ({ id }) => {
-      if (!(await store.transcript(id))) throw new Error(`ไม่พบการประชุม ${id}`)
-      const summary = await store.summary(id)
-      if (summary === null) throw new Error(`การประชุม ${id} ยังไม่ได้สรุป`)
-      return { content: [{ type: 'text' as const, text: summary }] }
     },
   )
 

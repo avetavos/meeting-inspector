@@ -1,14 +1,12 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
 import { randomBytes } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
 import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
 import { MODELS, downloadModel, modelStatus } from './download.ts'
-import { getKey, hasKey, setKey } from './keys.ts'
-import { PREFERRED_PORT, startMcp, startTunnel, type McpHandle } from './mcp.ts'
-import { getSettings, setSettings, type Settings } from './settings.ts'
-import { PROVIDERS, estimate, modelFor, summarize } from './summarize.ts'
+import { getKey, setKey } from './keys.ts'
+import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
+import { getSettings, setSettings } from './settings.ts'
 import { NOTES_ROOT, createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
@@ -91,7 +89,6 @@ async function enqueue(wc: WebContents, track: Track, chunk: Chunk, retry = true
 let downloads: AbortController | null = null
 
 let mcp: McpHandle | null = null
-let tunnel: { url: string; stop: () => void } | null = null
 
 /** Generated once and kept with the API keys — it is the only thing guarding the transcripts. */
 async function mcpToken(): Promise<string> {
@@ -106,23 +103,15 @@ async function restartMcp(): Promise<void> {
   await mcp?.close()
   mcp = null
   if (!(await getSettings()).mcp) return
-  mcp = await startMcp({
-    token: await mcpToken(),
-    root: NOTES_ROOT,
-    // A tunnelled request arrives with the tunnel's Host header, so it has to be
-    // allowed explicitly; the loopback default exists to block DNS rebinding.
-    allowHosts: tunnel ? [new URL(tunnel.url).hostname] : [],
-  })
+  mcp = await startMcp({ token: await mcpToken(), root: NOTES_ROOT })
 }
 
 async function mcpState() {
-  const { mcp: enabled, tunnel: tunnelOn } = await getSettings()
+  const { mcp: enabled } = await getSettings()
   return {
     enabled,
     url: mcp?.url ?? null,
     token: mcp ? await mcpToken() : null,
-    tunnelOn,
-    tunnelUrl: tunnel?.url ?? null,
     // Anything else means the saved client configs are pointing at the wrong place.
     portMoved: mcp !== null && mcp.port !== PREFERRED_PORT,
   }
@@ -233,112 +222,12 @@ function registerIpc(): void {
     return updated
   })
 
-  ipcMain.handle('keys:set', (_e, provider: string, key: string) => setKey(provider, key.trim()))
-  ipcMain.handle('keys:has', (_e, provider: string) => hasKey(provider))
-
-  // Sent over IPC rather than imported by the renderer: importing it would drag the
-  // Anthropic SDK into the sandboxed preload bundle.
-  ipcMain.handle('models:status', () => modelStatus())
-  ipcMain.handle('models:cancel', () => downloads?.abort())
-
-  // Downloads run one at a time so the progress the user sees matches what is
-  // actually moving, and a failure names the file that failed.
-  ipcMain.handle('models:download', async (e) => {
-    if (downloads) throw new Error('กำลังโหลดอยู่แล้ว')
-    downloads = new AbortController()
-    try {
-      for (const spec of MODELS) {
-        if ((await modelStatus()).find((m) => m.file === spec.file)?.present) continue
-        try {
-          await downloadModel(spec, (p) => e.sender.send('models:progress', p), downloads.signal)
-        } catch (err) {
-          // Whatever went wrong, the bytes already written are a valid prefix — they
-          // stay on disk so the next attempt resumes rather than restarts. Cancelling
-          // is a choice, not a failure, so it comes back as a result.
-          if (downloads.signal.aborted) return { cancelled: true }
-          throw err
-        }
-      }
-      return { cancelled: false }
-    } finally {
-      downloads = null
-    }
-  })
-
   ipcMain.handle('mcp:state', () => mcpState())
 
   ipcMain.handle('mcp:toggle', async (_e, on: boolean) => {
-    await setSettings({ mcp: on, ...(on ? {} : { tunnel: false }) })
-    if (!on) {
-      tunnel?.stop()
-      tunnel = null
-    }
+    await setSettings({ mcp: on })
     await restartMcp()
     return mcpState()
-  })
-
-  // Flipping this publishes the transcripts (spec §10) — it stays a deliberate press,
-  // never something that follows from turning the server on.
-  ipcMain.handle('mcp:tunnel', async (_e, on: boolean) => {
-    if (on && !mcp) throw new Error('เปิด MCP server ก่อน')
-    tunnel?.stop()
-    tunnel = on ? await startTunnel(mcp!.port) : null
-    await setSettings({ tunnel: on })
-    await restartMcp()
-    return mcpState()
-  })
-
-  /**
-   * One meeting at a time, on an explicit press. Auto-uploading everything would
-   * quietly undo spec §10's point that putting transcripts online is a decision.
-   */
-  ipcMain.handle('cloud:sync', async (_e, dir: string) => {
-    const { workerUrl } = await getSettings()
-    const token = await getKey('worker-sync')
-    if (!workerUrl || !token) throw new Error('ยังไม่ได้ตั้ง Worker URL หรือ sync token')
-
-    const transcript = await readTranscript(dir)
-    const summary = await readFile(join(dir, 'summary.md'), 'utf8').catch(() => undefined)
-    const res = await fetch(`${workerUrl.replace(/\/+$/, '')}/sync/${transcript.id}`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ transcript, summary }),
-    })
-    if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`)
-    return (await res.json()) as { id: string; segments: number }
-  })
-
-  ipcMain.handle('summary:providers', () => PROVIDERS)
-  ipcMain.handle('settings:get', () => getSettings())
-  ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => setSettings(patch))
-
-  // transcript.md already carries the speaker names the user typed, so it is what the
-  // model should read — no second renderer of the same data.
-  const readForSummary = async (dir: string) => {
-    const { provider, models } = await getSettings()
-    const key = await getKey(provider)
-    if (!key) throw new Error(`ยังไม่ได้ใส่ API key ของ ${provider}`)
-    return {
-      provider,
-      key,
-      model: modelFor(provider, models[provider]),
-      transcript: await readFile(join(dir, 'transcript.md'), 'utf8'),
-    }
-  }
-
-  ipcMain.handle('summary:estimate', async (_e, dir: string) => {
-    const { provider, key, model, transcript } = await readForSummary(dir)
-    // Only Claude can price ahead of the run; the others report after.
-    return provider === 'claude' ? estimate(transcript, key, model) : null
-  })
-
-  ipcMain.handle('summary:run', async (e, dir: string) => {
-    const { provider, key, model, transcript } = await readForSummary(dir)
-    const { text, cost } = await summarize(provider, model, transcript, key, (delta) =>
-      e.sender.send('summary:delta', delta),
-    )
-    await writeFile(join(dir, 'summary.md'), text.endsWith('\n') ? text : `${text}\n`)
-    return cost
   })
 
   ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(dir))
@@ -370,7 +259,6 @@ app.whenReady().then(() => {
 // quit, so we save what already came back rather than making them wait for the tail.
 app.on('before-quit', async (e) => {
   void whisper?.then((w) => w.stop()).catch(() => {})
-  tunnel?.stop()
   void mcp?.close()
   if (!current || current.stopping) return
   e.preventDefault()
