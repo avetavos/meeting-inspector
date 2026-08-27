@@ -41,6 +41,26 @@ export type Transcript = {
    * that fallback is applied, explicitly, to the current setting.
    */
   language?: MeetingLanguage
+  /**
+   * Which of `speakers`' names came from voices.ts's cross-meeting recognition, and
+   * what that voice was called at the moment it was recognised — set by diarizeMeeting
+   * (index.ts) alongside `speakers` itself, for every speaker key `identify()` matched
+   * this diarize pass. Recomputed from scratch on every diarize pass, never merged with
+   * a previous value: a raw `SPEAKER_00` key means something different every run (a
+   * fresh clustering, per diarize.ts/voices.ts's own doc comments), so carrying an old
+   * entry forward under a key that now means someone else would be actively wrong.
+   *
+   * Additive and optional so older transcripts stay readable as-is — absent here reads
+   * exactly as it always has, `speakers`/`segments` alone. The `name` half is a fallback
+   * for exactly one case: this transcript's `speakerVoices` entry outlives the voice it
+   * points at (voices.ts's `forget`) — the id then resolves to nothing, and this is the
+   * last known name to fall back to before speakerNames()'s own fallbacks.
+   *
+   * Not consumed anywhere in the renderer yet — resolving display through this field
+   * (current name for the id, else this stored name, else the existing fallbacks) is a
+   * separate, later task.
+   */
+  speakerVoices?: Record<string, { voiceId: string; name: string }>
 }
 
 export type MeetingMeta = {

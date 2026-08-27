@@ -38,12 +38,14 @@
             <div id="meetings">
               <span id="meetings-heading" class="label"></span>
               <div id="meetings-list"></div>
-              <div class="row">
-                <button id="meetings-select-all"></button>
-                <button id="meetings-select-none"></button>
-                <button id="meetings-transcribe"></button>
-                <button id="meetings-stop" hidden></button>
+              <button id="meetings-view-all" class="settings-back" hidden></button>
+              <div class="row wrap-row">
+                <button id="meetings-select-all" class="meetings-action-btn"></button>
+                <button id="meetings-select-none" class="meetings-action-btn"></button>
+                <button id="meetings-transcribe" class="meetings-action-btn"></button>
+                <button id="meetings-stop" class="meetings-action-btn" hidden></button>
               </div>
+              <div id="meetings-retranscribe-hint" class="hint"></div>
               <div id="meetings-progress" class="hint"></div>
             </div>
           </div>
@@ -278,6 +280,37 @@
               <button id="onb-next" class="onb-next"></button>
             </div>
           </div>
+        </div>
+
+        <div id="meeting-detail-page" class="meeting-detail-page" hidden>
+          <div class="view-header">
+            <button id="detail-back" class="settings-back">
+              <span aria-hidden="true">‹</span> <span id="detail-back-label"></span>
+            </button>
+            <h1 id="detail-title" class="settings-title"></h1>
+          </div>
+          <div id="detail-meta" class="hint"></div>
+          <button id="detail-reveal" class="settings-back"></button>
+          <div id="detail-speakers"></div>
+          <div id="detail-transcript"></div>
+        </div>
+
+        <div id="all-meetings-page" class="all-meetings-page" hidden>
+          <div class="view-header">
+            <button id="all-meetings-back" class="settings-back">
+              <span aria-hidden="true">‹</span> <span id="all-meetings-back-label"></span>
+            </button>
+            <h1 id="all-meetings-title" class="settings-title"></h1>
+          </div>
+          <div id="all-meetings-list"></div>
+          <div class="row wrap-row">
+            <button id="all-meetings-select-all" class="meetings-action-btn"></button>
+            <button id="all-meetings-select-none" class="meetings-action-btn"></button>
+            <button id="all-meetings-transcribe" class="meetings-action-btn"></button>
+            <button id="all-meetings-stop" class="meetings-action-btn" hidden></button>
+          </div>
+          <div id="all-meetings-retranscribe-hint" class="hint"></div>
+          <div id="all-meetings-progress" class="hint"></div>
         </div>
       </main>
     </div>

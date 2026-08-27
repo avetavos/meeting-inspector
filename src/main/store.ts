@@ -8,7 +8,9 @@ import { join, resolve, sep } from 'node:path'
 // node:test (same requirement as everything else in this file).
 import type { TranscribeMode } from './settings.ts'
 
-export const NOTES_ROOT = join(homedir(), 'Documents', 'MeetingNotes')
+// Override for throwaway test/verification runs (voices.ts's VOICES_FILE already has
+// the same escape hatch) — nothing in the app reads this except the default here.
+export const NOTES_ROOT = process.env['MEETING_INSPECTOR_NOTES_ROOT'] ?? join(homedir(), 'Documents', 'MeetingNotes')
 
 /**
  * Paths that arrive over IPC are renderer-supplied, so main must not trust them.

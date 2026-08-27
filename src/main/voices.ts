@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { model } from './models.ts'
@@ -29,7 +30,15 @@ const MATCH_THRESHOLD = 0.6
 /** Enough voice to be characteristic, without loading a whole meeting into memory. */
 const MAX_SECONDS = 30
 
-type Voice = { name: string; embedding: number[] }
+/**
+ * `id` is what a future rename-propagation feature will resolve by (a name is now just
+ * this voice's current label, not its identity) — deliberately not built here, only the
+ * shape it needs. Optional on read: `read()` below backfills it for entries written
+ * before this field existed, deterministically (a hash of the embedding, not random) so
+ * the same legacy voice resolves to the same id on every read without a migration pass
+ * rewriting voices.json up front.
+ */
+type Voice = { id: string; name: string; embedding: number[] }
 type Extractor = {
   dim: number
   createStream(): { acceptWaveform(o: { sampleRate: number; samples: Float32Array }): void; inputFinished(): void }
@@ -50,9 +59,14 @@ async function load(): Promise<Extractor | null> {
   }
 }
 
+/** Deterministic stand-in id for a voice written before `id` existed — same embedding
+ * in, same id out, every read, every session, with nothing written back until this
+ * voice is naturally remembered again (see `remember`'s `existing?.id` reuse below). */
+const legacyId = (embedding: number[]): string => createHash('sha256').update(JSON.stringify(embedding)).digest('hex').slice(0, 16)
+
 const read = async (): Promise<Voice[]> =>
   readFile(await voicesFile(), 'utf8').then(
-    (raw) => JSON.parse(raw) as Voice[],
+    (raw) => (JSON.parse(raw) as (Voice | Omit<Voice, 'id'>)[]).map((v) => ('id' in v ? v : { ...v, id: legacyId(v.embedding) })),
     () => [],
   )
 
@@ -91,20 +105,31 @@ async function embed(samples: Float32Array): Promise<Float32Array | null> {
   return ex.isReady(stream) ? ex.compute(stream) : null
 }
 
-/** Stores the voice behind a speaker under the name the user just typed. */
+/** Stores the voice behind a speaker under the name the user just typed. Reuses the
+ * existing id when this exact name was already known (a refreshed embedding for the
+ * same person) — this is the only case `remember` itself can tell is "the same voice"
+ * without embedding-matching first, so it is the only case whose id survives a re-run.
+ * A genuinely new name always gets a fresh id. Renaming a known voice to a *different*
+ * name a rename-propagation feature would resolve by id is deliberately out of scope
+ * here — this only keeps id stable across re-remembering the same name. */
 export async function remember(dir: string, transcript: Transcript, speaker: string, name: string): Promise<void> {
   const samples = await samplesFor(dir, transcript, speaker)
   if (!samples) return
   const embedding = await embed(samples)
   if (!embedding) return
 
-  const voices = (await read()).filter((v) => v.name !== name)
-  voices.push({ name, embedding: [...embedding] })
-  await write(voices)
+  const voices = await read()
+  const id = voices.find((v) => v.name === name)?.id ?? randomUUID()
+  const kept = voices.filter((v) => v.name !== name)
+  kept.push({ id, name, embedding: [...embedding] })
+  await write(kept)
 }
 
-/** The name of a voice already known, or null to leave the speaker unnamed. */
-export async function identify(dir: string, transcript: Transcript, speaker: string): Promise<string | null> {
+/** The id and current name of a voice already known, or null to leave the speaker
+ * unnamed. Returns the id alongside the name (not just the name, as before) so a
+ * caller can persist a stable reference on the transcript — see Transcript.speakerVoices
+ * in shared/meetings.ts. */
+export async function identify(dir: string, transcript: Transcript, speaker: string): Promise<{ id: string; name: string } | null> {
   const voices = await read()
   if (voices.length === 0) return null
 
@@ -113,12 +138,12 @@ export async function identify(dir: string, transcript: Transcript, speaker: str
   const embedding = await embed(samples)
   if (!embedding) return null
 
-  let best: { name: string; score: number } | null = null
+  let best: { id: string; name: string; score: number } | null = null
   for (const voice of voices) {
     const score = cosine(embedding, voice.embedding)
-    if (!best || score > best.score) best = { name: voice.name, score }
+    if (!best || score > best.score) best = { id: voice.id, name: voice.name, score }
   }
-  return best && best.score >= MATCH_THRESHOLD ? best.name : null
+  return best && best.score >= MATCH_THRESHOLD ? { id: best.id, name: best.name } : null
 }
 
 export const knownVoices = async (): Promise<string[]> => (await read()).map((v) => v.name)

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { copyFile, mkdtemp, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -57,7 +57,7 @@ test('voices: a named voice is recognised again, and a different one is not', { 
   assert.deepEqual(await voices.knownVoices(), ['พี่โจ้'])
 
   // The same voice in the same recording must come back with the name on it.
-  assert.equal(await voices.identify(dir, transcript, 'SPEAKER_00'), 'พี่โจ้')
+  assert.equal((await voices.identify(dir, transcript, 'SPEAKER_00'))?.name, 'พี่โจ้')
 
   // The other speaker must not. A wrong name attached to someone else's words is
   // worse than an unnamed speaker.
@@ -66,11 +66,37 @@ test('voices: a named voice is recognised again, and a different one is not', { 
 
 test('voices: forgetting a voice stops it matching', { skip: skip() }, async () => {
   await voices.remember(dir, transcript, 'SPEAKER_01', 'น้องมิ้น')
-  assert.equal(await voices.identify(dir, transcript, 'SPEAKER_01'), 'น้องมิ้น')
+  assert.equal((await voices.identify(dir, transcript, 'SPEAKER_01'))?.name, 'น้องมิ้น')
 
   await voices.forget('น้องมิ้น')
   assert.equal(await voices.identify(dir, transcript, 'SPEAKER_01'), null)
   assert.ok(!(await voices.knownVoices()).includes('น้องมิ้น'))
+})
+
+test('voices: a voice keeps the same id across remember() calls for the same name', { skip: skip() }, async () => {
+  await voices.remember(dir, transcript, 'SPEAKER_00', 'คุณเอ');
+  const first = await voices.identify(dir, transcript, 'SPEAKER_00')
+  assert.ok(first?.id, 'expected an id on a freshly remembered voice')
+
+  // Re-remembered under the same name (e.g. a refreshed embedding from a later
+  // meeting) — the id must survive, since a future rename-propagation feature (not
+  // built here) will need it to stay stable across exactly this.
+  await voices.remember(dir, transcript, 'SPEAKER_00', 'คุณเอ')
+  const second = await voices.identify(dir, transcript, 'SPEAKER_00')
+  assert.equal(second?.id, first?.id)
+})
+
+test('voices: a legacy entry with no id gets a stable, deterministic one on every read', { skip: skip() }, async () => {
+  await voices.remember(dir, transcript, 'SPEAKER_00', 'ลุงตี๋')
+  const file = process.env['VOICES_FILE']!
+  const raw = JSON.parse(await readFile(file, 'utf8')) as { id: string; name: string; embedding: number[] }[]
+  // Strip the id, as if this entry was written before the field existed.
+  await writeFile(file, JSON.stringify(raw.map(({ id: _id, ...rest }) => rest)))
+
+  const a = await voices.identify(dir, transcript, 'SPEAKER_00')
+  const b = await voices.identify(dir, transcript, 'SPEAKER_00')
+  assert.ok(a?.id, 'expected a backfilled id')
+  assert.equal(a?.id, b?.id, 'the same legacy voice must resolve to the same id on every read, not a fresh random one')
 })
 
 test('voices: a speaker with almost no audio is not learned', { skip: skip() }, async () => {

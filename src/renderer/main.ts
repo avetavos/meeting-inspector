@@ -161,6 +161,10 @@ const en = {
   copy: 'Copy',
   copied: 'Copied',
   speakerDefaults: { me: 'You', them: 'Others' },
+  // Same wording as main/index.ts's own SPEAKER_LABELS.speaker(n) — the renderer's own
+  // number (by first appearance among lines still unattributed) can't promise to match
+  // main's actual cluster numbering, but the *words* should read as the same convention.
+  unnamedSpeaker: (n: number) => `Speaker ${n}`,
   meetingsHeading: 'Meetings',
   meetingsEmpty: 'No meetings recorded yet.',
   meetingsStatus: {
@@ -175,6 +179,20 @@ const en = {
   meetingsStop: 'Stop',
   meetingsProgress: (title: string, index: number, total: number, pct: number) =>
     `Transcribing ${title} (${index}/${total}) — ${pct}%`,
+  // The main page only ever shows the 5 most recent (spec item a) — this is the way
+  // to everything else, and doubles as a hint that there is more.
+  viewAllMeetings: (n: number) => `View all ${n} meeting${n === 1 ? '' : 's'}`,
+  allMeetingsTitle: 'All meetings',
+  // A done meeting is deliberately excluded from "Select all" (spec item c) — checking
+  // it yourself is the only way in, so this is the one place that cost gets said out
+  // loud before the Transcribe button is pressed. What actually survives is decided by
+  // voices.ts's cross-meeting voice recognition, not by anything this meeting's own
+  // transcript.json remembers — SPEAKER_00 this run has no guaranteed relation to
+  // SPEAKER_00 last run (diarize.ts's clustering starts over from nothing each time).
+  meetingsRetranscribeWarning: (n: number) =>
+    n === 1
+      ? "Re-transcribing this already-done meeting replaces its transcript. A speaker you renamed comes back automatically only if this app already recognises that voice (Settings › Speakers) — otherwise you'll need to rename them again."
+      : `Re-transcribing ${n} already-done meetings replaces their transcripts. A speaker you renamed comes back automatically only if this app already recognises that voice (Settings › Speakers) — otherwise you'll need to rename them again.`,
   // Second pass of the batch queue (MEDIUM 4), once every meeting is transcribed and
   // whisper-server has been let go — this is what puts speaker names on the transcript.
   meetingsDiarizing: (title: string, index: number, total: number) =>
@@ -226,6 +244,7 @@ const en = {
   // volume) — without this, onboarding used to fail silently and reopen on every
   // launch forever with nothing explaining why.
   onboardingSaveFailed: (msg: string) => `Could not save that setup is done: ${msg} — you may see this screen again next launch.`,
+  detailReveal: 'Show in Finder',
 }
 
 const th: typeof en = {
@@ -356,6 +375,7 @@ const th: typeof en = {
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
   speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
+  unnamedSpeaker: (n) => `ผู้พูด ${n}`,
   meetingsHeading: 'การประชุม',
   meetingsEmpty: 'ยังไม่มีการประชุมที่บันทึกไว้',
   meetingsStatus: {
@@ -369,6 +389,10 @@ const th: typeof en = {
   meetingsTranscribe: (n) => (n === 0 ? 'ถอดเสียง' : `ถอดเสียง ${n} การประชุม`),
   meetingsStop: 'หยุด',
   meetingsProgress: (title, index, total, pct) => `กำลังถอดเสียง ${title} (${index}/${total}) — ${pct}%`,
+  viewAllMeetings: (n) => `ดูทั้งหมด ${n} การประชุม`,
+  allMeetingsTitle: 'การประชุมทั้งหมด',
+  meetingsRetranscribeWarning: (n) =>
+    `ถอดเสียงซ้ำ ${n} การประชุมที่ถอดเสร็จแล้วจะแทนที่ transcript เดิม ชื่อผู้พูดที่เคยตั้งไว้จะกลับมาเองก็ต่อเมื่อแอปจำเสียงคนนั้นได้แล้ว (ตั้งค่า › ผู้พูด) — ถ้าไม่ ต้องตั้งชื่อใหม่อีกครั้ง`,
   meetingsDiarizing: (title, index, total) => `กำลังแยกว่าใครพูดใน ${title} (${index}/${total})…`,
   meetingsStopping: 'กำลังหยุด…',
   meetingsCancelled: 'หยุดแล้ว — ประชุมที่ยังค้างในคิวจะยังไม่ถูกแตะต้อง',
@@ -404,6 +428,7 @@ const th: typeof en = {
   onboardingRerun: 'ทำใหม่อีกครั้ง',
   onboardingRerunLockedReason: 'ใช้ไม่ได้ตอนนี้ — กำลังอัดเสียงหรือถอดเสียงการประชุมอยู่',
   onboardingSaveFailed: (msg) => `บันทึกสถานะตั้งค่าเสร็จไม่สำเร็จ: ${msg} — ครั้งหน้าอาจเจอหน้านี้อีก`,
+  detailReveal: 'แสดงใน Finder',
 }
 
 const STR: Record<Language, typeof en> = { en, th }
@@ -482,6 +507,34 @@ const meetingsSelectNoneBtn = $<HTMLButtonElement>('meetings-select-none')
 const meetingsTranscribeBtn = $<HTMLButtonElement>('meetings-transcribe')
 const meetingsStopBtn = $<HTMLButtonElement>('meetings-stop')
 const meetingsProgressEl = $('meetings-progress')
+const meetingsRetranscribeHintEl = $('meetings-retranscribe-hint')
+const meetingsViewAllBtn = $<HTMLButtonElement>('meetings-view-all')
+
+/** A whole separate top-level page (spec item b) for every recording, not just the main
+ * page's 5-most-recent preview — see `showPage`. */
+const allMeetingsPage = $('all-meetings-page')
+const allMeetingsBackBtn = $<HTMLButtonElement>('all-meetings-back')
+const allMeetingsBackLabel = $('all-meetings-back-label')
+const allMeetingsTitleEl = $('all-meetings-title')
+const allMeetingsListEl = $('all-meetings-list')
+const allMeetingsSelectAllBtn = $<HTMLButtonElement>('all-meetings-select-all')
+const allMeetingsSelectNoneBtn = $<HTMLButtonElement>('all-meetings-select-none')
+const allMeetingsTranscribeBtn = $<HTMLButtonElement>('all-meetings-transcribe')
+const allMeetingsStopBtn = $<HTMLButtonElement>('all-meetings-stop')
+const allMeetingsProgressEl = $('all-meetings-progress')
+const allMeetingsRetranscribeHintEl = $('all-meetings-retranscribe-hint')
+
+/** A single past meeting's transcript (spec item 1) — its own page so opening one
+ * never disturbs a recording that may still be running in the background (see
+ * `showPage`'s doc comment; Settings already works the same way). */
+const detailPage = $('meeting-detail-page')
+const detailBackBtn = $<HTMLButtonElement>('detail-back')
+const detailBackLabel = $('detail-back-label')
+const detailTitleEl = $('detail-title')
+const detailMetaEl = $('detail-meta')
+const detailRevealBtn = $<HTMLButtonElement>('detail-reveal')
+const detailSpeakersEl = $('detail-speakers')
+const detailTranscriptEl = $('detail-transcript')
 const langRadios: Record<Language, HTMLInputElement> = {
   en: $<HTMLInputElement>('lang-en'),
   th: $<HTMLInputElement>('lang-th'),
@@ -496,6 +549,21 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = ['general', 'recording', 'transc
 
 const mainView = $('main-view')
 const settingsPage = $('settings-page')
+
+/**
+ * Every top-level page this app can show, in one place — main view, Settings,
+ * onboarding, a single meeting's transcript, and the full meetings list. Only one is
+ * ever visible; `showPage` is the one function allowed to touch any of their `hidden`
+ * flags, so a page opened from within another page (e.g. Settings from the meetings
+ * panel's "missing model" warning) can never leave two pages visible at once. Forward
+ * references to `onboardingPage`/`detailPage`/`allMeetingsPage` (declared further down,
+ * next to the controls each page owns) are fine here — this function's body only runs
+ * once a user interacts with something, long after every const below has initialized.
+ */
+function showPage(page: HTMLElement): void {
+  for (const p of [mainView, settingsPage, onboardingPage, detailPage, allMeetingsPage]) p.hidden = p !== page
+}
+
 const settingsOpenBtn = $<HTMLButtonElement>('settings-open')
 const settingsOpenLabel = $('settings-open-label')
 const settingsBackBtn = $<HTMLButtonElement>('settings-back')
@@ -550,27 +618,29 @@ function openSettings(): void {
   // A batch started from the main view can still be running once Settings opens —
   // reflect that immediately rather than waiting for the next onBatchItem tick.
   updateTranscriptionLocks()
-  settingsPage.hidden = false
-  mainView.hidden = true
+  showPage(settingsPage)
 }
 
 function closeSettings(): void {
   stopMicTest()
-  settingsPage.hidden = true
-  mainView.hidden = false
+  showPage(mainView)
 }
 
 settingsOpenBtn.onclick = () => openSettings()
 settingsBackBtn.onclick = () => closeSettings()
 for (const key of SETTINGS_CATEGORIES) settingsCatButtons[key].onclick = () => showSettingsCategory(key)
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || settingsPage.hidden) return
+  if (e.key !== 'Escape') return
   // Don't steal Escape from a form control the user is actively editing — e.g. typing
   // a port number should let Escape do its native "cancel this edit" thing, not also
-  // close the whole Settings page and discard it.
+  // close whichever secondary page is open and discard it.
   const el = document.activeElement
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return
-  closeSettings()
+  // Onboarding is deliberately excluded — it has no Escape-to-cancel of its own (see
+  // its own doc comment below), only Back/Next/Skip.
+  if (!settingsPage.hidden) closeSettings()
+  else if (!detailPage.hidden) closeMeetingDetail()
+  else if (!allMeetingsPage.hidden) closeAllMeetings()
 })
 
 /**
@@ -747,9 +817,7 @@ async function showOnboarding(): Promise<void> {
   // Hidden before the await below, not after — otherwise "Run setup again" (which
   // closes Settings, itself synchronous, right before calling this) would flash the
   // main page for a frame while the settings round-trip is in flight.
-  settingsPage.hidden = true
-  mainView.hidden = true
-  onboardingPage.hidden = false
+  showPage(onboardingPage)
   // Seeded from disk rather than assumed — "Run setup again" from Settings can open
   // this long after the defaults were last touched.
   const settings = await window.api.getSettings()
@@ -760,8 +828,7 @@ async function showOnboarding(): Promise<void> {
 }
 
 function hideOnboarding(): void {
-  onboardingPage.hidden = true
-  mainView.hidden = false
+  showPage(mainView)
 }
 
 for (const [code, radio] of Object.entries(onbLangRadios) as [Language, HTMLInputElement][]) {
@@ -1211,9 +1278,51 @@ function followTranscript(): void {
   content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' })
 }
 
-function renderTranscript(): void {
-  transcript.replaceChildren(
-    ...segments.map((s) => {
+/**
+ * diarize.ts's UNKNOWN sentinel — the bucket a segment keeps when diarization could not
+ * attribute it to any turn, or never ran (diarize() threw, or hasn't reached this
+ * meeting yet). `speakerDisplayName` below treats it specially: still carrying the
+ * bare default word ('Others'/'คนอื่น') means genuinely nobody has been distinguished
+ * here yet, so a renamable number reads more honestly than a word that looks like a
+ * name but names nobody.
+ */
+const UNKNOWN_SPEAKER_KEY = 'them'
+
+/**
+ * Every transcript line must be attributed (spec item d): a real name when one is
+ * known, a numbered fallback when it is not — never the raw storage key (`SPEAKER_00`,
+ * seen on a transcript this app did not just diarize, or one whose diarize pass threw)
+ * and never an empty string (a hand-edited transcript.json). `numbering` is one Map per
+ * render call, so every line from the same not-yet-named speaker gets the same number
+ * instead of a fresh one each time, numbered in the order that speaker first appears.
+ *
+ * Deliberately does not retranslate an already-resolved name — a typed name, a voice
+ * `identify()` matched, or a real "Speaker 2"/"ผู้พูด 2" placeholder diarize.ts already
+ * assigned — into the *current* interface language: those are real, meaningful values
+ * once set, in whatever language they were set, not a stand-in worth overriding.
+ */
+function speakerDisplayName(speaker: string, names: Record<string, string>, numbering: Map<string, string>): string {
+  const stored = names[speaker]
+  const isGenericUnattributed =
+    speaker === UNKNOWN_SPEAKER_KEY && (stored === en.speakerDefaults.them || stored === th.speakerDefaults.them)
+  if (stored && !isGenericUnattributed) return stored
+  if (!numbering.has(speaker)) numbering.set(speaker, t().unnamedSpeaker(numbering.size + 1))
+  return numbering.get(speaker)!
+}
+
+/** `segs`/`names`/`container` default to the live-session panel; the meeting detail
+ * page (below) passes its own so the two never share state. `segs` must already be in
+ * t0 order — both callers already guarantee that (writeTranscript on disk, the running
+ * session's own sort in onSegments) — so speakerDisplayName's first-appearance
+ * numbering is stable across re-renders instead of reshuffling as more lines arrive. */
+function renderTranscript(
+  segs: Transcript['segments'] = segments,
+  names: Record<string, string> = speakers,
+  container: HTMLElement = transcript,
+): void {
+  const numbering = new Map<string, string>()
+  container.replaceChildren(
+    ...segs.map((s) => {
       const row = document.createElement('p')
       if (s.speaker === 'me') row.className = 'me'
       const at = document.createElement('span')
@@ -1221,46 +1330,60 @@ function renderTranscript(): void {
       at.textContent = fmt(s.t0)
       const who = document.createElement('span')
       who.className = 'who'
-      who.textContent = speakers[s.speaker] ?? s.speaker
+      who.textContent = speakerDisplayName(s.speaker, names, numbering)
       const text = document.createElement('span')
       text.textContent = s.text
       row.append(at, who, text)
       return row
     }),
   )
-  followTranscript()
+  // Only the live panel auto-follows new lines — a past meeting's transcript (the
+  // detail page passes its own container) should stay put wherever the reader left it.
+  if (container === transcript) followTranscript()
 }
 
-function renderSpeakerPanel(): void {
-  speakerPanel.replaceChildren()
-  if (!meetingDir) return
+/** `dir`/`spk`/`container` default to the live-session panel, same as renderTranscript
+ * above. `onPreview` re-renders whichever transcript this panel's typing should
+ * preview into; `onSave` commits the round-tripped result into whichever variable
+ * owns `spk` — the live session's own `speakers`, or the detail page's own copy. */
+function renderSpeakerPanel(
+  dir: string | null = meetingDir,
+  spk: Record<string, string> = speakers,
+  container: HTMLElement = speakerPanel,
+  onPreview: () => void = () => renderTranscript(),
+  onSave: (updated: Record<string, string>) => void = (updated) => {
+    speakers = updated
+  },
+): void {
+  container.replaceChildren()
+  if (!dir) return
 
   const inputs = new Map<string, HTMLInputElement>()
-  for (const label of Object.keys(speakers)) {
+  for (const label of Object.keys(spk)) {
     const row = document.createElement('div')
     row.className = 'who'
     const tag = document.createElement('code')
     tag.textContent = label
     const input = document.createElement('input')
-    input.value = speakers[label] ?? label
+    input.value = spk[label] ?? label
     input.oninput = () => {
-      speakers[label] = input.value
-      renderTranscript()
+      spk[label] = input.value
+      onPreview()
     }
     inputs.set(label, input)
     row.append(tag, input)
-    speakerPanel.append(row)
+    container.append(row)
   }
 
   const save = document.createElement('button')
   save.textContent = t().speakerSave
   save.onclick = async () => {
-    if (!meetingDir) return
     save.disabled = true
     const named = Object.fromEntries(
       [...inputs].map(([label, input]) => [label, input.value.trim() || label]),
     )
-    speakers = (await window.api.renameSpeakers(meetingDir, named)).speakers
+    const result = (await window.api.renameSpeakers(dir, named)).speakers
+    onSave(result)
     save.disabled = false
     save.textContent = t().speakerSaved
   }
@@ -1268,7 +1391,7 @@ function renderSpeakerPanel(): void {
   const hint = document.createElement('div')
   hint.className = 'hint'
   hint.textContent = t().speakerMergeHint
-  speakerPanel.append(save, hint)
+  container.append(save, hint)
 }
 
 function copyRow(label: string, value: string): HTMLElement {
@@ -1689,15 +1812,67 @@ async function stop(): Promise<void> {
 
 /**
  * The meetings list (spec item 3/5) — every recorded meeting, with checkboxes for
- * picking several to transcribe at once while the user is away from the app. Only a
- * meeting that actually needs transcribing (not-transcribed or failed) is selectable;
- * queuing work that is already done would need a deliberate re-run, not a checkbox.
+ * picking several to transcribe at once while the user is away from the app. Rendered
+ * into two places (spec item b: the main page's 5-most-recent preview, and the full
+ * All Meetings page) from the same data and the same row-building code — one
+ * `MeetingsPanel` per container, keyed the way `bars` (the model-download bar) keys its
+ * DOM refs per container, so a re-render of one container never blanks the other's.
  */
+type MeetingsPanel = {
+  listEl: HTMLElement
+  selectAllBtn: HTMLButtonElement
+  selectNoneBtn: HTMLButtonElement
+  transcribeBtn: HTMLButtonElement
+  stopBtn: HTMLButtonElement
+  progressEl: HTMLElement
+  retranscribeHintEl: HTMLElement
+  /** id -> that row's status <span>, so a live batch percentage (onBatchProgress fires
+   * once per ~1MB chunk) can update just the one row in flight instead of rebuilding
+   * every row on every tick. */
+  statusEls: Map<string, HTMLElement>
+  /** Main page shows only the 5 most recent (spec item a); All Meetings shows all of them. */
+  limit: number | null
+}
+const mainMeetingsPanel: MeetingsPanel = {
+  listEl: meetingsListEl,
+  selectAllBtn: meetingsSelectAllBtn,
+  selectNoneBtn: meetingsSelectNoneBtn,
+  transcribeBtn: meetingsTranscribeBtn,
+  stopBtn: meetingsStopBtn,
+  progressEl: meetingsProgressEl,
+  retranscribeHintEl: meetingsRetranscribeHintEl,
+  statusEls: new Map(),
+  limit: 5,
+}
+const allMeetingsPanelState: MeetingsPanel = {
+  listEl: allMeetingsListEl,
+  selectAllBtn: allMeetingsSelectAllBtn,
+  selectNoneBtn: allMeetingsSelectNoneBtn,
+  transcribeBtn: allMeetingsTranscribeBtn,
+  stopBtn: allMeetingsStopBtn,
+  progressEl: allMeetingsProgressEl,
+  retranscribeHintEl: allMeetingsRetranscribeHintEl,
+  statusEls: new Map(),
+  limit: null,
+}
+const meetingsPanels = [mainMeetingsPanel, allMeetingsPanelState]
+
 let meetingItems: MeetingItem[] = []
 const selectedMeetings = new Set<string>()
 let batchRunning = false
+/** The one meeting the batch queue is actually working on right now (transcribing or
+ * diarizing), and the live text to show on its row — thunk, not a rendered string, the
+ * same reason every other reactive-to-language message in this file is (see
+ * `adHocWarning`'s doc comment): a language switch must be able to re-derive it. */
+let activeBatchId: string | null = null
+let activeBatchText: (() => string) | null = null
 
 const meetingSelectable = (m: MeetingItem): boolean => m.status === 'not-transcribed' || m.status === 'failed'
+/** A done meeting is deliberately NOT selectable (below, meetingPickable is what a
+ * checkbox actually gates) — re-running it is a real cost (meetingsRetranscribeWarning
+ * below), so it must be a choice, not something "Select all" sweeps in (spec item c). */
+const meetingRetranscribable = (m: MeetingItem): boolean => m.status === 'done'
+const meetingPickable = (m: MeetingItem): boolean => meetingSelectable(m) || meetingRetranscribable(m)
 
 function fmtMeetingWhen(iso: string): string {
   const d = new Date(iso)
@@ -1705,15 +1880,17 @@ function fmtMeetingWhen(iso: string): string {
   return d.toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function renderMeetingRows(): void {
-  meetingsListEl.replaceChildren(
-    ...meetingItems.map((m) => {
+function renderMeetingRowsInto(panel: MeetingsPanel): void {
+  panel.statusEls.clear()
+  const items = panel.limit === null ? meetingItems : meetingItems.slice(0, panel.limit)
+  panel.listEl.replaceChildren(
+    ...items.map((m) => {
       const row = document.createElement('div')
       row.className = 'meeting-row'
 
       const checkbox = document.createElement('input')
       checkbox.type = 'checkbox'
-      checkbox.disabled = !meetingSelectable(m) || batchRunning
+      checkbox.disabled = !meetingPickable(m) || batchRunning
       checkbox.checked = selectedMeetings.has(m.id)
       checkbox.onchange = () => {
         if (checkbox.checked) selectedMeetings.add(m.id)
@@ -1721,9 +1898,17 @@ function renderMeetingRows(): void {
         updateMeetingsActions()
       }
 
-      const title = document.createElement('span')
-      title.className = 'meeting-title'
+      // A done meeting's title doubles as the way into its transcript (spec item 1) —
+      // a real <button> only when there is something to open, a plain <span> otherwise,
+      // so a not-yet/still-transcribing/failed row is not a dead-looking control.
+      const openable = m.status === 'done'
+      const title = document.createElement(openable ? 'button' : 'span')
+      title.className = openable ? 'meeting-title meeting-title-open' : 'meeting-title'
       title.textContent = m.title
+      if (openable) {
+        ;(title as HTMLButtonElement).type = 'button'
+        title.onclick = () => void openMeetingDetail(m.id)
+      }
 
       const when = document.createElement('span')
       when.className = 'meeting-when'
@@ -1742,17 +1927,51 @@ function renderMeetingRows(): void {
 
       const status = document.createElement('span')
       status.className = `meeting-status ${m.status}`
-      status.textContent = t().meetingsStatus[m.status]
+      status.textContent = m.id === activeBatchId && activeBatchText ? activeBatchText() : t().meetingsStatus[m.status]
+      panel.statusEls.set(m.id, status)
 
       row.append(checkbox, title, when, dur, language, status)
       return row
     }),
   )
-  if (meetingItems.length === 0) {
+  if (items.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'hint'
     empty.textContent = t().meetingsEmpty
-    meetingsListEl.append(empty)
+    panel.listEl.append(empty)
+  }
+}
+
+function renderMeetingRows(): void {
+  for (const panel of meetingsPanels) renderMeetingRowsInto(panel)
+  meetingsViewAllBtn.hidden = mainMeetingsPanel.limit === null || meetingItems.length <= mainMeetingsPanel.limit
+  meetingsViewAllBtn.textContent = t().viewAllMeetings(meetingItems.length)
+}
+
+/** Pushes this batch tick straight onto whichever row is already on screen, in either
+ * panel, instead of waiting for the next full renderMeetings() — cheap enough to call
+ * on every progress event (onBatchProgress fires roughly once per 1MB read). */
+function updateActiveRowStatus(): void {
+  if (!activeBatchId || !activeBatchText) return
+  for (const panel of meetingsPanels) {
+    const el = panel.statusEls.get(activeBatchId)
+    if (el) el.textContent = activeBatchText()
+  }
+}
+
+/** Puts a row back to its plain disk-derived status text — used when the diarize loop
+ * moves on to the next meeting (below), since nothing else re-renders that row in the
+ * meantime: onBatchItem's own renderMeetings() only covers the transcribe phase, and
+ * batch:diarizing carries just one id at a time, not "and here is what to undo". Without
+ * this, a meeting's row stays on "Working out who's speaking…" forever after its own
+ * turn ends, confirmed live — every finished meeting piled up the same stale text until
+ * the whole queue's batch:done finally forced a full re-render. */
+function resetRowToBaseStatus(id: string): void {
+  const m = meetingItems.find((x) => x.id === id)
+  if (!m) return
+  for (const panel of meetingsPanels) {
+    const el = panel.statusEls.get(id)
+    if (el) el.textContent = t().meetingsStatus[m.status]
   }
 }
 
@@ -1799,18 +2018,25 @@ function updateTranscriptionLocks(): void {
   onboardingRerunLockHint.textContent = busy ? t().onboardingRerunLockedReason : ''
 }
 
+function updateMeetingsActionsFor(panel: MeetingsPanel): void {
+  // Labels, not just disabled/hidden — this is the only place these buttons' text ever
+  // gets set, so it has to run on first paint (called from renderMeetings(), itself
+  // called from applyLanguage() at boot) and again on every language switch.
+  panel.selectAllBtn.textContent = t().meetingsSelectAll
+  panel.selectNoneBtn.textContent = t().meetingsSelectNone
+  panel.stopBtn.textContent = t().meetingsStop
+  panel.selectAllBtn.disabled = batchRunning
+  panel.selectNoneBtn.disabled = batchRunning || selectedMeetings.size === 0
+  panel.transcribeBtn.disabled = batchRunning || selectedMeetings.size === 0
+  panel.transcribeBtn.textContent = t().meetingsTranscribe(selectedMeetings.size)
+  panel.stopBtn.hidden = !batchRunning
+  // Spec item c: say the cost before the click, not after — how many of what's
+  // currently selected are a done meeting being deliberately re-run.
+  const doneSelected = meetingItems.filter((m) => selectedMeetings.has(m.id) && m.status === 'done').length
+  panel.retranscribeHintEl.textContent = doneSelected > 0 ? t().meetingsRetranscribeWarning(doneSelected) : ''
+}
 function updateMeetingsActions(): void {
-  // Labels, not just disabled/hidden — this is the only place these three buttons'
-  // text ever gets set, so it has to run on first paint (called from renderMeetings(),
-  // itself called from applyLanguage() at boot) and again on every language switch.
-  meetingsSelectAllBtn.textContent = t().meetingsSelectAll
-  meetingsSelectNoneBtn.textContent = t().meetingsSelectNone
-  meetingsStopBtn.textContent = t().meetingsStop
-  meetingsSelectAllBtn.disabled = batchRunning
-  meetingsSelectNoneBtn.disabled = batchRunning || selectedMeetings.size === 0
-  meetingsTranscribeBtn.disabled = batchRunning || selectedMeetings.size === 0
-  meetingsTranscribeBtn.textContent = t().meetingsTranscribe(selectedMeetings.size)
-  meetingsStopBtn.hidden = !batchRunning
+  for (const panel of meetingsPanels) updateMeetingsActionsFor(panel)
 }
 
 /** Refetches the list from disk — cheap (a directory walk + small JSON reads), called
@@ -1820,32 +2046,71 @@ async function renderMeetings(): Promise<void> {
   meetingItems = await window.api.listMeetings()
   for (const id of [...selectedMeetings]) {
     const m = meetingItems.find((x) => x.id === id)
-    if (!m || !meetingSelectable(m)) selectedMeetings.delete(id)
+    if (!m || !meetingPickable(m)) selectedMeetings.delete(id)
   }
   meetingsHeadingEl.textContent = t().meetingsHeading
+  allMeetingsBackLabel.textContent = t().settingsBack
+  allMeetingsTitleEl.textContent = t().allMeetingsTitle
   renderMeetingRows()
   updateMeetingsActions()
 }
 
-meetingsSelectAllBtn.onclick = () => {
-  for (const m of meetingItems) if (meetingSelectable(m)) selectedMeetings.add(m.id)
-  renderMeetingRows()
-  updateMeetingsActions()
+for (const panel of meetingsPanels) {
+  // Select all deliberately only ever grabs meetingSelectable, not meetingPickable —
+  // a done meeting must never get swept in (spec item c).
+  panel.selectAllBtn.onclick = () => {
+    for (const m of meetingItems) if (meetingSelectable(m)) selectedMeetings.add(m.id)
+    renderMeetingRows()
+    updateMeetingsActions()
+  }
+  panel.selectNoneBtn.onclick = () => {
+    selectedMeetings.clear()
+    renderMeetingRows()
+    updateMeetingsActions()
+  }
+  panel.transcribeBtn.onclick = async () => {
+    if (selectedMeetings.size === 0) return
+    batchRunning = true
+    batchModelMissing = false
+    activeBatchId = null
+    activeBatchText = null
+    renderMeetingsProgress('')
+    renderMeetingRows()
+    updateMeetingsActions()
+    updateTranscriptionLocks()
+    try {
+      await window.api.transcribeMeetings([...selectedMeetings])
+    } catch (err) {
+      batchRunning = false
+      renderMeetingsProgress(reason(err))
+      renderMeetingRows()
+      updateMeetingsActions()
+      updateTranscriptionLocks()
+    }
+  }
+  panel.stopBtn.onclick = () => {
+    // MEDIUM 5: immediate, honest feedback — diarizing a meeting cannot be interrupted
+    // mid-pass (diarize.ts), so without this the button gave no sign it had registered
+    // the click until batch:done eventually arrived, possibly minutes later, and read
+    // as hung in the meantime.
+    renderMeetingsProgress(t().meetingsStopping)
+    void window.api.cancelTranscribeMeetings()
+  }
 }
-meetingsSelectNoneBtn.onclick = () => {
-  selectedMeetings.clear()
-  renderMeetingRows()
-  updateMeetingsActions()
-}
+
 /** Same "text + optional action" shape as the ad-hoc warning box above, for the one
- * spot in the meetings panel that can also be caused by a missing model. */
+ * spot in the meetings panel that can also be caused by a missing model. Writes into
+ * both panels' progress line — there is only ever one batch running, so both copies
+ * should always agree regardless of which page is on screen. */
 function renderMeetingsProgress(text: string, action?: () => void): void {
-  meetingsProgressEl.replaceChildren(document.createTextNode(text))
-  if (!action) return
-  const button = document.createElement('button')
-  button.textContent = t().modelsGoToSettings
-  button.onclick = action
-  meetingsProgressEl.append(document.createElement('br'), button)
+  for (const panel of meetingsPanels) {
+    panel.progressEl.replaceChildren(document.createTextNode(text))
+    if (!action) continue
+    const button = document.createElement('button')
+    button.textContent = t().modelsGoToSettings
+    button.onclick = action
+    panel.progressEl.append(document.createElement('br'), button)
+  }
 }
 
 // Set on any 'failed' batch item whose error names a missing model (isModelMissing) —
@@ -1854,35 +2119,21 @@ function renderMeetingsProgress(text: string, action?: () => void): void {
 // idle/cancelled line with something that actually explains why and where to fix it.
 let batchModelMissing = false
 
-meetingsTranscribeBtn.onclick = async () => {
-  if (selectedMeetings.size === 0) return
-  batchRunning = true
-  batchModelMissing = false
-  renderMeetingsProgress('')
-  renderMeetingRows()
-  updateMeetingsActions()
-  updateTranscriptionLocks()
-  try {
-    await window.api.transcribeMeetings([...selectedMeetings])
-  } catch (err) {
-    batchRunning = false
-    renderMeetingsProgress(reason(err))
-    renderMeetingRows()
-    updateMeetingsActions()
-    updateTranscriptionLocks()
-  }
-}
-meetingsStopBtn.onclick = () => {
-  // MEDIUM 5: immediate, honest feedback — diarizing a meeting cannot be interrupted
-  // mid-pass (diarize.ts), so without this the button gave no sign it had registered
-  // the click until batch:done eventually arrived, possibly minutes later, and read as
-  // hung in the meantime.
-  renderMeetingsProgress(t().meetingsStopping)
-  void window.api.cancelTranscribeMeetings()
-}
-
 window.api.onBatchItem((item: BatchItem) => {
   if (item.status === 'failed' && item.error && isModelMissing(item.error)) batchModelMissing = true
+  // A meeting stops being "the one in flight" the moment its own item event says so —
+  // unless it is about to enter the diarize phase, which sends its own batch:diarizing
+  // and reclaims activeBatchId then. Without this, a meeting that finished with nothing
+  // left to diarize would keep showing its last "Transcribing… 100%" text forever,
+  // since disk truth alone (meeting:list) has no percentage to replace it with.
+  if (item.status !== 'running' && activeBatchId === item.id) {
+    activeBatchId = null
+    activeBatchText = null
+  }
+  if (item.status === 'running') {
+    activeBatchId = item.id
+    activeBatchText = null
+  }
   // The status change (running/done/failed/cancelled) is worth a fresh read from disk —
   // a progress tick alone is not, see onBatchProgress below.
   void renderMeetings()
@@ -1890,18 +2141,112 @@ window.api.onBatchItem((item: BatchItem) => {
 window.api.onBatchProgress(({ id, index, total, fraction }: BatchTick) => {
   const title = meetingItems.find((m) => m.id === id)?.title ?? id
   renderMeetingsProgress(t().meetingsProgress(title, index, total, Math.round(fraction * 100)))
+  // Reuses the exact same "Transcribing… N%" wording the single-recording 'after'-mode
+  // queue line already uses (t().transcribing) — same meaning, same words.
+  activeBatchId = id
+  activeBatchText = () => t().transcribing(Math.round(fraction * 100))
+  updateActiveRowStatus()
 })
 window.api.onBatchDiarizing(({ id, index, total }: BatchDiarizing) => {
   const title = meetingItems.find((m) => m.id === id)?.title ?? id
   renderMeetingsProgress(t().meetingsDiarizing(title, index, total))
+  // The previous meeting's diarize call has already returned by the time this event
+  // for the *next* one arrives (diarize.ts's loop is sequential, one at a time) — put
+  // its row back to plain "Done" before moving the live text onto the new one, or it
+  // keeps reading "Working out who's speaking…" long after that is no longer true.
+  if (activeBatchId && activeBatchId !== id) resetRowToBaseStatus(activeBatchId)
+  // By now this meeting's own status (meeting:list) already reads "done" — its
+  // transcribing pass finished before the whole queue's diarize pass even started
+  // (index.ts's batch:start, MEDIUM 4) — so without this the row would flash "Done"
+  // for the length of a diarize call instead of naming the phase it is actually in.
+  activeBatchId = id
+  activeBatchText = () => t().diarizing
+  updateActiveRowStatus()
 })
 window.api.onBatchDone(({ cancelled }) => {
   batchRunning = false
+  activeBatchId = null
+  activeBatchText = null
   if (batchModelMissing) renderMeetingsProgress(t().modelMissingWarning, modelMissingAction)
   else renderMeetingsProgress(cancelled ? t().meetingsCancelled : '')
   updateTranscriptionLocks()
   void renderMeetings()
 })
+
+/**
+ * All Meetings (spec item b) is a plain top-level page — no state of its own beyond
+ * what's already module-level (meetingItems/selectedMeetings/batchRunning), so opening
+ * it is just showPage(); its rows are already kept current in the background by every
+ * renderMeetings()/updateActiveRowStatus() call above, whether or not this page is the
+ * one currently on screen.
+ */
+function openAllMeetings(): void {
+  showPage(allMeetingsPage)
+}
+function closeAllMeetings(): void {
+  showPage(mainView)
+}
+meetingsViewAllBtn.onclick = () => openAllMeetings()
+allMeetingsBackBtn.onclick = () => closeAllMeetings()
+
+/**
+ * A single past meeting's transcript (spec item 1) — its own module-level state,
+ * deliberately separate from the live session's (`segments`/`speakers`/`meetingDir`),
+ * so viewing an old meeting can never collide with a recording still running in the
+ * background (see `showPage`'s doc comment).
+ */
+let detailId: string | null = null
+let detailDir: string | null = null
+let detailSegments: Transcript['segments'] = []
+let detailSpeakers: Record<string, string> = {}
+let detailStartedAt = ''
+let detailDurationSec = 0
+
+/** Static chrome first (always current, even before a meeting is loaded), then the
+ * per-meeting header — split out so applyLanguage() can refresh both without knowing
+ * whether a meeting is currently open. */
+function renderDetailMeta(): void {
+  detailBackLabel.textContent = t().settingsBack
+  detailRevealBtn.textContent = t().detailReveal
+  if (!detailId) return
+  detailTitleEl.textContent = titleOf(detailId)
+  detailMetaEl.textContent = `${fmtMeetingWhen(detailStartedAt)} · ${fmt(detailDurationSec)}`
+}
+
+/** Delegates to the exact same renderSpeakerPanel the live session uses (generalized
+ * above to take its data/container/callbacks as parameters) rather than a second copy. */
+function renderDetailSpeakers(): void {
+  renderSpeakerPanel(
+    detailDir,
+    detailSpeakers,
+    detailSpeakersEl,
+    () => renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl),
+    (updated) => {
+      detailSpeakers = updated
+    },
+  )
+}
+
+async function openMeetingDetail(id: string): Promise<void> {
+  const { dir, transcript: tr } = await window.api.getTranscript(id)
+  detailId = id
+  detailDir = dir
+  detailSegments = tr.segments
+  detailSpeakers = tr.speakers
+  detailStartedAt = tr.startedAt
+  detailDurationSec = tr.durationSec
+  renderDetailMeta()
+  renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl)
+  renderDetailSpeakers()
+  showPage(detailPage)
+}
+function closeMeetingDetail(): void {
+  showPage(mainView)
+}
+detailBackBtn.onclick = () => closeMeetingDetail()
+detailRevealBtn.onclick = () => {
+  if (detailDir) void window.api.reveal(detailDir)
+}
 
 window.api.onSegments((track, incoming) => {
   segments.push(...incoming.map((s) => ({ ...s, speaker: track === 'mic' ? 'me' : 'them' })))
@@ -2035,6 +2380,13 @@ function applyLanguage(l: Language): void {
   void renderAsrModel()
   renderSpeakerPanel()
   void renderMeetings()
+  renderDetailMeta()
+  // Only re-render the detail page's own transcript/speakers if a meeting is actually
+  // loaded there — renderDetailMeta() above already covers its static chrome either way.
+  if (detailId) {
+    renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl)
+    renderDetailSpeakers()
+  }
   void window.api.mcpState().then(showMcpState)
   // Harmless (and cheap) even when onboarding isn't open — re-derives whichever step
   // is current, so a language switch mid-onboarding does not leave it half-translated.

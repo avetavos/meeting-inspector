@@ -143,6 +143,26 @@ test('listMeetings: a folder whose transcript.json is missing or corrupt is not 
   )
 })
 
+test('listMeetings: sorts by the transcript\'s own startedAt, never by folder name (spec item b)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'store-sort-order-test-'))
+  // Folder names sort the opposite way from their real recording time — a renamed or
+  // hand-created folder must not be able to reorder the list.
+  const aaa = join(root, 'aaa-renamed-folder')
+  await mkdir(aaa, { recursive: true })
+  await writeTranscript(aaa, { ...base, id: 'aaa', startedAt: '2026-08-10T09:00:00+07:00' })
+
+  const zzz = join(root, 'zzz-actually-newest')
+  await mkdir(zzz, { recursive: true })
+  await writeTranscript(zzz, { ...base, id: 'zzz', startedAt: '2026-08-27T09:00:00+07:00' })
+
+  const middle = join(root, 'middle-meeting')
+  await mkdir(middle, { recursive: true })
+  await writeTranscript(middle, { ...base, id: 'middle', startedAt: '2026-08-20T09:00:00+07:00' })
+
+  const items = await listMeetings(root)
+  assert.deepEqual(items.map((m) => m.id), ['zzz-actually-newest', 'middle-meeting', 'aaa-renamed-folder'])
+})
+
 test('createMeetingDir: two recordings in the same minute get different folders, never overwriting each other (MEDIUM 3)', async () => {
   const root = await mkdtemp(join(tmpdir(), 'store-collision-test-'))
   const at = new Date(2026, 7, 27, 14, 0)

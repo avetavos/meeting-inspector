@@ -85,7 +85,7 @@ h1.app-title {
 .settings-open { flex: 0 0 auto; padding: 7px 14px; font-size: 13px; }
 
 /* ---------- secondary glass cards (warnings, models, speakers, settings) - */
-.warn, #speakers, #meetings {
+.warn, #speakers, #detail-speakers, #meetings {
   padding: 14px 16px;
   margin-top: 14px;
   background: var(--glass-fill);
@@ -98,7 +98,7 @@ h1.app-title {
     0 10px 26px -12px var(--shadow-color);
 }
 
-#models:empty, #warnings:empty, #speakers:empty { margin: 0; padding: 0; box-shadow: none; background: none; }
+#models:empty, #warnings:empty, #speakers:empty, #detail-speakers:empty { margin: 0; padding: 0; box-shadow: none; background: none; }
 
 input, button { font: inherit; color: inherit; -webkit-app-region: no-drag; }
 input[type='checkbox'], input[type='radio'] { width: auto; flex: none; accent-color: var(--accent); margin: 0; }
@@ -147,29 +147,53 @@ button:disabled { opacity: 0.4; cursor: default; }
 #asr-model .asr-state { font-size: 13px; color: var(--text-dim); }
 
 /* ---------- meetings panel: list + batch transcription ------------------- */
-#meetings-list { margin-top: 10px; }
+/* Shared between the main page's 5-row preview and the full All Meetings page —
+   one list renderer, two containers (same reuse pattern as #models below). */
+#meetings-list, #all-meetings-list { margin-top: 10px; }
 .meeting-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
 .meeting-row + .meeting-row { border-top: 1px solid var(--line-lo); }
 .meeting-row .meeting-title { flex: 1; }
+/* A done meeting's title doubles as the "open its transcript" control — a real
+   <button> (not a styled <span>) for free keyboard reachability, stripped back to
+   look like the plain label text everywhere except the accent color. */
+button.meeting-title-open { background: none; box-shadow: none; padding: 0; border-radius: 0; text-align: left; color: var(--accent); font: inherit; }
+button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoration: underline; }
 .meeting-row .meeting-when, .meeting-row .meeting-dur { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .meeting-status, .meeting-lang { font-size: 12px; padding: 2px 8px; border-radius: var(--radius-pill); background: rgba(127, 127, 127, 0.14); color: var(--text-dim); white-space: nowrap; }
 .meeting-status.done { color: var(--accent); }
 .meeting-status.failed { color: var(--accent-rec); }
 .meeting-status.transcribing { color: var(--accent); }
-#meetings .row { flex-wrap: wrap; }
-#meetings-transcribe, #meetings-select-all, #meetings-select-none, #meetings-stop { padding: 7px 14px; font-size: 13px; }
+.wrap-row { flex-wrap: wrap; }
+.meetings-action-btn { padding: 7px 14px; font-size: 13px; }
+#meetings-view-all { margin-top: 10px; display: block; }
+
+/* ---------- meeting detail page: a past meeting's transcript, read-only chrome
+   aside from renaming speakers ------------------------------------------- */
+.meeting-detail-page { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; }
+.meeting-detail-page[hidden] { display: none; }
+.meeting-detail-page .view-header { margin-bottom: 0; }
+#detail-reveal { align-self: flex-start; margin: 4px 0 0; }
+
+/* ---------- all meetings page: every recording, newest first ------------- */
+.all-meetings-page { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; }
+.all-meetings-page[hidden] { display: none; }
+
+/* Both new pages reuse settings-page's header idiom (a small transparent "back"
+   button + a 22px title) but, unlike the settings sidebar, the title should take
+   the remaining row width the way main-view's own app-title does. */
+.view-header .settings-title { flex: 1; min-width: 0; margin: 0; }
 
 /* ---------- speaker naming ------------------------------------------------ */
-#speakers .who { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
-#speakers .who code { font-size: 12px; color: var(--text-dim); width: 90px; }
-#speakers input { flex: 1; }
+#speakers .who, #detail-speakers .who { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+#speakers .who code, #detail-speakers .who code { font-size: 12px; color: var(--text-dim); width: 90px; }
+#speakers input, #detail-speakers input { flex: 1; }
 
 /* ---------- transcript --------------------------------------------------- */
-#transcript { margin-top: 18px; }
-#transcript p { margin: 14px 0 0; display: grid; grid-template-columns: 52px 68px 1fr; gap: 10px; line-height: 1.65; }
-#transcript .t { color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 13px; }
-#transcript .who { color: var(--text-dim); font-size: 13px; }
-#transcript .me .who { color: var(--text); font-weight: 600; }
+#transcript, #detail-transcript { margin-top: 18px; }
+#transcript p, #detail-transcript p { margin: 14px 0 0; display: grid; grid-template-columns: 52px 68px 1fr; gap: 10px; line-height: 1.65; }
+#transcript .t, #detail-transcript .t { color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 13px; }
+#transcript .who, #detail-transcript .who { color: var(--text-dim); font-size: 13px; }
+#transcript .me .who, #detail-transcript .me .who { color: var(--text); font-weight: 600; }
 
 /* ---------- MCP connection state (settings > Connections) ---------------- */
 #mcpstate { font-size: 13px; line-height: 1.6; color: var(--text-dim); margin-top: 10px; }
@@ -244,7 +268,7 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 
 /* ---------- reduced transparency: opaque, no blur ------------------------- */
 @media (prefers-reduced-transparency: reduce) {
-  .capsule, .warn, #speakers, #meetings {
+  .capsule, .warn, #speakers, #detail-speakers, #meetings {
     background: var(--opaque-bg);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -263,7 +287,7 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
   @media (prefers-color-scheme: dark) {
     :root { --line-hi: rgba(255, 255, 255, 0.9); --line-lo: rgba(255, 255, 255, 0.9); }
   }
-  .capsule, .warn, #speakers, #meetings, input, button, .meters {
+  .capsule, .warn, #speakers, #detail-speakers, #meetings, input, button, .meters {
     border: 1.5px solid var(--text);
   }
 }

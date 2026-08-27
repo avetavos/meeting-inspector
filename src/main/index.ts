@@ -163,13 +163,21 @@ async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signa
 
     // A voice the user has named before comes back with its name already on it.
     const withTranscript: Transcript = { ...previous, segments, speakers: named }
+    // Rebuilt from nothing every pass, never merged with previous.speakerVoices — a raw
+    // speaker key means someone different every diarize run (see Transcript.speakerVoices'
+    // own doc comment), so an old entry under a reused key would be actively wrong, not
+    // just stale.
+    const recognizedVoices: NonNullable<Transcript['speakerVoices']> = {}
     for (const speaker of Object.keys(named)) {
       if (speaker === 'me' || speaker === 'them') continue
       const known = await identify(dir, withTranscript, speaker).catch(() => null)
-      if (known) named[speaker] = known
+      if (known) {
+        named[speaker] = known.name
+        recognizedVoices[speaker] = { voiceId: known.id, name: known.name }
+      }
     }
 
-    const updated: Transcript = { ...withTranscript, speakers: named }
+    const updated: Transcript = { ...withTranscript, speakers: named, speakerVoices: recognizedVoices }
     await writeTranscript(dir, updated)
     if (notify) wc.send('meeting:transcript', dir, updated)
   } catch (err) {
@@ -582,6 +590,15 @@ function registerIpc(): void {
   // Every recorded meeting plus its transcription status, for the meetings panel (spec
   // item 3/5). `listMeetings` only knows disk state (transcribed or not); "transcribing"
   // and "failed" are this session's own batch-queue state layered on top.
+  // A single meeting's full transcript, for the meetings-list detail view (spec item
+  // 1). Takes an id, not a directory — the renderer never learns NOTES_ROOT's actual
+  // path, and the id is what gets resolved and guarded here (assertMeetingDir), the
+  // same idiom transcribeOne already uses to turn a renderer-supplied id into a path.
+  ipcMain.handle('meeting:get', async (_e, id: string) => {
+    const dir = assertMeetingDir(join(NOTES_ROOT, id))
+    return { dir, transcript: await readTranscript(dir) }
+  })
+
   ipcMain.handle('meeting:list', async () => {
     const [items, settings] = await Promise.all([listMeetings(), getSettings()])
     return items.map((m) => ({

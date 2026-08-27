@@ -109,6 +109,11 @@ const api = {
 
   /** Every recorded meeting, newest first, with its transcription status (spec item 3). */
   listMeetings: (): Promise<MeetingItem[]> => ipcRenderer.invoke('meeting:list'),
+  /** A single meeting's full transcript, for the meetings-list detail view (spec item
+   * 1) — takes an id, not a directory: main resolves and guards the path itself
+   * (assertMeetingDir), the same way transcribeOne already does. */
+  getTranscript: (id: string): Promise<{ dir: string; transcript: Transcript }> =>
+    ipcRenderer.invoke('meeting:get', id),
   /** Transcribes the given meetings one at a time, in order (spec item 4). Resolves
    * once the queue has started, not once it has finished — onBatchItem/onBatchDone
    * report the rest. */
