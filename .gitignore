@@ -12,3 +12,4 @@ build/.whisper-src/
 worker/.dev.vars
 .wrangler/
 spike/asr-accuracy/corpus/
+spike/fixtures/*.wav

@@ -52,6 +52,9 @@ const api = {
   setLanguage: (language: Language): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', { language }),
 
+  knownVoices: (): Promise<string[]> => ipcRenderer.invoke('voices:list'),
+  forgetVoice: (name: string): Promise<void> => ipcRenderer.invoke('voices:forget', name),
+
   mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
   toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),
 }

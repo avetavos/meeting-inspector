@@ -6,6 +6,7 @@ import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { mcpToken } from './token.ts'
 import { getSettings, setSettings, type Language, type Settings } from './settings.ts'
+import { forget, identify, knownVoices, remember } from './voices.ts'
 import {
   NOTES_ROOT,
   assertMeetingDir,
@@ -85,7 +86,17 @@ async function diarizeMeeting(wc: WebContents, dir: string): Promise<void> {
     const turns = await diarize(join(dir, 'loopback.wav'))
     const previous = await readTranscript(dir)
     const segments = assignSpeakers(previous.segments, turns)
-    const updated: Transcript = { ...previous, segments, speakers: speakerNames(segments, previous.speakers, await speakerLabels()) }
+    const named = speakerNames(segments, previous.speakers, await speakerLabels())
+
+    // A voice the user has named before comes back with its name already on it.
+    const withTranscript: Transcript = { ...previous, segments, speakers: named }
+    for (const speaker of Object.keys(named)) {
+      if (speaker === 'me' || speaker === 'them') continue
+      const known = await identify(dir, withTranscript, speaker).catch(() => null)
+      if (known) named[speaker] = known
+    }
+
+    const updated: Transcript = { ...withTranscript, speakers: named }
     await writeTranscript(dir, updated)
     wc.send('meeting:transcript', dir, updated)
   } catch (err) {
@@ -233,8 +244,18 @@ function registerIpc(): void {
     const previous = await readTranscript(assertMeetingDir(dir))
     const updated: Transcript = { ...previous, speakers: { ...previous.speakers, ...speakers } }
     await writeTranscript(assertMeetingDir(dir), updated)
+
+    // Typing a name is the only moment we know whose voice this is. Learn it here so
+    // the next meeting can fill it in on its own.
+    for (const [speaker, name] of Object.entries(speakers)) {
+      if (speaker === 'me' || speaker === name || !name.trim()) continue
+      await remember(assertMeetingDir(dir), updated, speaker, name.trim()).catch(() => {})
+    }
     return updated
   })
+
+  ipcMain.handle('voices:list', () => knownVoices())
+  ipcMain.handle('voices:forget', (_e, name: string) => forget(name))
 
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => setSettings(patch))

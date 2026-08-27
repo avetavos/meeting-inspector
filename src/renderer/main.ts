@@ -12,6 +12,9 @@ const en = {
   meterOthers: 'Others',
   meterUs: 'You',
   settingsSummary: 'Settings',
+  voicesHeading: (n: number) => `Voices I recognise (${n})`,
+  voicesEmpty: 'No voices yet — name a speaker after a meeting and I will know them next time',
+  voicesForget: 'Forget',
   mcpLabel: 'Turn on the MCP server so a local AI assistant can pull the transcript to summarize it',
   permWhy: {
     screen: 'Needed to record system audio — everyone else in the meeting',
@@ -60,6 +63,9 @@ const th: typeof en = {
   meterOthers: 'คนอื่น',
   meterUs: 'เรา',
   settingsSummary: 'ตั้งค่า',
+  voicesHeading: (n: number) => `เสียงที่จำได้ (${n} คน)`,
+  voicesEmpty: 'ยังไม่จำเสียงใคร — ตั้งชื่อคนพูดหลังประชุมสักครั้ง ครั้งหน้าจะเติมชื่อให้เอง',
+  voicesForget: 'ลืมเสียงนี้',
   mcpLabel: 'เปิด MCP server ให้ AI ในเครื่องดึง transcript ไปสรุป',
   permWhy: {
     screen: 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)',
@@ -122,6 +128,7 @@ const mcpStateEl = $('mcpstate')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 const meterLabels: Record<Track, HTMLElement> = { loopback: $('meter-others-label'), mic: $('meter-us-label') }
 const settingsSummary = $('settings-summary')
+const voicesEl = $('voices')
 const mcpLabel = $('mcp-label')
 const langRadios: Record<Language, HTMLInputElement> = {
   en: $<HTMLInputElement>('lang-en'),
@@ -401,6 +408,36 @@ function showMcpState(state: McpState): void {
   )
 }
 
+/**
+ * The voices the app has learned. Naming a speaker after a meeting teaches it one;
+ * this is where you take it back.
+ */
+async function renderVoices(): Promise<void> {
+  const names = await window.api.knownVoices()
+  voicesEl.replaceChildren()
+
+  const heading = document.createElement('div')
+  heading.className = 'hint'
+  heading.textContent = names.length > 0 ? t().voicesHeading(names.length) : t().voicesEmpty
+  voicesEl.append(heading)
+
+  for (const name of names) {
+    const row = document.createElement('div')
+    row.className = 'voice'
+    const who = document.createElement('span')
+    who.textContent = name
+    const forget = document.createElement('button')
+    forget.textContent = t().voicesForget
+    forget.onclick = async () => {
+      forget.disabled = true
+      await window.api.forgetVoice(name)
+      await renderVoices()
+    }
+    row.append(who, forget)
+    voicesEl.append(row)
+  }
+}
+
 function setLevel(track: Track, rms: number): void {
   // sqrt curve: speech sits low on a linear scale and the bar would look dead.
   meters[track].style.width = `${Math.min(100, Math.sqrt(rms) * 180)}%`
@@ -528,6 +565,7 @@ function applyLanguage(l: Language): void {
   meterLabels.loopback.textContent = t().meterOthers
   meterLabels.mic.textContent = t().meterUs
   settingsSummary.textContent = t().settingsSummary
+  void renderVoices()
   mcpLabel.textContent = t().mcpLabel
 
   void showPermissionWarnings(permissionsIncludeScreen)

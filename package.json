@@ -15,7 +15,8 @@
     "asr:score": "node --experimental-transform-types spike/asr-accuracy/score.mjs",
     "dist": "npm run build:whisper && electron-vite build && electron-builder",
     "icon": "electron build/icon.mjs",
-    "build:whisper": "node build/build-whisper.mjs"
+    "build:whisper": "node build/build-whisper.mjs",
+    "fixtures": "node spike/fixtures/make.mjs"
   },
   "devDependencies": {
     "@types/node": "^24",

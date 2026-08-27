@@ -37,9 +37,24 @@ declare module 'sherpa-onnx-node' {
     flush(): void
   }
 
+  export type SpeakerEmbeddingStream = {
+    acceptWaveform(o: { sampleRate: number; samples: Float32Array }): void
+    inputFinished(): void
+  }
+
+  /** Turns a stretch of one person's speech into a vector that identifies the voice. */
+  export class SpeakerEmbeddingExtractor {
+    constructor(config: { model: string; numThreads?: number })
+    readonly dim: number
+    createStream(): SpeakerEmbeddingStream
+    isReady(stream: SpeakerEmbeddingStream): boolean
+    compute(stream: SpeakerEmbeddingStream): Float32Array
+  }
+
   const cjs: {
     OfflineSpeakerDiarization: typeof OfflineSpeakerDiarization
     Vad: typeof Vad
+    SpeakerEmbeddingExtractor: typeof SpeakerEmbeddingExtractor
   }
   export default cjs
 }
