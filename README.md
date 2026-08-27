@@ -23,6 +23,20 @@ summarizes it there.
 | Disk | ~3.5 GB (the app is 120 MB; the speech models are the rest) |
 | Memory | 8 GB works for short meetings, 16 GB is comfortable |
 
+**The short way — one command**
+
+```
+curl -fsSL https://raw.githubusercontent.com/avetavos/meeting-inspector/main/install.sh | bash
+```
+
+Downloads the latest release, installs it, and opens it. No Gatekeeper dialog:
+the "downloaded from the internet" flag that macOS blocks on is set by the
+browser doing the downloading, not by macOS, so fetching with `curl` never
+acquires it. ([read the script first](install.sh) if you'd rather not pipe to
+bash — it is about forty lines.)
+
+The rest of this section is the manual route.
+
 **1. Download**
 
 Get the `.dmg` from
@@ -130,6 +144,19 @@ done.
 | macOS | 13 Ventura ขึ้นไป — พัฒนาและทดสอบบน macOS 26 |
 | พื้นที่ | ~3.5 GB (ตัวแอป 120 MB ที่เหลือคือโมเดลถอดเสียง) |
 | แรม | 8 GB พอสำหรับประชุมสั้น 16 GB สบายกว่า |
+
+**ทางลัด — คำสั่งเดียว**
+
+```
+curl -fsSL https://raw.githubusercontent.com/avetavos/meeting-inspector/main/install.sh | bash
+```
+
+โหลด release ล่าสุด ติดตั้ง แล้วเปิดให้เลย ไม่เจอกล่อง Gatekeeper เพราะป้าย
+"ดาวน์โหลดมาจากอินเทอร์เน็ต" ที่ macOS ใช้บล็อกนั้น **เบราว์เซอร์เป็นคนติด ไม่ใช่ระบบ**
+โหลดด้วย `curl` เลยไม่ติดตั้งแต่แรก ([อ่านสคริปต์ก่อนได้](install.sh) ถ้าไม่อยากไพป์เข้า bash
+— ยาวประมาณสี่สิบบรรทัด)
+
+ที่เหลือด้านล่างคือวิธีติดตั้งด้วยมือ
 
 **1. ดาวน์โหลด**
 
