@@ -6,7 +6,7 @@ import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
 import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { getKey, setKey } from './keys.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
-import { getSettings, setSettings } from './settings.ts'
+import { getSettings, setSettings, type Settings } from './settings.ts'
 import {
   NOTES_ROOT,
   assertMeetingDir,
@@ -34,6 +34,19 @@ type Session = {
 }
 
 const TRACKS = ['loopback', 'mic'] as const
+
+/**
+ * Written into transcript.json, so they follow the UI language at the time of the
+ * meeting. Diarization replaces `them`; the user can rename either afterwards.
+ */
+const DEFAULT_SPEAKERS = {
+  en: { me: 'You', them: 'Others' },
+  th: { me: 'คุณ', them: 'คนอื่น' },
+} as const
+
+const defaultSpeakers = async (): Promise<Record<string, string>> => ({
+  ...DEFAULT_SPEAKERS[(await getSettings()).language],
+})
 
 /** The mic track is us by construction (spec §4.1); `them` is replaced by diarization. */
 const SPEAKER: Record<Track, string> = { mic: 'me', loopback: 'them' }
@@ -213,7 +226,7 @@ function registerIpc(): void {
       id: s.id,
       startedAt: localIso(new Date(s.startedAt)),
       durationSec: Math.max(durations.loopback.durationSec, durations.mic.durationSec),
-      speakers: { me: 'คุณ', them: 'คนอื่น' },
+      speakers: await defaultSpeakers(),
       segments: s.segments,
     }
     await writeTranscript(s.dir, transcript)
@@ -229,6 +242,9 @@ function registerIpc(): void {
     await writeTranscript(assertMeetingDir(dir), updated)
     return updated
   })
+
+  ipcMain.handle('settings:get', () => getSettings())
+  ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => setSettings(patch))
 
   ipcMain.handle('models:status', () => modelStatus())
   ipcMain.handle('models:cancel', () => downloads?.abort())
@@ -308,7 +324,7 @@ app.on('before-quit', async (e) => {
     id: s.id,
     startedAt: localIso(new Date(s.startedAt)),
     durationSec,
-    speakers: { me: 'คุณ', them: 'คนอื่น' },
+    speakers: await defaultSpeakers(),
     segments: s.segments,
   }).catch(() => {})
   app.quit()

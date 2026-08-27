@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelStatus, Progress } from '../main/download.ts'
+import type { Language, Settings } from '../main/settings.ts'
 import type { Transcript } from '../shared/meetings.ts'
 
 export type { Transcript } from '../shared/meetings.ts'
 export type { ModelStatus, Progress } from '../main/download.ts'
+export type { Language, Settings } from '../main/settings.ts'
 
 export type Track = 'loopback' | 'mic'
 export type Segment = { t0: number; t1: number; text: string }
@@ -45,6 +47,10 @@ const api = {
   cancelModels: (): Promise<void> => ipcRenderer.invoke('models:cancel'),
   onModelProgress: (fn: (progress: Progress) => void) =>
     ipcRenderer.on('models:progress', (_e, p: Progress) => fn(p)),
+
+  getSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
+  setLanguage: (language: Language): Promise<Settings> =>
+    ipcRenderer.invoke('settings:set', { language }),
 
   mcpState: (): Promise<McpState> => ipcRenderer.invoke('mcp:state'),
   toggleMcp: (on: boolean): Promise<McpState> => ipcRenderer.invoke('mcp:toggle', on),

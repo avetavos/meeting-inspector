@@ -1,12 +1,16 @@
 import { app } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+export type Language = 'en' | 'th'
+
 export type Settings = {
   /** On by default: leaving the app open is how a connected assistant reaches it. */
   mcp: boolean
+  /** UI language. English by default; Thai is one switch away in settings. */
+  language: Language
 }
 
-const DEFAULTS: Settings = { mcp: true }
+const DEFAULTS: Settings = { mcp: true, language: 'en' }
 const FILE = () => join(app.getPath('userData'), 'settings.json')
 
 export async function getSettings(): Promise<Settings> {
