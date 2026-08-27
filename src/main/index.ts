@@ -1,11 +1,10 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
-import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
 import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
 import { MODELS, downloadModel, modelStatus } from './download.ts'
-import { getKey, setKey } from './keys.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
+import { mcpToken } from './token.ts'
 import { getSettings, setSettings, type Settings } from './settings.ts'
 import {
   NOTES_ROOT,
@@ -110,15 +109,6 @@ async function enqueue(wc: WebContents, track: Track, chunk: Chunk, retry = true
 let downloads: AbortController | null = null
 
 let mcp: McpHandle | null = null
-
-/** Generated once and kept with the API keys — it is the only thing guarding the transcripts. */
-async function mcpToken(): Promise<string> {
-  const existing = await getKey('mcp')
-  if (existing) return existing
-  const token = randomBytes(24).toString('base64url')
-  await setKey('mcp', token)
-  return token
-}
 
 async function restartMcp(): Promise<void> {
   await mcp?.close()
