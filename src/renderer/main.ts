@@ -20,10 +20,15 @@ const PERMISSION_LABEL = {
   microphone: ['Microphone', 'ต้องมีเพื่ออัดเสียงเรา'],
 } as const
 
-async function showPermissionWarnings(): Promise<void> {
+/**
+ * macOS has no not-determined state for Screen Recording — never-granted reads back
+ * as "denied". So at launch we only speak up about the mic, which does distinguish
+ * the two; the screen box appears once a capture attempt has actually failed.
+ */
+async function showPermissionWarnings(includeScreen = false): Promise<void> {
   const status = await window.api.permissions()
   warnings.replaceChildren()
-  for (const which of ['screen', 'microphone'] as const) {
+  for (const which of includeScreen ? (['screen', 'microphone'] as const) : (['microphone'] as const)) {
     if (status[which] === 'granted') continue
     const [name, why] = PERMISSION_LABEL[which]
     const box = document.createElement('div')
@@ -90,8 +95,8 @@ async function start(): Promise<void> {
     })
     recorder = started.recorder
   } catch (err) {
-    warnings.textContent = `เริ่มอัดไม่ได้: ${err instanceof Error ? err.message : String(err)}`
-    await showPermissionWarnings()
+    await showPermissionWarnings(true)
+    warnings.prepend(`เริ่มอัดไม่ได้: ${err instanceof Error ? err.message : String(err)}`)
     return
   } finally {
     toggle.disabled = false
