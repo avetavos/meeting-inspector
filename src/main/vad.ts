@@ -22,17 +22,30 @@ import { model } from './models.ts'
 const MODEL = model('silero_vad.onnx')
 const WINDOW = 512
 
+export type NoiseFilter = 'low' | 'medium' | 'high'
+
+/**
+ * How readily Silero calls something speech. Higher threshold and a longer minimum
+ * mean more of the room is ignored — and a quiet or distant speaker is more likely
+ * to be ignored with it, which is why this is the user's choice and not ours.
+ */
+const LEVELS: Record<NoiseFilter, { threshold: number; minSpeechDuration: number }> = {
+  low: { threshold: 0.35, minSpeechDuration: 0.2 },
+  medium: { threshold: 0.5, minSpeechDuration: 0.25 },
+  high: { threshold: 0.7, minSpeechDuration: 0.4 },
+}
+
 type Detector = { acceptWaveform(s: Float32Array): void; isEmpty(): boolean; pop(): void; reset(): void; flush(): void }
 
-let detector: Promise<Detector | null> | null = null
+let cached: { level: NoiseFilter; detector: Promise<Detector | null> } | null = null
 
-async function load(): Promise<Detector | null> {
+async function load(level: NoiseFilter): Promise<Detector | null> {
   try {
     const sherpa = await import('sherpa-onnx-node')
     const Vad = sherpa.Vad ?? sherpa.default.Vad
     return new Vad(
       {
-        sileroVad: { model: MODEL, threshold: 0.5, minSilenceDuration: 0.25, minSpeechDuration: 0.25, maxSpeechDuration: 20 },
+        sileroVad: { model: MODEL, minSilenceDuration: 0.25, maxSpeechDuration: 20, ...LEVELS[level] },
         sampleRate: 16000,
         numThreads: 1,
       },
@@ -46,12 +59,13 @@ async function load(): Promise<Detector | null> {
   }
 }
 
-export async function hasSpeech(pcm: Int16Array): Promise<boolean> {
+export async function hasSpeech(pcm: Int16Array, level: NoiseFilter = 'medium'): Promise<boolean> {
   // Free, and settles the loopback track without waking the model at all.
   if (!hasSignal(pcm)) return false
 
-  detector ??= load()
-  const vad = await detector
+  // Changing the setting has to take effect on the next chunk, not the next launch.
+  if (cached?.level !== level) cached = { level, detector: load(level) }
+  const vad = await cached.detector
   if (!vad) return true // no detector: better a hallucinated line than a lost one
 
   const samples = new Float32Array(pcm.length)

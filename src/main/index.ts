@@ -6,6 +6,7 @@ import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { mcpToken } from './token.ts'
 import { getSettings, setSettings, type Language, type Settings } from './settings.ts'
+import { hasSpeech } from './vad.ts'
 import { forget, identify, knownVoices, remember } from './voices.ts'
 import {
   NOTES_ROOT,
@@ -63,6 +64,7 @@ function transcription(wc: WebContents): Promise<Whisper> {
   whisper ??= Whisper.start({
     language: 'th',
     prompt: DEFAULT_PROMPT,
+    noiseFilter: async () => (await getSettings()).noiseFilter,
     onSegments: (track, segments) => {
       current?.segments.push(...segments.map((s) => ({ ...s, speaker: SPEAKER[track as Track] })))
       wc.send('transcript:segments', track, segments)
@@ -252,6 +254,18 @@ function registerIpc(): void {
       await remember(assertMeetingDir(dir), updated, speaker, name.trim()).catch(() => {})
     }
     return updated
+  })
+
+  // Microphone test: is what I just said speech at the current setting, and what
+  // survives of it? Answering both is the only way the slider means anything.
+  ipcMain.handle('mic:probe', async (_e, pcm: ArrayBuffer) =>
+    hasSpeech(new Int16Array(pcm), (await getSettings()).noiseFilter),
+  )
+
+  ipcMain.handle('mic:transcribe', async (e, pcm: ArrayBuffer) => {
+    const samples = new Int16Array(pcm)
+    if (!(await hasSpeech(samples, (await getSettings()).noiseFilter))) return ''
+    return (await transcription(e.sender)).transcribeOnce(samples)
   })
 
   ipcMain.handle('voices:list', () => knownVoices())

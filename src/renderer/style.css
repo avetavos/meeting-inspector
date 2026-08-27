@@ -248,3 +248,13 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 #voices { margin-top: 18px; font-size: 13px; }
 #voices .voice { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-top: 6px; }
 #voices button { padding: 2px 10px; font-size: 12px; }
+
+select { font: inherit; color: inherit; padding: 7px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-lo); background: rgba(127, 127, 127, 0.12); -webkit-app-region: no-drag; }
+
+/* microphone test — see what the current noise setting does to your own voice */
+#mictest { margin-top: 14px; }
+#mictest-line { margin-top: 10px; font-size: 15px; line-height: 1.7; }
+#mictest-verdict { font-size: 13px; width: 8em; color: var(--text-dim); }
+#mictest-verdict.speech { color: var(--accent); font-weight: 600; }
+#mictest-verdict.dropped { color: var(--accent-rec); font-weight: 600; }

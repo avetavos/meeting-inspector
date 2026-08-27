@@ -4,7 +4,7 @@ import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { SAMPLE_RATE, type Chunk } from './chunker.ts'
 import { model, requireFiles } from './models.ts'
-import { hasSpeech } from './vad.ts'
+import { hasSpeech, type NoiseFilter } from './vad.ts'
 import { wavHeader } from './wav.ts'
 
 export type Segment = { t0: number; t1: number; text: string }
@@ -48,6 +48,8 @@ export type WhisperOptions = {
   language: string
   /** Initial prompt: vocabulary to bias decoding toward (spec §13 risk #3). */
   prompt?: string
+  /** Read per chunk, so changing it in settings applies without a restart. */
+  noiseFilter?: () => Promise<NoiseFilter>
   onSegments: (track: string, segments: Segment[]) => void
   onDepth: (depth: number) => void
 }
@@ -124,7 +126,8 @@ export class Whisper {
       for (let job = this.queue.shift(); job; job = this.queue.shift()) {
         // Silence has nothing to transcribe, invites a hallucination, and can take
         // the server down with it (spec §7.3).
-        if (!(await hasSpeech(job.pcm))) {
+        const level = (await this.opts.noiseFilter?.()) ?? 'medium'
+        if (!(await hasSpeech(job.pcm, level))) {
           this.opts.onDepth(this.queue.length)
           continue
         }
@@ -160,6 +163,12 @@ export class Whisper {
     return (json.segments ?? [])
       .map((s) => ({ t0: job.startSec + s.start, t1: job.startSec + s.end, text: s.text.trim() }))
       .filter((s) => s.text.length > 0)
+  }
+
+  /** One-off, outside the queue — the microphone test in settings, not a meeting. */
+  async transcribeOnce(pcm: Int16Array): Promise<string> {
+    const segments = await this.transcribe({ track: 'test', pcm, startSec: 0 })
+    return segments.map((s) => s.text).join(' ')
   }
 
   /** Resolves once every queued chunk has come back — a meeting's tail is 1-2 chunks. */

@@ -1,6 +1,6 @@
 import type { Language, McpState, Transcript } from '../preload/index.ts'
 import { titleOf } from '../shared/meetings.ts'
-import { Recorder, type Track } from './recorder.ts'
+import { Recorder, openMicTap, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -15,6 +15,22 @@ const en = {
   voicesHeading: (n: number) => `Voices I recognise (${n})`,
   voicesEmpty: 'No voices yet — name a speaker after a meeting and I will know them next time',
   voicesForget: 'Forget',
+  micTest: 'Test my microphone',
+  micTestStop: 'Stop',
+  micTestLine: 'Read this out loud: "วันนี้เราจะคุยเรื่อง deploy กับ migration ของฐานข้อมูลครับ"',
+  micTestSpeech: 'hearing speech',
+  micTestDropped: 'ignoring this',
+  micTestHeard: (text: string) => `Transcribed: ${text}`,
+  micTestNothing: 'Nothing survived the filter — try a lower setting, or speak closer to the mic.',
+  noiseLabel: 'Ignore noise',
+  noiseLow: 'Keep everything',
+  noiseMedium: 'Balanced',
+  noiseHigh: 'Speech only',
+  noiseHint: {
+    low: 'Room tone is still ignored. Faint talking in a noisy room is kept — with it, the odd line the room made rather than a person.',
+    medium: 'The default. Room tone ignored, quiet and distant speech still transcribed.',
+    high: 'Also drops very faint speech in a noisy room. Use this if lines appear when nobody is talking.',
+  } as Record<string, string>,
   mcpLabel: 'Turn on the MCP server so a local AI assistant can pull the transcript to summarize it',
   permWhy: {
     screen: 'Needed to record system audio — everyone else in the meeting',
@@ -66,6 +82,22 @@ const th: typeof en = {
   voicesHeading: (n: number) => `เสียงที่จำได้ (${n} คน)`,
   voicesEmpty: 'ยังไม่จำเสียงใคร — ตั้งชื่อคนพูดหลังประชุมสักครั้ง ครั้งหน้าจะเติมชื่อให้เอง',
   voicesForget: 'ลืมเสียงนี้',
+  micTest: 'ทดสอบไมค์',
+  micTestStop: 'หยุด',
+  micTestLine: 'อ่านประโยคนี้ออกเสียง: "วันนี้เราจะคุยเรื่อง deploy กับ migration ของฐานข้อมูลครับ"',
+  micTestSpeech: 'ได้ยินเป็นเสียงพูด',
+  micTestDropped: 'กำลังทิ้งเสียงนี้',
+  micTestHeard: (text: string) => `ถอดได้ว่า: ${text}`,
+  micTestNothing: 'ไม่มีอะไรรอดผ่านตัวกรอง — ลองลดระดับลง หรือพูดใกล้ไมค์ขึ้น',
+  noiseLabel: 'กรองเสียงรบกวน',
+  noiseLow: 'เก็บทุกอย่าง',
+  noiseMedium: 'สมดุล',
+  noiseHigh: 'เอาแต่เสียงพูด',
+  noiseHint: {
+    low: 'เสียงห้องเปล่ายังถูกกรองอยู่ แต่คนคุยแผ่วๆ ในห้องที่มีเสียงรบกวนจะถูกเก็บไว้ — แลกกับบางบรรทัดที่ห้องสร้างขึ้นเอง ไม่ใช่คนพูด',
+    medium: 'ค่าเริ่มต้น กรองเสียงห้องออก แต่ยังถอดเสียงคนที่พูดเบาหรืออยู่ไกลไมค์',
+    high: 'ตัดเสียงพูดที่แผ่วมากในห้องที่มีเสียงรบกวนออกด้วย ใช้เมื่อมีบรรทัดโผล่ทั้งที่ไม่มีใครพูด',
+  } as Record<string, string>,
   mcpLabel: 'เปิด MCP server ให้ AI ในเครื่องดึง transcript ไปสรุป',
   permWhy: {
     screen: 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)',
@@ -129,6 +161,14 @@ const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('
 const meterLabels: Record<Track, HTMLElement> = { loopback: $('meter-others-label'), mic: $('meter-us-label') }
 const settingsSummary = $('settings-summary')
 const voicesEl = $('voices')
+const noiseSelect = $<HTMLSelectElement>('noise')
+const noiseLabel = $('noise-label')
+const noiseHint = $('noisehint')
+const micToggle = $<HTMLButtonElement>('mictest-toggle')
+const micLevel = $('mictest-level')
+const micVerdict = $('mictest-verdict')
+const micLine = $('mictest-line')
+const micHeard = $('mictest-heard')
 const mcpLabel = $('mcp-label')
 const langRadios: Record<Language, HTMLInputElement> = {
   en: $<HTMLInputElement>('lang-en'),
@@ -438,6 +478,77 @@ async function renderVoices(): Promise<void> {
   }
 }
 
+/**
+ * Lets someone hear what the noise setting does to their own room before a meeting
+ * depends on it. Live meter, a live verdict from the same gate the recorder uses,
+ * and what actually survives to the transcript.
+ */
+let micStop: (() => void) | null = null
+let micFrames: Float32Array[] = []
+
+async function toggleMicTest(): Promise<void> {
+  if (micStop) {
+    micStop()
+    micStop = null
+    micToggle.textContent = t().micTest
+    micLine.textContent = ''
+    micVerdict.textContent = ''
+    micVerdict.className = ''
+    micLevel.style.width = '0%'
+
+    const total = micFrames.reduce((n, f) => n + f.length, 0)
+    const all = new Int16Array(total)
+    let at = 0
+    for (const f of micFrames) for (const v of f) all[at++] = Math.max(-1, Math.min(1, v)) * 32767
+    micFrames = []
+    if (total > 16000) {
+      micHeard.textContent = '…'
+      const text = await window.api.transcribeMic(all.buffer as ArrayBuffer)
+      micHeard.textContent = text.trim() ? t().micTestHeard(text.trim()) : t().micTestNothing
+    }
+    return
+  }
+
+  micHeard.textContent = ''
+  micFrames = []
+  try {
+    micStop = await openMicTap((frame) => {
+      micFrames.push(frame)
+      let sum = 0
+      for (const v of frame) sum += v * v
+      setMicLevel(Math.sqrt(sum / frame.length))
+    })
+  } catch (err) {
+    micHeard.textContent = reason(err)
+    return
+  }
+  micToggle.textContent = t().micTestStop
+  micLine.textContent = t().micTestLine
+  void probeLoop()
+}
+
+function setMicLevel(rms: number): void {
+  micLevel.style.width = `${Math.min(100, Math.sqrt(rms) * 180)}%`
+}
+
+/** Asks main, every second, whether the last two seconds count as speech right now. */
+async function probeLoop(): Promise<void> {
+  while (micStop) {
+    const recent = micFrames.slice(-20)
+    const total = recent.reduce((n, f) => n + f.length, 0)
+    if (total > 16000) {
+      const pcm = new Int16Array(total)
+      let at = 0
+      for (const f of recent) for (const v of f) pcm[at++] = Math.max(-1, Math.min(1, v)) * 32767
+      const speech = await window.api.probeMic(pcm.buffer as ArrayBuffer).catch(() => false)
+      if (!micStop) break
+      micVerdict.textContent = speech ? t().micTestSpeech : t().micTestDropped
+      micVerdict.className = speech ? 'speech' : 'dropped'
+    }
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+}
+
 function setLevel(track: Track, rms: number): void {
   // sqrt curve: speech sits low on a linear scale and the bar would look dead.
   meters[track].style.width = `${Math.min(100, Math.sqrt(rms) * 180)}%`
@@ -565,6 +676,14 @@ function applyLanguage(l: Language): void {
   meterLabels.loopback.textContent = t().meterOthers
   meterLabels.mic.textContent = t().meterUs
   settingsSummary.textContent = t().settingsSummary
+  noiseLabel.textContent = t().noiseLabel
+  const options = noiseSelect.options
+  options[0]!.textContent = t().noiseLow
+  options[1]!.textContent = t().noiseMedium
+  options[2]!.textContent = t().noiseHigh
+  noiseHint.textContent = t().noiseHint[noiseSelect.value] ?? ''
+  micToggle.textContent = micStop ? t().micTestStop : t().micTest
+  micLine.textContent = micStop ? t().micTestLine : ''
   void renderVoices()
   mcpLabel.textContent = t().mcpLabel
 
@@ -582,4 +701,21 @@ for (const [code, radio] of Object.entries(langRadios) as [Language, HTMLInputEl
 }
 
 toggle.onclick = () => void (recorder ? stop() : start())
-void window.api.getSettings().then((settings) => applyLanguage(settings.language))
+micToggle.onclick = () => void toggleMicTest()
+
+noiseSelect.onchange = async () => {
+  noiseSelect.disabled = true
+  try {
+    // Applies to the next chunk, not the next launch — the whole point is trying a
+    // level and hearing whether it helped.
+    await window.api.setNoiseFilter(noiseSelect.value as 'low' | 'medium' | 'high')
+    noiseHint.textContent = t().noiseHint[noiseSelect.value] ?? ''
+  } finally {
+    noiseSelect.disabled = false
+  }
+}
+
+void window.api.getSettings().then((settings) => {
+  noiseSelect.value = settings.noiseFilter
+  applyLanguage(settings.language)
+})
