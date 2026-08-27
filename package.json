@@ -13,8 +13,9 @@
     "test": "node --experimental-transform-types --test \"src/**/*.test.ts\"",
     "asr:read": "cat spike/asr-accuracy/script.th.txt",
     "asr:score": "node --experimental-transform-types spike/asr-accuracy/score.mjs",
-    "dist": "electron-vite build && electron-builder",
-    "icon": "electron build/icon.mjs"
+    "dist": "npm run build:whisper && electron-vite build && electron-builder",
+    "icon": "electron build/icon.mjs",
+    "build:whisper": "node build/build-whisper.mjs"
   },
   "devDependencies": {
     "@types/node": "^24",

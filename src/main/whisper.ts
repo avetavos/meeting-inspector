@@ -1,12 +1,25 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { join } from 'node:path'
 import { SAMPLE_RATE, type Chunk } from './chunker.ts'
 import { model, requireFiles } from './models.ts'
 import { wavHeader } from './wav.ts'
 
 export type Segment = { t0: number; t1: number; text: string }
 
-const BIN = process.env['WHISPER_SERVER'] ?? '/opt/homebrew/bin/whisper-server'
+/**
+ * Prefer the copy we build and ship (build/build-whisper.mjs) so an installed .dmg
+ * needs nothing else; fall back to Homebrew's so a checkout without a build still
+ * runs. `process.resourcesPath` only exists under Electron, hence the guard.
+ */
+const BIN =
+  process.env['WHISPER_SERVER'] ??
+  [
+    process.resourcesPath ? join(process.resourcesPath, 'whisper', 'whisper-server') : '',
+    join(process.cwd(), 'resources', 'whisper', 'whisper-server'),
+  ].find((path) => path && existsSync(path)) ??
+  '/opt/homebrew/bin/whisper-server'
 const MODEL = model('ggml-large-v3.bin')
 // Silero, run inside whisper-server. Measured on 30s of digital silence:
 // without it large-v3 emits "โปรดติดตามตอนต่อไป"; with it, an empty segment list
@@ -66,7 +79,7 @@ export class Whisper {
 
   static async start(opts: WhisperOptions): Promise<Whisper> {
     const { language } = opts
-    await requireFiles([BIN], 'ติดตั้งด้วย `brew install whisper-cpp`')
+    await requireFiles([BIN], 'รัน `npm run build:whisper` หรือ `brew install whisper-cpp`')
     await requireFiles([MODEL, VAD_MODEL], 'กดปุ่มโหลดโมเดลในแอป')
     const port = await freePort()
     const proc = spawn(

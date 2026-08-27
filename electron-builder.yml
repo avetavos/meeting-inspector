@@ -13,6 +13,11 @@ files:
 asarUnpack:
   - '**/node_modules/sherpa-onnx-*/**'
 
+# Statically built by build/build-whisper.mjs so the .dmg does not need Homebrew.
+extraResources:
+  - from: resources/whisper
+    to: whisper
+
 mac:
   category: public.app-category.productivity
   # Unsigned by design (spec §3) — the first launch needs Open Anyway.

@@ -7,3 +7,5 @@ models/
 *.dmg
 .DS_Store
 .env
+resources/
+build/.whisper-src/
