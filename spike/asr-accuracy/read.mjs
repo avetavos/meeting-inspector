@@ -16,8 +16,9 @@ if (!wanted) {
     const spoken = text.split('\n').filter((l) => l.trim() && !l.startsWith('#') && !l.startsWith('TERMS:'))
     const words = spoken.join(' ').split(/\s+/).length
     const people = new Set(spoken.map((l) => /^([^:]{1,20}):\s/.exec(l)?.[1]).filter(Boolean))
-    const who = people.size > 1 ? `${people.size} คน (${[...people].join(', ')})` : '1 คน'
-    console.log(`  ${file.slice(0, 2)}  ${file.slice(3, -4).padEnd(14)} ${who.padEnd(30)} ~${words} คำ, ${terms} ศัพท์`)
+    const cast = /^#\s*CAST:\s*(.+)$/m.exec(text)?.[1]?.trim()
+    const who = people.size > 1 ? `${people.size} คน${cast ? ` ${cast}` : ''}` : '1 คน'
+    console.log(`  ${file.slice(0, 2)}  ${file.slice(3, -4).padEnd(16)} ${who.padEnd(18)} ~${words} คำ, ${terms} ศัพท์`)
   }
   console.log('\n  npm run asr:read -- 02     อ่านบทนั้น')
   console.log('  npm run asr:score -- 02    ให้คะแนนการประชุมล่าสุดเทียบกับบทนั้น')

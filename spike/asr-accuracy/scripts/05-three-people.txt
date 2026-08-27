@@ -1,4 +1,5 @@
 # จำลองประชุม 3 คน — standup ตอนเช้า
+# CAST: ชาย+หญิง
 # TERMS: ศัพท์ที่ต้องออกมาเป็นภาษาอังกฤษ
 
 TERMS: standup, sprint, ticket, blocker, deploy, staging, production, API, endpoint, schema, migration, test, bug, release, dependency

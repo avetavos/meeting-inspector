@@ -1,4 +1,5 @@
 # จำลองประชุม 5 คน — วางแผนปล่อยของรอบใหญ่
+# CAST: ชาย+หญิง
 # TERMS: ศัพท์ที่ต้องออกมาเป็นภาษาอังกฤษ
 
 TERMS: release, deploy, staging, production, feature flag, rollout, rollback, regression, test, bug, hotfix, downtime, backup, migration, monitoring, alert, on-call, checklist

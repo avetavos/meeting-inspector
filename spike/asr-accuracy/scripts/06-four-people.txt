@@ -1,4 +1,5 @@
 # จำลองประชุม 4 คน — ตัดสินใจเรื่องสถาปัตยกรรม
+# CAST: ชาย+หญิง
 # TERMS: ศัพท์ที่ต้องออกมาเป็นภาษาอังกฤษ
 
 TERMS: architecture, service, monolith, microservice, database, cache, Redis, queue, latency, throughput, scale, deploy, rollback, migration, API gateway, load, cost

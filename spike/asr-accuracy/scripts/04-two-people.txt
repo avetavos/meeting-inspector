@@ -1,6 +1,7 @@
 # จำลองประชุม 2 คน — code review คุยกันไปมา
 # แต่ละบรรทัดขึ้นต้นด้วยชื่อคนพูด อ่านสลับกันจริงจะดีที่สุด
 # ถ้าอ่านคนเดียว ให้ทดสอบการถอดเสียง ถ้ามีสองคนจะทดสอบการแยกคนพูดได้ด้วย
+# CAST: ชาย+หญิง
 # TERMS: ศัพท์ที่ต้องออกมาเป็นภาษาอังกฤษ
 
 TERMS: code review, pull request, merge, branch, commit, refactor, function, variable, test, coverage, edge case, null, exception, log, performance, query, index, cache
