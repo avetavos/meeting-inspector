@@ -17,10 +17,15 @@ const en = {
   voicesForget: 'Forget',
   micTest: 'Test my microphone',
   micTestStop: 'Stop',
-  micTestLine: 'Read this out loud: "วันนี้เราจะคุยเรื่อง deploy กับ migration ของฐานข้อมูลครับ"',
+  micTestPrompt: 'Read this out loud',
+  micTestExpected: 'You read',
+  micTestGot: 'It heard',
+  micTestTerms: (found: string[], missed: string[]) =>
+    missed.length === 0
+      ? `Both technical terms came through: ${found.join(', ')}`
+      : `Missed: ${missed.join(', ')}${found.length > 0 ? ` · kept: ${found.join(', ')}` : ''}`,
   micTestSpeech: 'hearing speech',
   micTestDropped: 'ignoring this',
-  micTestHeard: (text: string) => `Transcribed: ${text}`,
   micTestNothing: 'Nothing survived the filter.',
   micVerdictQuiet: 'The microphone barely picked anything up. This is not the filter — check the input device, or speak closer.',
   micVerdictTooStrict: (pct: number) =>
@@ -94,10 +99,15 @@ const th: typeof en = {
   voicesForget: 'ลืมเสียงนี้',
   micTest: 'ทดสอบไมค์',
   micTestStop: 'หยุด',
-  micTestLine: 'อ่านประโยคนี้ออกเสียง: "วันนี้เราจะคุยเรื่อง deploy กับ migration ของฐานข้อมูลครับ"',
+  micTestPrompt: 'อ่านประโยคนี้ออกเสียง',
+  micTestExpected: 'ประโยคที่ให้อ่าน',
+  micTestGot: 'ถอดได้ว่า',
+  micTestTerms: (found: string[], missed: string[]) =>
+    missed.length === 0
+      ? `ศัพท์เทคนิคมาครบ: ${found.join(', ')}`
+      : `หายไป: ${missed.join(', ')}${found.length > 0 ? ` · ได้: ${found.join(', ')}` : ''}`,
   micTestSpeech: 'ได้ยินเป็นเสียงพูด',
   micTestDropped: 'กำลังทิ้งเสียงนี้',
-  micTestHeard: (text: string) => `ถอดได้ว่า: ${text}`,
   micTestNothing: 'ไม่มีอะไรรอดผ่านตัวกรอง',
   micVerdictQuiet: 'ไมค์แทบไม่ได้ยินอะไรเลย อันนี้ไม่ใช่เรื่องระดับกรอง ลองเช็คว่าเลือกไมค์ถูกตัวไหม หรือพูดใกล้ขึ้น',
   micVerdictTooStrict: (pct: number) =>
@@ -507,6 +517,24 @@ let micStop: (() => void) | null = null
 let micFrames: Float32Array[] = []
 let micProbes = { checks: 0, heard: 0, loudest: 0 }
 
+/**
+ * Thai regardless of the interface language — it is the transcriber being tested,
+ * and the transcriber is set to Thai. The two English terms are the point: whether
+ * they survive is what the vocabulary prompt exists for.
+ */
+const MIC_TEST_SENTENCE = 'วันนี้เราจะคุยเรื่อง deploy กับ migration ของฐานข้อมูลครับ'
+const MIC_TEST_TERMS = ['deploy', 'migration']
+
+const line = (label: string, text: string, dim = false): HTMLElement => {
+  const row = document.createElement('div')
+  if (dim) row.className = 'hint'
+  const name = document.createElement('span')
+  name.className = 'rowlabel'
+  name.textContent = `${label}: `
+  row.append(name, document.createTextNode(text))
+  return row
+}
+
 const LEVELS = ['low', 'medium', 'high'] as const
 
 /**
@@ -557,9 +585,15 @@ async function toggleMicTest(): Promise<void> {
       const { message, move } = micVerdict(text)
       micHeard.replaceChildren()
       if (text.trim()) {
-        const heard = document.createElement('div')
-        heard.textContent = t().micTestHeard(text.trim())
-        micHeard.append(heard)
+        // Both sentences, together. Whether the transcription is any good is a
+        // comparison, and clearing the prompt made that impossible to see.
+        micHeard.append(line(t().micTestExpected, MIC_TEST_SENTENCE, true))
+        micHeard.append(line(t().micTestGot, text.trim()))
+        const lower = text.toLowerCase()
+        const found = MIC_TEST_TERMS.filter((term) => lower.includes(term))
+        micHeard.append(
+          line('', t().micTestTerms(found, MIC_TEST_TERMS.filter((term) => !found.includes(term))), true),
+        )
       }
       const verdict = document.createElement('div')
       verdict.textContent = message
@@ -596,7 +630,7 @@ async function toggleMicTest(): Promise<void> {
     return
   }
   micToggle.textContent = t().micTestStop
-  micLine.textContent = t().micTestLine
+  micLine.textContent = `${t().micTestPrompt}: ${MIC_TEST_SENTENCE}`
   void probeLoop()
 }
 
@@ -761,7 +795,7 @@ function applyLanguage(l: Language): void {
   options[2]!.textContent = t().noiseHigh
   noiseHint.textContent = t().noiseHint[noiseSelect.value] ?? ''
   micToggle.textContent = micStop ? t().micTestStop : t().micTest
-  micLine.textContent = micStop ? t().micTestLine : ''
+  micLine.textContent = micStop ? `${t().micTestPrompt}: ${MIC_TEST_SENTENCE}` : ''
   void renderVoices()
   mcpLabel.textContent = t().mcpLabel
 

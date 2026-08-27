@@ -264,3 +264,6 @@ select { font: inherit; color: inherit; padding: 7px 10px; border-radius: var(--
 #mictest-level.speech { background: var(--accent); }
 #mictest-heard > div { margin-top: 6px; }
 #mictest-heard button { margin-top: 8px; }
+
+#mictest-heard .rowlabel { color: var(--text-dim); }
+#mictest-heard > div { margin-top: 6px; line-height: 1.7; }
