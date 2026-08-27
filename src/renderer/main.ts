@@ -8,6 +8,7 @@ import type {
   MeetingItem,
   MeetingLanguage,
   ModelStatus,
+  PendingVoiceItem,
   Transcript,
   TranscribeMode,
   TranscribeStatus,
@@ -37,6 +38,15 @@ const en = {
   voicesHeading: (n: number) => `Voices I recognise (${n})`,
   voicesEmpty: 'No voices yet — name a speaker after a meeting and I will know them next time',
   voicesForget: 'Forget',
+  pendingHeading: (n: number) => `New voices waiting to be named (${n})`,
+  pendingEmpty: 'No new voices waiting to be named',
+  pendingHeard: (title: string, when: string) => `First heard in ${title} · ${when}`,
+  pendingSaidLabel: 'Said: ',
+  pendingNamePlaceholder: 'Name this voice',
+  pendingSave: 'Save',
+  pendingPlay: 'Play sample',
+  pendingPlaying: 'Playing…',
+  pendingNoSample: 'No audio sample available',
   micTest: 'Test my microphone',
   micTestStop: 'Stop',
   micTestPrompt: 'Read this out loud',
@@ -158,6 +168,8 @@ const en = {
   speakerSave: 'Save names',
   speakerSaved: 'Saved',
   speakerMergeHint: 'If someone got split into two speakers, give them the same name to merge them.',
+  speakerScopeHint: 'A 🔊 speaker is a voice this app already recognises — renaming them updates every meeting. Anyone else is renamed only in this meeting.',
+  voiceRecognisedTag: 'recognised',
   copy: 'Copy',
   copied: 'Copied',
   speakerDefaults: { me: 'You', them: 'Others' },
@@ -266,6 +278,15 @@ const th: typeof en = {
   voicesHeading: (n: number) => `เสียงที่จำได้ (${n} คน)`,
   voicesEmpty: 'ยังไม่จำเสียงใคร — ตั้งชื่อคนพูดหลังประชุมสักครั้ง ครั้งหน้าจะเติมชื่อให้เอง',
   voicesForget: 'ลืมเสียงนี้',
+  pendingHeading: (n: number) => `เสียงใหม่รอตั้งชื่อ (${n} คน)`,
+  pendingEmpty: 'ยังไม่มีเสียงใหม่รอตั้งชื่อ',
+  pendingHeard: (title: string, when: string) => `ได้ยินครั้งแรกในการประชุม ${title} · ${when}`,
+  pendingSaidLabel: 'พูดว่า: ',
+  pendingNamePlaceholder: 'ตั้งชื่อเสียงนี้',
+  pendingSave: 'บันทึก',
+  pendingPlay: 'ฟังตัวอย่างเสียง',
+  pendingPlaying: 'กำลังเล่น…',
+  pendingNoSample: 'ไม่มีตัวอย่างเสียง',
   micTest: 'ทดสอบไมค์',
   micTestStop: 'หยุด',
   micTestPrompt: 'อ่านประโยคนี้ออกเสียง',
@@ -372,6 +393,8 @@ const th: typeof en = {
   speakerSave: 'บันทึกชื่อ',
   speakerSaved: 'บันทึกแล้ว',
   speakerMergeHint: 'ถ้าแยกคนพูดผิด ตั้งชื่อเดียวกันให้สองคน = รวมเป็นคนเดียว',
+  speakerScopeHint: 'ผู้พูดที่มี 🔊 คือเสียงที่แอปนี้จำได้แล้ว — เปลี่ยนชื่อจะอัปเดตทุกการประชุม ส่วนคนอื่นจะเปลี่ยนแค่ในการประชุมนี้',
+  voiceRecognisedTag: 'จำได้แล้ว',
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
   speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
@@ -454,6 +477,7 @@ const mcpStateEl = $('mcpstate')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 const meterLabels: Record<Track, HTMLElement> = { loopback: $('meter-others-label'), mic: $('meter-us-label') }
 const voicesEl = $('voices')
+const pendingVoicesEl = $('pending-voices')
 const portInput = $<HTMLInputElement>('port')
 const portSave = $<HTMLButtonElement>('port-save')
 const portLabel = $('port-label')
@@ -906,6 +930,11 @@ let ticker: number | undefined
  */
 let segments: Transcript['segments'] = []
 let speakers: Record<string, string> = { ...en.speakerDefaults }
+/** Which of `speakers` are voices the app already recognises, and by which id — set
+ * alongside `speakers` whenever a diarize pass lands (onDiarized below), read by
+ * renderSpeakerPanel to show the user which renames propagate everywhere and which
+ * stay local to this meeting (spec item 3). */
+let speakerVoices: Transcript['speakerVoices'] = undefined
 let meetingDir: string | null = null
 
 /** Remembered so a language switch re-renders the panel with the same screen/mic scope. */
@@ -1354,6 +1383,7 @@ function renderSpeakerPanel(
   onSave: (updated: Record<string, string>) => void = (updated) => {
     speakers = updated
   },
+  spkVoices: Transcript['speakerVoices'] = speakerVoices,
 ): void {
   container.replaceChildren()
   if (!dir) return
@@ -1364,6 +1394,16 @@ function renderSpeakerPanel(
     row.className = 'who'
     const tag = document.createElement('code')
     tag.textContent = label
+    // Visible up front, not just after saving (spec item 3): a voice this diarize
+    // pass already tied to an id renames everywhere that id is used; anything else
+    // renames only this meeting — see speakerScopeHint below for the full rule.
+    if (spkVoices?.[label]) {
+      const badge = document.createElement('span')
+      badge.className = 'voice-badge'
+      badge.textContent = '🔊'
+      badge.title = t().voiceRecognisedTag
+      tag.append(badge)
+    }
     const input = document.createElement('input')
     input.value = spk[label] ?? label
     input.oninput = () => {
@@ -1391,7 +1431,10 @@ function renderSpeakerPanel(
   const hint = document.createElement('div')
   hint.className = 'hint'
   hint.textContent = t().speakerMergeHint
-  container.append(save, hint)
+  const scopeHint = document.createElement('div')
+  scopeHint.className = 'hint'
+  scopeHint.textContent = t().speakerScopeHint
+  container.append(save, hint, scopeHint)
 }
 
 function copyRow(label: string, value: string): HTMLElement {
@@ -1495,6 +1538,112 @@ async function renderVoices(): Promise<void> {
     }
     row.append(who, forget)
     voicesEl.append(row)
+  }
+}
+
+/** Playing a pending voice's sample is one at a time — a second click (this row or
+ * another) must stop whatever is already playing rather than overlap it. */
+let pendingAudio: HTMLAudioElement | null = null
+let pendingAudioUrl: string | null = null
+function stopPendingAudio(): void {
+  pendingAudio?.pause()
+  pendingAudio = null
+  if (pendingAudioUrl) {
+    URL.revokeObjectURL(pendingAudioUrl)
+    pendingAudioUrl = null
+  }
+}
+
+/**
+ * Voices diarization has clustered but nobody has named yet (spec item 1). Each row
+ * lets the user hear the voice before deciding what to call it (spec item 2) — the
+ * sample comes back from main as raw WAV bytes (never a file path the renderer could
+ * point anywhere) and is played from a Blob URL, which CSP's `media-src ... blob:`
+ * already allows. Naming one here removes it from this list and, via voices.ts's
+ * resolveSpeakerNames, updates every meeting that already recognised it (spec item 3)
+ * — nothing on disk to walk or rewrite.
+ */
+async function renderPendingVoices(): Promise<void> {
+  const items = await window.api.pendingVoices()
+  stopPendingAudio()
+  pendingVoicesEl.replaceChildren()
+
+  const heading = document.createElement('div')
+  heading.className = 'hint'
+  heading.textContent = items.length > 0 ? t().pendingHeading(items.length) : t().pendingEmpty
+  pendingVoicesEl.append(heading)
+
+  for (const item of items) {
+    const row = document.createElement('div')
+    row.className = 'pending-voice'
+
+    const meta = document.createElement('div')
+    meta.className = 'hint'
+    meta.textContent = t().pendingHeard(item.meetingTitle, fmtMeetingWhen(item.at))
+    row.append(meta)
+
+    if (item.text) {
+      const said = document.createElement('div')
+      said.textContent = `${t().pendingSaidLabel}${item.text}`
+      row.append(said)
+    }
+
+    const controls = document.createElement('div')
+    controls.className = 'who'
+
+    const play = document.createElement('button')
+    play.textContent = t().pendingPlay
+    play.onclick = async () => {
+      stopPendingAudio()
+      play.disabled = true
+      play.textContent = t().pendingPlaying
+      const sample = await window.api.voiceSample(item.id)
+      const reset = () => {
+        play.disabled = false
+        play.textContent = t().pendingPlay
+      }
+      if (!sample) {
+        play.textContent = t().pendingNoSample
+        play.disabled = false
+        setTimeout(reset, 1500)
+        return
+      }
+      // Re-wrapped rather than passed straight through: the value that survives IPC
+      // types as Uint8Array<ArrayBufferLike> (it could in principle back onto a
+      // SharedArrayBuffer), which Blob's constructor does not accept — a fresh
+      // Uint8Array always backs onto a plain ArrayBuffer.
+      const url = URL.createObjectURL(new Blob([new Uint8Array(sample)], { type: 'audio/wav' }))
+      pendingAudioUrl = url
+      const audio = new Audio(url)
+      pendingAudio = audio
+      audio.onended = () => {
+        reset()
+        stopPendingAudio()
+      }
+      audio.onerror = () => {
+        reset()
+        stopPendingAudio()
+      }
+      await audio.play().catch(reset)
+    }
+
+    const input = document.createElement('input')
+    input.placeholder = t().pendingNamePlaceholder
+
+    const save = document.createElement('button')
+    save.textContent = t().pendingSave
+    save.onclick = async () => {
+      const name = input.value.trim()
+      if (!name) return
+      save.disabled = true
+      await window.api.nameVoice(item.id, name)
+      await renderPendingVoices()
+      await renderVoices()
+    }
+
+    controls.append(play, input, save)
+    row.append(controls)
+    pendingVoicesEl.append(row)
   }
 }
 
@@ -1747,6 +1896,7 @@ async function start(): Promise<void> {
         ? t().transcribeManualPlaceholder
         : ''
   speakers = { ...t().speakerDefaults }
+  speakerVoices = undefined
   meetingDir = null
   await window.api.requestPermissions()
   toggle.disabled = true
@@ -2171,6 +2321,10 @@ window.api.onBatchDone(({ cancelled }) => {
   else renderMeetingsProgress(cancelled ? t().meetingsCancelled : '')
   updateTranscriptionLocks()
   void renderMeetings()
+  // The batch's diarize pass (spec item 4/MEDIUM 4) is exactly where a new stranger's
+  // voice would get clustered into a pending entry — refresh the Settings list so it
+  // shows up without waiting for a language switch or a manual reopen.
+  void renderPendingVoices()
 })
 
 /**
@@ -2199,6 +2353,9 @@ let detailId: string | null = null
 let detailDir: string | null = null
 let detailSegments: Transcript['segments'] = []
 let detailSpeakers: Record<string, string> = {}
+/** The detail page's own copy of `speakerVoices` above, same reason it keeps its own
+ * `detailSpeakers` rather than sharing the live session's. */
+let detailSpeakerVoices: Transcript['speakerVoices'] = undefined
 let detailStartedAt = ''
 let detailDurationSec = 0
 
@@ -2224,6 +2381,7 @@ function renderDetailSpeakers(): void {
     (updated) => {
       detailSpeakers = updated
     },
+    detailSpeakerVoices,
   )
 }
 
@@ -2233,6 +2391,7 @@ async function openMeetingDetail(id: string): Promise<void> {
   detailDir = dir
   detailSegments = tr.segments
   detailSpeakers = tr.speakers
+  detailSpeakerVoices = tr.speakerVoices
   detailStartedAt = tr.startedAt
   detailDurationSec = tr.durationSec
   renderDetailMeta()
@@ -2278,8 +2437,13 @@ window.api.onDiarized((dir, updated) => {
   meetingDir = dir
   segments = updated.segments
   speakers = updated.speakers
+  speakerVoices = updated.speakerVoices
   renderTranscript()
   renderSpeakerPanel()
+  // This diarize pass is exactly where a new stranger's voice gets clustered into a
+  // pending entry (spec item 1) — keep the Settings list current without waiting for
+  // the user to switch language or reopen the panel.
+  void renderPendingVoices()
 })
 window.api.onDiarizeError((message) => {
   setQueueMsg(null)
@@ -2367,6 +2531,7 @@ function applyLanguage(l: Language): void {
   micToggle.textContent = micStop ? t().micTestStop : t().micTest
   micLine.textContent = micStop ? `${t().micTestPrompt}: ${MIC_TEST_SENTENCE}` : ''
   void renderVoices()
+  void renderPendingVoices()
   mcpLabel.textContent = t().mcpLabel
   onboardingRerunLabelEl.textContent = t().onboardingRerunLabel
   onboardingRerunBtn.textContent = t().onboardingRerun

@@ -33,6 +33,12 @@ export type MeetingItem = {
    * meeting will be (or was) decoded in before the user queues it up. */
   language: MeetingLanguage
 }
+/** A voice diarization has clustered but nobody has named yet (spec item 1) — enough
+ * to show the user who it might be (spec item 2) before they type a name: the
+ * meeting it was first heard in, when, and what it said there. The audio sample
+ * itself is a separate call (voiceSample) since it's heavier and only wanted on
+ * demand, not prefetched for every pending voice up front. */
+export type PendingVoiceItem = { id: string; meetingId: string; meetingTitle: string; at: string; text: string }
 export type BatchTick = { id: string; index: number; total: number; fraction: number }
 export type BatchItem = {
   id: string
@@ -106,6 +112,14 @@ const api = {
 
   knownVoices: (): Promise<string[]> => ipcRenderer.invoke('voices:list'),
   forgetVoice: (name: string): Promise<void> => ipcRenderer.invoke('voices:forget', name),
+
+  /** Voices waiting to be named (spec item 1), oldest first-heard first. */
+  pendingVoices: (): Promise<PendingVoiceItem[]> => ipcRenderer.invoke('voices:pending'),
+  nameVoice: (id: string, name: string): Promise<void> => ipcRenderer.invoke('voices:name', id, name),
+  /** A short WAV preview of a pending voice's own audio (spec item 2), or null if the
+   * meeting it was heard in is gone. Play it from a Blob URL — CSP's media-src allows
+   * `blob:` already, nothing to widen. */
+  voiceSample: (id: string): Promise<Uint8Array | null> => ipcRenderer.invoke('voices:sample', id),
 
   /** Every recorded meeting, newest first, with its transcription status (spec item 3). */
   listMeetings: (): Promise<MeetingItem[]> => ipcRenderer.invoke('meeting:list'),

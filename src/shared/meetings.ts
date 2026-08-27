@@ -56,9 +56,11 @@ export type Transcript = {
    * points at (voices.ts's `forget`) — the id then resolves to nothing, and this is the
    * last known name to fall back to before speakerNames()'s own fallbacks.
    *
-   * Not consumed anywhere in the renderer yet — resolving display through this field
-   * (current name for the id, else this stored name, else the existing fallbacks) is a
-   * separate, later task.
+   * Resolved into a display name — current name for the id, else this stored name,
+   * else the existing fallbacks — by voices.ts's resolveSpeakerNames, applied by main
+   * (index.ts) to every Transcript handed to the renderer. Never written back to disk:
+   * that resolution runs at read time precisely so a rename never needs to walk and
+   * rewrite every transcript that mentions the voice.
    */
   speakerVoices?: Record<string, { voiceId: string; name: string }>
 }

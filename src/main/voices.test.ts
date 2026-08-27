@@ -106,3 +106,84 @@ test('voices: a speaker with almost no audio is not learned', { skip: skip() }, 
   await voices.remember(dir, brief, 'SPEAKER_00', 'ไม่ควรจำ')
   assert.ok(!(await voices.knownVoices()).includes('ไม่ควรจำ'))
 })
+
+test(
+  'voices: the same unnamed voice heard twice stays one pending entry; a genuinely different one gets its own',
+  { skip: skip() },
+  async () => {
+    // "Heard in meeting X" then "heard again in meeting Y" — trackPending only cares
+    // about the embedding, not the meeting id, so reusing the same fixture dir/speaker
+    // under two different meeting ids is exactly the cross-meeting case (spec item 1).
+    const firstId = await voices.trackPending(dir, transcript, 'SPEAKER_00', 'meeting-a')
+    assert.ok(firstId, 'expected a pending id for a genuinely unnamed voice')
+    const secondId = await voices.trackPending(dir, transcript, 'SPEAKER_00', 'meeting-b')
+    assert.equal(secondId, firstId, 'the same voice heard again must not create a second pending entry')
+
+    // A different real person's voice must NOT collapse into the same pending entry.
+    const otherId = await voices.trackPending(dir, transcript, 'SPEAKER_01', 'meeting-a')
+    assert.ok(otherId, 'expected a pending id for the second voice')
+    assert.notEqual(otherId, firstId, 'two different voices must stay two pending entries')
+
+    const pending = await voices.pendingVoices()
+    assert.ok(pending.some((p) => p.id === firstId))
+    assert.ok(pending.some((p) => p.id === otherId))
+    // firstHeard is fixed at creation — re-tracking the same voice must not have
+    // overwritten it with the second sighting's meeting id.
+    assert.equal(pending.find((p) => p.id === firstId)?.meetingId, 'meeting-a')
+  },
+)
+
+test('voices: naming a pending voice clears it from the pending list everywhere it was heard', { skip: skip() }, async () => {
+  const id = await voices.trackPending(dir, transcript, 'SPEAKER_00', 'meeting-c')
+  assert.ok(id)
+  assert.ok((await voices.pendingVoices()).some((p) => p.id === id))
+
+  await voices.nameVoice(id!, 'พี่หนึ่ง')
+  assert.ok(!(await voices.pendingVoices()).some((p) => p.id === id), 'must stop being pending once named')
+  assert.ok((await voices.knownVoices()).includes('พี่หนึ่ง'))
+  // (Whether identify() now picks this exact id for SPEAKER_00 over an older named
+  // voice built from the same fixture audio is a tie-breaking question this test
+  // doesn't need to answer — the pending/known-list checks above are the behaviour
+  // spec item 1 actually asks for.)
+})
+
+test('voices: renaming a speaker the app already recognised retargets that id, not a fresh one', { skip: skip() }, async () => {
+  const first = await voices.remember(dir, transcript, 'SPEAKER_01', 'คุณบี')
+  assert.ok(first)
+
+  // Simulates what diarizeMeeting/meeting:rename thread through: this speaker key was
+  // already tied to `first` by a previous pass (Transcript.speakerVoices).
+  const recognised: Transcript = {
+    ...transcript,
+    speakerVoices: { SPEAKER_01: { voiceId: first!, name: 'คุณบี' } },
+  }
+  const second = await voices.remember(dir, recognised, 'SPEAKER_01', 'คุณบีทู')
+  assert.equal(second, first, 'a recognised speaker must be renamed in place, by id — not given a new one')
+  assert.ok((await voices.knownVoices()).includes('คุณบีทู'))
+  assert.ok(!(await voices.knownVoices()).includes('คุณบี'), 'the old name must not linger as a second entry')
+})
+
+test('voices: resolveSpeakerNames resolves the live name, then the stored fallback, then leaves an unrecognised key alone', async () => {
+  const id = (await voices.remember(dir, transcript, 'SPEAKER_00', 'พี่ซี'))!
+
+  // A key speakerVoices never covered (e.g. 'me', or a transcript older than this
+  // feature) must pass through untouched.
+  const untouched = await voices.resolveSpeakerNames({ me: 'You', SPEAKER_00: 'Speaker 1' })
+  assert.deepEqual(untouched, { me: 'You', SPEAKER_00: 'Speaker 1' })
+
+  // The live name wins over whatever was stored on the transcript at diarize time.
+  const live = await voices.resolveSpeakerNames(
+    { SPEAKER_00: 'Speaker 1' },
+    { SPEAKER_00: { voiceId: id, name: 'Speaker 1' } },
+  )
+  assert.equal(live['SPEAKER_00'], 'พี่ซี')
+
+  // Once the voice is forgotten, fall back to the name recorded on the transcript at
+  // diarize time — never undefined, never the raw key.
+  await voices.forget('พี่ซี')
+  const forgotten = await voices.resolveSpeakerNames(
+    { SPEAKER_00: 'Speaker 1' },
+    { SPEAKER_00: { voiceId: id, name: 'Speaker 1 (พี่ซี)' } },
+  )
+  assert.equal(forgotten['SPEAKER_00'], 'Speaker 1 (พี่ซี)')
+})

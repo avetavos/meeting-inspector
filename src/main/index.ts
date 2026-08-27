@@ -1,18 +1,28 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
 import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
 import { assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
-import { startedAtFromId, type MeetingLanguage } from '../shared/meetings.ts'
+import { startedAtFromId, titleOf, type MeetingLanguage } from '../shared/meetings.ts'
 import { TRACKS, transcribeRecorded, type Track } from './replay.ts'
 import { mcpToken } from './token.ts'
 import { getSettings, setSettings, validPort, type AsrModel, type Language, type Settings } from './settings.ts'
 import { hasSpeech } from './vad.ts'
-import { forget, identify, knownVoices, remember } from './voices.ts'
+import {
+  forget,
+  identify,
+  knownVoices,
+  nameVoice,
+  pendingVoices,
+  remember,
+  resolveSpeakerNames,
+  sampleWav,
+  trackPending,
+} from './voices.ts'
 import {
   NOTES_ROOT,
   assertMeetingDir,
@@ -174,12 +184,27 @@ async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signa
       if (known) {
         named[speaker] = known.name
         recognizedVoices[speaker] = { voiceId: known.id, name: known.name }
+        continue
       }
+      // Not a voice the app can name — cluster it against every other not-yet-named
+      // voice (spec item 1) so the same stranger heard again, here or in a later
+      // meeting, lands on the same pending entry instead of a fresh one. `named[speaker]`
+      // is already the placeholder speakerNames() gave it just above; recorded as the
+      // fallback display name (Transcript.speakerVoices' own doc comment) in case this
+      // voice is later forgotten before ever being named.
+      const pendingId = await trackPending(dir, withTranscript, speaker, basename(dir)).catch(() => null)
+      if (pendingId) recognizedVoices[speaker] = { voiceId: pendingId, name: named[speaker]! }
     }
 
     const updated: Transcript = { ...withTranscript, speakers: named, speakerVoices: recognizedVoices }
     await writeTranscript(dir, updated)
-    if (notify) wc.send('meeting:transcript', dir, updated)
+    if (notify) {
+      // The disk copy above stays raw (speaker keys, this pass's own placeholders) —
+      // only what's handed to the renderer is resolved to the *current* voices.json
+      // name (spec item 3), so a rename elsewhere never needs a rewrite pass here.
+      const speakers = await resolveSpeakerNames(updated.speakers, updated.speakerVoices)
+      wc.send('meeting:transcript', dir, { ...updated, speakers })
+    }
   } catch (err) {
     // A deliberate cancel is not a failure worth logging — same treatment as
     // whisper.ts's pump() gives an aborted chunk.
@@ -535,17 +560,28 @@ function registerIpc(): void {
   // Typing one name for two speakers is how you merge them (spec §8) — the summary
   // sees one person, and nothing has to reshuffle the segments.
   ipcMain.handle('meeting:rename', async (_e, dir: string, speakers: Record<string, string>) => {
-    const previous = await readTranscript(assertMeetingDir(dir))
-    const updated: Transcript = { ...previous, speakers: { ...previous.speakers, ...speakers } }
-    await writeTranscript(assertMeetingDir(dir), updated)
+    const guarded = assertMeetingDir(dir)
+    const previous = await readTranscript(guarded)
+    const merged = { ...previous.speakers, ...speakers }
+    // Untouched keys keep whatever they already resolved to — see remember()'s doc
+    // comment for why only the id already on `previous.speakerVoices` (not one minted
+    // below, mid-loop) decides propagation.
+    const speakerVoices = { ...previous.speakerVoices }
 
     // Typing a name is the only moment we know whose voice this is. Learn it here so
-    // the next meeting can fill it in on its own.
+    // the next meeting can fill it in on its own — and, when this speaker was already
+    // a voice the app recognised (named or still pending), retarget that same id so
+    // every other meeting pointing at it picks up the new name too (spec item 3).
     for (const [speaker, name] of Object.entries(speakers)) {
       if (speaker === 'me' || speaker === name || !name.trim()) continue
-      await remember(assertMeetingDir(dir), updated, speaker, name.trim()).catch(() => {})
+      const id = await remember(guarded, { ...previous, speakers: merged }, speaker, name.trim()).catch(() => null)
+      if (id) speakerVoices[speaker] = { voiceId: id, name: name.trim() }
     }
-    return updated
+
+    const updated: Transcript = { ...previous, speakers: merged, speakerVoices }
+    await writeTranscript(guarded, updated)
+    const displaySpeakers = await resolveSpeakerNames(updated.speakers, updated.speakerVoices)
+    return { ...updated, speakers: displaySpeakers }
   })
 
   // Microphone test: is what I just said speech at the current setting, and what
@@ -587,6 +623,38 @@ function registerIpc(): void {
   ipcMain.handle('voices:list', () => knownVoices())
   ipcMain.handle('voices:forget', (_e, name: string) => forget(name))
 
+  // Voices diarization has clustered but nobody has named yet (spec item 1) — enriched
+  // here, not in voices.ts, with what the settings panel actually wants to show: a
+  // title/date (shared/meetings.ts's titleOf, no NOTES_ROOT knowledge needed) and the
+  // speaker's own lines from that meeting's transcript. voices.ts only knows ids,
+  // meeting ids and a speaker key — it has no notion of NOTES_ROOT or path-guarding,
+  // same split as everywhere else main resolves a renderer-supplied id into a path.
+  ipcMain.handle('voices:pending', async () => {
+    const items = await pendingVoices()
+    return Promise.all(
+      items.map(async (p) => {
+        const transcript = await readTranscript(assertMeetingDir(join(NOTES_ROOT, p.meetingId))).catch(() => null)
+        const text = transcript?.segments
+          .filter((s) => s.speaker === p.speaker)
+          .map((s) => s.text)
+          .join(' ')
+        return { id: p.id, meetingId: p.meetingId, meetingTitle: titleOf(p.meetingId), at: p.at, text: text ?? '' }
+      }),
+    )
+  })
+  ipcMain.handle('voices:name', (_e, id: string, name: string) => nameVoice(id, name))
+  // A few seconds of the pending voice's own audio, so the user can hear who it is
+  // before typing a name (spec item 2) — resolved from the id, never a renderer-
+  // supplied path, and read straight out of a meeting folder assertMeetingDir has
+  // already guarded.
+  ipcMain.handle('voices:sample', async (_e, id: string) => {
+    const pending = (await pendingVoices()).find((p) => p.id === id)
+    if (!pending) return null
+    const dir = assertMeetingDir(join(NOTES_ROOT, pending.meetingId))
+    const transcript = await readTranscript(dir).catch(() => null)
+    return transcript ? sampleWav(dir, transcript, pending.speaker) : null
+  })
+
   // Every recorded meeting plus its transcription status, for the meetings panel (spec
   // item 3/5). `listMeetings` only knows disk state (transcribed or not); "transcribing"
   // and "failed" are this session's own batch-queue state layered on top.
@@ -596,7 +664,12 @@ function registerIpc(): void {
   // same idiom transcribeOne already uses to turn a renderer-supplied id into a path.
   ipcMain.handle('meeting:get', async (_e, id: string) => {
     const dir = assertMeetingDir(join(NOTES_ROOT, id))
-    return { dir, transcript: await readTranscript(dir) }
+    const transcript = await readTranscript(dir)
+    // Same read-time resolution as diarizeMeeting's own notify send (spec item 3) —
+    // an old meeting reopened later shows whatever its recognised voices are called
+    // *today*, not what they were called when this transcript was written.
+    const speakers = await resolveSpeakerNames(transcript.speakers, transcript.speakerVoices)
+    return { dir, transcript: { ...transcript, speakers } }
   })
 
   ipcMain.handle('meeting:list', async () => {
