@@ -72,9 +72,17 @@ async function diarizeMeeting(wc: WebContents, dir: string): Promise<void> {
   }
 }
 
-async function enqueue(wc: WebContents, track: Track, chunk: Chunk): Promise<void> {
+async function enqueue(wc: WebContents, track: Track, chunk: Chunk, retry = true): Promise<void> {
   try {
-    ;(await transcription(wc)).enqueue(track, chunk)
+    const server = await transcription(wc)
+    // A dead whisper-server would swallow this chunk and every one after it without
+    // anyone noticing, so start a fresh one and say so.
+    if (!server.alive && retry) {
+      whisper = null
+      wc.send('transcript:error', 'whisper-server หยุดไป กำลังเริ่มใหม่ — ท่อนที่ค้างอยู่อาจหาย')
+      return enqueue(wc, track, chunk, false)
+    }
+    server.enqueue(track, chunk)
   } catch {
     // transcription() already pushed the error to the renderer
   }

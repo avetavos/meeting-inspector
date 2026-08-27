@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
-import { SAMPLE_RATE, type Chunk } from './chunker.ts'
+import { SAMPLE_RATE, hasSignal, type Chunk } from './chunker.ts'
 import { model, requireFiles } from './models.ts'
 import { wavHeader } from './wav.ts'
 
@@ -100,12 +100,19 @@ export class Whisper {
     return new Whisper(proc, url, opts)
   }
 
+  /** False once the child has exited — every later chunk would fail in silence. */
+  get alive(): boolean {
+    return this.proc.exitCode === null && !this.proc.killed
+  }
+
   get depth(): number {
     return this.queue.length + (this.pumping ? 1 : 0)
   }
 
   /** FIFO, nothing dropped (spec §7). The server handles one request at a time anyway. */
   enqueue(track: string, chunk: Chunk): void {
+    // Silence has nothing to transcribe and can take the server down with it.
+    if (!hasSignal(chunk.pcm)) return
     this.queue.push({ track, ...chunk })
     this.opts.onDepth(this.depth)
     void this.pump()

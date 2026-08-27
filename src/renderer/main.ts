@@ -287,26 +287,49 @@ function showMcpState(state: McpState): void {
 
   mcpStateEl.replaceChildren()
   if (state.url && state.token) {
-    const url = document.createElement('div')
-    url.append('URL: ', code(state.url))
-    const token = document.createElement('div')
-    token.append('Bearer token: ', code(state.token))
-    mcpStateEl.append(url, token)
+    mcpStateEl.append(
+      copyRow('URL', state.url),
+      copyRow('Bearer token', state.token),
+      // Claude Code and Claude Desktop can reach localhost and send a header.
+      copyRow(
+        'Claude Code',
+        `claude mcp add --transport http meeting-inspector ${state.url} --header "Authorization: Bearer ${state.token}"`,
+      ),
+    )
   }
 
   tunnelStateEl.className = state.tunnelOn ? 'danger' : ''
   tunnelStateEl.replaceChildren()
-  if (state.tunnelUrl) {
-    tunnelStateEl.append('⚠️ transcript เข้าถึงได้จากอินเทอร์เน็ตแล้ว: ', code(state.tunnelUrl))
+  if (state.tunnelUrl && state.token) {
+    const warning = document.createElement('div')
+    warning.textContent = '⚠️ transcript เข้าถึงได้จากอินเทอร์เน็ตแล้ว'
+    // ChatGPT's custom connectors take only OAuth or no-auth, so the token rides in
+    // the URL and the connector is set up as "No authentication".
+    tunnelStateEl.append(
+      warning,
+      copyRow('ChatGPT (ตั้งเป็น No authentication)', `${state.tunnelUrl}/${state.token}`),
+    )
   } else if (state.enabled) {
     tunnelStateEl.textContent = 'ปิดอยู่ — cloud client อย่าง ChatGPT/Grok ต่อ localhost ไม่ได้ เปิดเมื่อไหร่เท่ากับ transcript ออกอินเทอร์เน็ต'
   }
 }
 
-const code = (text: string) => {
+function copyRow(label: string, value: string): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'copyrow'
+  const name = document.createElement('span')
+  name.textContent = `${label}: `
   const el = document.createElement('code')
-  el.textContent = text
-  return el
+  el.textContent = value
+  const copy = document.createElement('button')
+  copy.textContent = 'คัดลอก'
+  copy.onclick = async () => {
+    await navigator.clipboard.writeText(value)
+    copy.textContent = 'คัดลอกแล้ว'
+    setTimeout(() => (copy.textContent = 'คัดลอก'), 1500)
+  }
+  row.append(name, el, copy)
+  return row
 }
 
 async function loadSettings(): Promise<void> {

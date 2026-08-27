@@ -65,10 +65,25 @@ Under ตั้งค่า, "เปิด MCP server" serves `list_meetings`, `
 `http://127.0.0.1:8787/` (any free port if that one is taken), behind a bearer
 token the panel shows. Point any MCP client at that URL with the token.
 
+The panel gives you the line to paste, per client:
+
+```
+# Claude Code / Claude Desktop — reach localhost and can send a header
+claude mcp add --scope user --transport http meeting-inspector \
+  http://127.0.0.1:8787/ --header "Authorization: Bearer <token>"
+```
+
 Cloud clients — ChatGPT, Grok — cannot reach localhost, so there is a tunnel
 toggle that runs `cloudflared tunnel` (`brew install cloudflared`). **Turning it
 on puts your meeting transcripts on the public internet**, behind the same
 token. It is off by default and turns itself off with the server.
+
+ChatGPT's custom connectors offer only OAuth or no authentication, so the token
+can also ride in the URL — the panel shows `https://<tunnel>/<token>`, which you
+add with authentication set to "None". Weaker than a header, since URLs reach
+proxy logs, which is why it is not the default.
+
+The server only answers while the app is open.
 
 Model ids and prices were checked 2026-08-27 and move faster than this repo
 does — the Model field overrides the default per provider without a code

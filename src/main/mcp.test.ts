@@ -47,8 +47,8 @@ after(() => server.close())
 type Rpc = { status: number; body: { result?: any; error?: any } | null }
 
 let id = 0
-async function rpc(method: string, params?: unknown, token = TOKEN): Promise<Rpc> {
-  const res = await fetch(server.url, {
+async function rpc(method: string, params?: unknown, token = TOKEN, url?: string): Promise<Rpc> {
+  const res = await fetch(url ?? server.url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -75,6 +75,16 @@ const callTool = async (name: string, args: unknown = {}) => {
 test('mcp: a wrong bearer token is refused before anything is read', async () => {
   assert.equal((await rpc('tools/list', {}, 'wrong-token')).status, 401)
   assert.equal((await rpc('tools/list', {}, '')).status, 401)
+})
+
+test('mcp: the token may arrive in the path, for clients that cannot send headers', async () => {
+  const withToken = `${server.url}${TOKEN}`
+  const ok = await rpc('tools/list', {}, 'no-header-here', withToken)
+  assert.equal(ok.status, 200)
+  assert.ok(ok.body?.result?.tools?.length)
+
+  const wrong = await rpc('tools/list', {}, 'no-header-here', `${server.url}not-the-token`)
+  assert.equal(wrong.status, 401)
 })
 
 test('mcp: handshake and tool list', async () => {

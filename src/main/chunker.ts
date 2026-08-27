@@ -59,3 +59,22 @@ export class Chunker {
     return best
   }
 }
+
+/**
+ * Whether a chunk is worth sending to ASR at all (spec §7.3).
+ *
+ * The reason is robustness, not cost: whisper-server can abort when VAD finds no
+ * speech, taking every later chunk of the meeting down with it. The loopback track is
+ * exactly zero whenever nothing is playing — measured on a real recording, 0 non-zero
+ * samples in 2 million — so this catches the case that actually happens.
+ *
+ * ponytail: a peak gate, not a VAD. Chunks that are quiet but not silent still reach
+ * the server; the supervisor restarts it if one of those trips the same bug.
+ */
+export function hasSignal(pcm: Int16Array): boolean {
+  const FLOOR = 32 // ≈ -60 dBFS, far below any real speech
+  for (let i = 0; i < pcm.length; i++) {
+    if (pcm[i]! > FLOOR || pcm[i]! < -FLOOR) return true
+  }
+  return false
+}

@@ -4,6 +4,8 @@ directories:
   output: release
   buildResources: build
 
+afterPack: build/after-pack.cjs
+
 files:
   - out/**
   - package.json

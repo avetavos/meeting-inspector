@@ -15,7 +15,10 @@ import { cpus } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const VERSION = 'v1.9.2'
+// v1.9.2 aborts when VAD finds no speech in a chunk and an initial prompt was sent —
+// which is every silent stretch of the loopback track, since we always send the
+// vocabulary prompt. Fixed upstream in v1.9.3.
+const VERSION = 'v1.9.3'
 const REPO = 'https://github.com/ggml-org/whisper.cpp'
 
 const HERE = dirname(fileURLToPath(import.meta.url))

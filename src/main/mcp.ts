@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { timingSafeEqual } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
@@ -135,6 +136,24 @@ function buildServer(root: string): McpServer {
   return server
 }
 
+const sameSecret = (a: string, b: string): boolean => {
+  const [x, y] = [Buffer.from(a), Buffer.from(b)]
+  return x.length === y.length && timingSafeEqual(x, y)
+}
+
+/**
+ * Bearer header for clients that can send one (Claude Code, Claude Desktop). ChatGPT's
+ * custom connectors offer only OAuth or no-auth, so the token may also arrive as the
+ * first path segment — a secret URL. Weaker, since URLs end up in proxy logs, but it
+ * is the only way a header-less client can be let in at all.
+ */
+function authorized(req: IncomingMessage, token: string): boolean {
+  const header = req.headers.authorization
+  if (header?.startsWith('Bearer ') && sameSecret(header.slice(7), token)) return true
+  const first = (req.url ?? '/').split('?')[0]!.split('/').filter(Boolean)[0]
+  return first !== undefined && sameSecret(first, token)
+}
+
 export async function startMcp(opts: {
   token: string
   root: string
@@ -146,7 +165,7 @@ export async function startMcp(opts: {
 
   const http = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (!validateHost(req, res)) return
-    if (req.headers.authorization !== `Bearer ${opts.token}`) {
+    if (!authorized(req, opts.token)) {
       res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' })
       res.end(JSON.stringify({ error: 'unauthorized' }))
       return

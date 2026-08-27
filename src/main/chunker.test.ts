@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { Chunker, SAMPLE_RATE as SR, type Chunk } from './chunker.ts'
+import { Chunker, SAMPLE_RATE as SR, hasSignal, type Chunk } from './chunker.ts'
 
 /** Loud everywhere except the silent spans given as [startSec, endSec]. */
 function audio(seconds: number, ...gaps: [number, number][]): Int16Array {
@@ -53,4 +53,17 @@ test('chunker: every sample comes out exactly once, in order', () => {
   }
   assert.equal(at, total)
   assert.equal(c.flush(), null)
+})
+
+test('signal gate: digital silence is skipped, real audio is not', () => {
+  assert.equal(hasSignal(new Int16Array(SR)), false, 'a track with nothing playing is exactly zero')
+
+  // Dither well under the floor still counts as nothing worth transcribing.
+  const hiss = new Int16Array(SR)
+  for (let i = 0; i < hiss.length; i++) hiss[i] = i % 3 === 0 ? 8 : -8
+  assert.equal(hasSignal(hiss), false)
+
+  const speech = new Int16Array(SR)
+  speech[12345] = 900
+  assert.equal(hasSignal(speech), true, 'one loud sample is enough to be worth sending')
 })

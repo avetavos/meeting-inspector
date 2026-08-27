@@ -40,7 +40,9 @@
       details .row { margin-top: 12px; }
       #keystate { font-size: 13px; opacity: .7; margin-top: 8px; }
       #mcpstate, #tunnelstate { font-size: 13px; opacity: .7; margin-top: 8px; }
-      #mcpstate code { user-select: all; word-break: break-all; }
+      #mcpstate code, #tunnelstate code { user-select: all; word-break: break-all; }
+      .copyrow { margin-top: 6px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
+      .copyrow button { padding: 2px 8px; font-size: 12px; }
       #tunnelstate.danger { opacity: 1; }
       details label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
       select { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }
