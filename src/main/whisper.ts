@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
 import { SAMPLE_RATE, type Chunk } from './chunker.ts'
-import { model } from './models.ts'
+import { model, requireFiles } from './models.ts'
 import { wavHeader } from './wav.ts'
 
 export type Segment = { t0: number; t1: number; text: string }
@@ -66,14 +66,23 @@ export class Whisper {
 
   static async start(opts: WhisperOptions): Promise<Whisper> {
     const { language } = opts
+    await requireFiles([BIN, MODEL, VAD_MODEL], 'ดูขั้นตอนติดตั้งใน README')
     const port = await freePort()
     const proc = spawn(
       BIN,
       ['-m', MODEL, '--vad', '-vm', VAD_MODEL, '-l', language, '--host', '127.0.0.1', '--port', String(port)],
       { stdio: ['ignore', 'ignore', 'inherit'] },
     )
+    // Without a listener an ENOENT surfaces as an unhandled 'error' event and takes
+    // the whole main process down. It arrives after spawn returns, so the wait loop
+    // watches for it rather than checking once.
+    let spawnError: Error | null = null
+    proc.once('error', (err) => {
+      spawnError = err
+    })
+
     const url = `http://127.0.0.1:${port}`
-    await waitUntilUp(url, proc)
+    await waitUntilUp(url, proc, () => spawnError)
     return new Whisper(proc, url, opts)
   }
 
@@ -141,9 +150,16 @@ function toWav(pcm: Int16Array): Uint8Array<ArrayBuffer> {
   return out
 }
 
-async function waitUntilUp(url: string, proc: ChildProcess, timeoutMs = 120_000): Promise<void> {
+async function waitUntilUp(
+  url: string,
+  proc: ChildProcess,
+  spawnError: () => Error | null,
+  timeoutMs = 120_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    const failed = spawnError()
+    if (failed) throw new Error(`เปิด whisper-server ไม่ได้: ${failed.message}`)
     if (proc.exitCode !== null) throw new Error(`whisper-server exited with ${proc.exitCode}`)
     try {
       await fetch(url, { signal: AbortSignal.timeout(1000) })

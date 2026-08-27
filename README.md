@@ -26,9 +26,16 @@ curl -Lo campplus-sv-zh_en.onnx \
 ```
 npm install
 npm run dev        # electron-vite dev
-npm test           # wav writer + meeting-id/slug
+npm test           # chunker, wav, store, merge, mcp
 npm run typecheck
+npm run dist       # release/Meeting Inspector-<version>-arm64.dmg
 ```
+
+The .dmg is unsigned and unnotarized, so the first launch needs right-click →
+Open → Open Anyway. It bundles the app only: whisper.cpp and the four models
+above still have to be installed on the target machine (spec §12 wants that
+done in-app with a progress bar; it is not built yet). Without them the app
+runs and records, and says which file is missing when it needs one.
 
 Each meeting is a folder in `~/Documents/MeetingNotes/<yyyy-mm-dd-HHMM-title>/`:
 

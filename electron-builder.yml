@@ -1,0 +1,28 @@
+appId: dev.avetavos.meeting-inspector
+productName: Meeting Inspector
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+
+# sherpa-onnx ships a .node addon plus three dylibs; dlopen cannot read them
+# from inside an asar archive.
+asarUnpack:
+  - '**/node_modules/sherpa-onnx-*/**'
+
+mac:
+  category: public.app-category.productivity
+  # Unsigned by design (spec §3) — the first launch needs Open Anyway.
+  identity: null
+  target:
+    - target: dmg
+      arch: [arm64]
+  extendInfo:
+    # Without this the mic prompt kills the app instead of asking.
+    NSMicrophoneUsageDescription: อัดเสียงของคุณเป็น track แยกระหว่างประชุม
+
+dmg:
+  title: Meeting Inspector

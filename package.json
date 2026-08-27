@@ -1,7 +1,9 @@
 {
   "name": "meeting-inspector",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
+  "description": "Meeting transcription and summarization for macOS",
+  "author": "Aveta Vos",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -10,11 +12,13 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-transform-types --test \"src/**/*.test.ts\"",
     "asr:read": "cat spike/asr-accuracy/script.th.txt",
-    "asr:score": "node --experimental-transform-types spike/asr-accuracy/score.mjs"
+    "asr:score": "node --experimental-transform-types spike/asr-accuracy/score.mjs",
+    "dist": "electron-vite build && electron-builder"
   },
   "devDependencies": {
     "@types/node": "^24",
     "electron": "38.8.6",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^4",
     "typescript": "^5",
     "vite": "^7"
@@ -23,6 +27,7 @@
     "@anthropic-ai/sdk": "^0.121.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "hono": "^4.13.5",
     "sherpa-onnx-node": "^1.13.6"
   }
 }

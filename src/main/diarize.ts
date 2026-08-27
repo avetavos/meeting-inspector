@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { model } from './models.ts'
+import { model, requireFiles } from './models.ts'
 import type { Transcript } from './store.ts'
 
 export type Turn = { start: number; end: number; speaker: number }
@@ -11,15 +11,19 @@ export const UNKNOWN = 'them'
  * live because seeing the entire timeline at once groups voices far better than
  * deciding who is speaking with no view of what comes next.
  */
+const SEGMENTATION = model('pyannote-segmentation-3-0.onnx')
+const EMBEDDING = model('campplus-sv-zh_en.onnx')
+
 export async function diarize(wavPath: string): Promise<Turn[]> {
+  await requireFiles([SEGMENTATION, EMBEDDING], 'ดูขั้นตอนติดตั้งใน README')
   // Required late: this pulls in a ~30MB native addon nobody needs until a meeting ends.
   // It is CommonJS, so depending on who does the loading the class arrives either as a
   // named export or hidden under `default`.
   const sherpa = await import('sherpa-onnx-node')
   const OfflineSpeakerDiarization = sherpa.OfflineSpeakerDiarization ?? sherpa.default.OfflineSpeakerDiarization
   const engine = new OfflineSpeakerDiarization({
-    segmentation: { pyannote: { model: model('pyannote-segmentation-3-0.onnx') } },
-    embedding: { model: model('campplus-sv-zh_en.onnx') },
+    segmentation: { pyannote: { model: SEGMENTATION } },
+    embedding: { model: EMBEDDING },
     // Let clustering decide how many people were in the room (spec §8).
     clustering: { numClusters: -1, threshold: 0.5 },
   })
