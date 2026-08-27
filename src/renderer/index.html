@@ -21,6 +21,11 @@
       #elapsed { font-variant-numeric: tabular-nums; opacity: .7; }
       #done { margin-top: 16px; font-size: 14px; }
       #queue { margin-top: 12px; font-size: 13px; opacity: .8; }
+      #speakers { margin-top: 16px; }
+      #speakers .who { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+      #speakers .who code { font-size: 12px; opacity: .5; width: 90px; }
+      #speakers input { flex: 1; }
+      #speakers .hint { font-size: 13px; opacity: .7; margin-top: 10px; }
       #transcript { margin-top: 16px; max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--line); }
       #transcript p { margin: 12px 0 0; display: grid; grid-template-columns: 52px 64px 1fr; gap: 10px; }
       #transcript .t { opacity: .45; font-variant-numeric: tabular-nums; font-size: 13px; }
@@ -41,6 +46,7 @@
     <div id="warnings"></div>
     <div id="queue"></div>
     <div id="done"></div>
+    <div id="speakers"></div>
     <div id="transcript"></div>
     <script type="module" src="./main.ts"></script>
   </body>

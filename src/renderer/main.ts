@@ -1,4 +1,4 @@
-import type { Segment } from '../preload/index.ts'
+import type { Transcript } from '../preload/index.ts'
 import { Recorder, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -9,11 +9,20 @@ const elapsed = $('elapsed')
 const warnings = $('warnings')
 const done = $('done')
 const queue = $('queue')
+const speakerPanel = $('speakers')
 const transcript = $('transcript')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 
 let recorder: Recorder | null = null
 let ticker: number | undefined
+
+/**
+ * During the meeting a segment is only ever "us" or "them" (spec §4.2); diarization
+ * replaces the `them` half with real speakers once the recording is complete.
+ */
+let segments: Transcript['segments'] = []
+let speakers: Record<string, string> = { me: 'คุณ', them: 'คนอื่น' }
+let meetingDir: string | null = null
 
 const PERMISSION_LABEL = {
   screen: ['Screen Recording', 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)'],
@@ -42,32 +51,69 @@ async function showPermissionWarnings(includeScreen = false): Promise<void> {
   }
 }
 
-// Live pass only labels "us" vs "them" (spec §4.2) — real names come from
-// diarization after the meeting ends.
-const WHO: Record<Track, string> = { mic: 'คุณ', loopback: 'คนอื่น' }
+function fmt(sec: number): string {
+  const p = (n: number) => String(Math.floor(n)).padStart(2, '0')
+  return `${p(sec / 60)}:${p(sec % 60)}`
+}
 
-let segments: (Segment & { track: Track })[] = []
-
-function addSegments(track: Track, incoming: Segment[]): void {
-  segments.push(...incoming.map((s) => ({ ...s, track })))
-  segments.sort((a, b) => a.t0 - b.t0)
+function renderTranscript(): void {
   transcript.replaceChildren(
     ...segments.map((s) => {
-      const p = document.createElement('p')
-      if (s.track === 'mic') p.className = 'me'
-      const t = document.createElement('span')
-      t.className = 't'
-      t.textContent = fmt(s.t0)
+      const row = document.createElement('p')
+      if (s.speaker === 'me') row.className = 'me'
+      const at = document.createElement('span')
+      at.className = 't'
+      at.textContent = fmt(s.t0)
       const who = document.createElement('span')
       who.className = 'who'
-      who.textContent = WHO[s.track]
+      who.textContent = speakers[s.speaker] ?? s.speaker
       const text = document.createElement('span')
       text.textContent = s.text
-      p.append(t, who, text)
-      return p
+      row.append(at, who, text)
+      return row
     }),
   )
   transcript.scrollTop = transcript.scrollHeight
+}
+
+function renderSpeakerPanel(): void {
+  speakerPanel.replaceChildren()
+  if (!meetingDir) return
+
+  const inputs = new Map<string, HTMLInputElement>()
+  for (const label of Object.keys(speakers)) {
+    const row = document.createElement('div')
+    row.className = 'who'
+    const tag = document.createElement('code')
+    tag.textContent = label
+    const input = document.createElement('input')
+    input.value = speakers[label] ?? label
+    input.oninput = () => {
+      speakers[label] = input.value
+      renderTranscript()
+    }
+    inputs.set(label, input)
+    row.append(tag, input)
+    speakerPanel.append(row)
+  }
+
+  const save = document.createElement('button')
+  save.textContent = 'บันทึกชื่อ'
+  save.onclick = async () => {
+    if (!meetingDir) return
+    save.disabled = true
+    const named = Object.fromEntries(
+      [...inputs].map(([label, input]) => [label, input.value.trim() || label]),
+    )
+    speakers = (await window.api.renameSpeakers(meetingDir, named)).speakers
+    save.disabled = false
+    save.textContent = 'บันทึกแล้ว'
+  }
+
+  const hint = document.createElement('div')
+  hint.className = 'hint'
+  hint.textContent = 'ถ้าแยกคนพูดผิด ตั้งชื่อเดียวกันให้สองคน = รวมเป็นคนเดียว'
+  speakerPanel.append(save, hint)
 }
 
 function setLevel(track: Track, rms: number): void {
@@ -75,15 +121,13 @@ function setLevel(track: Track, rms: number): void {
   meters[track].style.width = `${Math.min(100, Math.sqrt(rms) * 180)}%`
 }
 
-function fmt(sec: number): string {
-  const p = (n: number) => String(Math.floor(n)).padStart(2, '0')
-  return `${p(sec / 60)}:${p(sec % 60)}`
-}
-
 async function start(): Promise<void> {
   done.replaceChildren()
+  speakerPanel.replaceChildren()
   transcript.replaceChildren()
   segments = []
+  speakers = { me: 'คุณ', them: 'คนอื่น' }
+  meetingDir = null
   await window.api.requestPermissions()
   toggle.disabled = true
   try {
@@ -128,6 +172,7 @@ async function stop(): Promise<void> {
     return
   }
 
+  meetingDir = result.dir
   done.textContent = `บันทึกแล้ว ${fmt(result.durationSec)} · ${result.segments} ท่อน — `
   const open = document.createElement('a')
   open.href = '#'
@@ -136,13 +181,33 @@ async function stop(): Promise<void> {
   done.append(open)
 }
 
-window.api.onSegments(addSegments)
+window.api.onSegments((track, incoming) => {
+  segments.push(...incoming.map((s) => ({ ...s, speaker: track === 'mic' ? 'me' : 'them' })))
+  segments.sort((a, b) => a.t0 - b.t0)
+  renderTranscript()
+})
 window.api.onQueue((depth) => {
   // Nothing is dropped; a deep queue just means the transcript lags further behind.
   queue.textContent = depth > 3 ? `ถอดเสียงตามไม่ทัน — ค้างอยู่ ${depth} ท่อน` : ''
 })
 window.api.onTranscriptError((message) => {
   warnings.textContent = `whisper-server ไม่ขึ้น: ${message}`
+})
+
+window.api.onDiarizing(() => {
+  queue.textContent = 'กำลังแยกว่าใครพูด…'
+})
+window.api.onDiarized((dir, updated) => {
+  queue.textContent = ''
+  meetingDir = dir
+  segments = updated.segments
+  speakers = updated.speakers
+  renderTranscript()
+  renderSpeakerPanel()
+})
+window.api.onDiarizeError((message) => {
+  queue.textContent = ''
+  warnings.textContent = `แยกคนพูดไม่สำเร็จ: ${message} (transcript ยังอยู่ครบ)`
 })
 
 toggle.onclick = () => void (recorder ? stop() : start())

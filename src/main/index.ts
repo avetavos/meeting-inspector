@@ -1,7 +1,8 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { Chunker, type Chunk } from './chunker.ts'
-import { createMeetingDir, localIso, writeTranscript, type Transcript } from './store.ts'
+import { assignSpeakers, diarize, speakerNames } from './diarize.ts'
+import { createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
 
@@ -44,6 +45,24 @@ function transcription(wc: WebContents): Promise<Whisper> {
     throw err
   })
   return whisper
+}
+
+/**
+ * Runs once a meeting ends (spec §4.2). Kicked off without awaiting: the recording is
+ * already safely on disk, so this can take its time on a long file.
+ */
+async function diarizeMeeting(wc: WebContents, dir: string): Promise<void> {
+  wc.send('meeting:diarizing')
+  try {
+    const turns = await diarize(join(dir, 'loopback.wav'))
+    const previous = await readTranscript(dir)
+    const segments = assignSpeakers(previous.segments, turns)
+    const updated: Transcript = { ...previous, segments, speakers: speakerNames(segments, previous.speakers) }
+    await writeTranscript(dir, updated)
+    wc.send('meeting:transcript', dir, updated)
+  } catch (err) {
+    wc.send('meeting:diarize-error', String(err))
+  }
 }
 
 async function enqueue(wc: WebContents, track: Track, chunk: Chunk): Promise<void> {
@@ -146,7 +165,17 @@ function registerIpc(): void {
       segments: s.segments,
     }
     await writeTranscript(s.dir, transcript)
+    void diarizeMeeting(e.sender, s.dir)
     return { id: s.id, dir: s.dir, durationSec: transcript.durationSec, segments: s.segments.length }
+  })
+
+  // Typing one name for two speakers is how you merge them (spec §8) — the summary
+  // sees one person, and nothing has to reshuffle the segments.
+  ipcMain.handle('meeting:rename', async (_e, dir: string, speakers: Record<string, string>) => {
+    const previous = await readTranscript(dir)
+    const updated: Transcript = { ...previous, speakers: { ...previous.speakers, ...speakers } }
+    await writeTranscript(dir, updated)
+    return updated
   })
 
   ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(dir))

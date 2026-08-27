@@ -12,7 +12,16 @@ brew install whisper-cpp
 mkdir -p ~/whisper-models && cd ~/whisper-models
 curl -LO https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
 curl -LO https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
+
+# speaker diarization
+R=https://github.com/k2-fsa/sherpa-onnx/releases/download
+curl -sL $R/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 \
+  | tar xj -O sherpa-onnx-pyannote-segmentation-3-0/model.onnx > pyannote-segmentation-3-0.onnx
+curl -Lo campplus-sv-zh_en.onnx \
+  $R/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
 ```
+
+`MODELS_DIR` overrides where all four are looked up.
 
 ```
 npm install
@@ -29,6 +38,11 @@ Each meeting is a folder in `~/Documents/MeetingNotes/<yyyy-mm-dd-HHMM-title>/`:
 | `mic.wav` | you, 16kHz mono |
 | `transcript.json` | the data — segments sorted by time, speaker per segment |
 | `transcript.md` | the same thing to read |
+
+When a meeting ends the loopback track is diarized and every segment picks up the
+speaker it overlaps most; the mic track is always you, so it is never guessed at.
+Name the speakers in the panel that appears — giving two of them the same name is
+how you merge a voice that got split in two.
 
 Stopping waits for the queued tail chunks before writing, so the transcript
 reaches the end of the meeting. Quitting mid-meeting saves what came back

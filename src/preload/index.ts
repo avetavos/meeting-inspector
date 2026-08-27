@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+export type { Transcript } from '../main/store.ts'
+import type { Transcript } from '../main/store.ts'
+
 export type Track = 'loopback' | 'mic'
 export type Segment = { t0: number; t1: number; text: string }
 
@@ -20,6 +23,14 @@ const api = {
     ipcRenderer.on('transcript:queue', (_e, depth: number) => fn(depth)),
   onTranscriptError: (fn: (message: string) => void) =>
     ipcRenderer.on('transcript:error', (_e, message: string) => fn(message)),
+
+  renameSpeakers: (dir: string, speakers: Record<string, string>): Promise<Transcript> =>
+    ipcRenderer.invoke('meeting:rename', dir, speakers),
+  onDiarizing: (fn: () => void) => ipcRenderer.on('meeting:diarizing', () => fn()),
+  onDiarized: (fn: (dir: string, transcript: Transcript) => void) =>
+    ipcRenderer.on('meeting:transcript', (_e, dir: string, t: Transcript) => fn(dir, t)),
+  onDiarizeError: (fn: (message: string) => void) =>
+    ipcRenderer.on('meeting:diarize-error', (_e, message: string) => fn(message)),
 }
 
 export type Api = typeof api

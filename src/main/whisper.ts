@@ -1,19 +1,17 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { SAMPLE_RATE, type Chunk } from './chunker.ts'
+import { model } from './models.ts'
 import { wavHeader } from './wav.ts'
 
 export type Segment = { t0: number; t1: number; text: string }
 
 const BIN = process.env['WHISPER_SERVER'] ?? '/opt/homebrew/bin/whisper-server'
-const MODELS = process.env['WHISPER_MODELS'] ?? join(homedir(), 'whisper-models')
-const MODEL = join(MODELS, 'ggml-large-v3.bin')
+const MODEL = model('ggml-large-v3.bin')
 // Silero, run inside whisper-server. Measured on 30s of digital silence:
 // without it large-v3 emits "โปรดติดตามตอนต่อไป"; with it, an empty segment list
 // in 0.07s. That is spec risk #2 closed by a flag (spec §7.3 wanted our own gate).
-const VAD_MODEL = join(MODELS, 'ggml-silero-v5.1.2.bin')
+const VAD_MODEL = model('ggml-silero-v5.1.2.bin')
 
 type Job = Chunk & { track: string }
 
