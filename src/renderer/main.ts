@@ -1,4 +1,17 @@
-import type { Language, McpState, Transcript } from '../preload/index.ts'
+import type {
+  AsrModel,
+  BatchDiarizing,
+  BatchItem,
+  BatchTick,
+  Language,
+  McpState,
+  MeetingItem,
+  MeetingLanguage,
+  ModelStatus,
+  Transcript,
+  TranscribeMode,
+  TranscribeStatus,
+} from '../preload/index.ts'
 import { titleOf } from '../shared/meetings.ts'
 import { Recorder, openMicTap, type Track } from './recorder.ts'
 
@@ -12,6 +25,15 @@ const en = {
   meterOthers: 'Others',
   meterUs: 'You',
   settingsSummary: 'Settings',
+  settingsBack: 'Back',
+  catGeneral: 'General',
+  catRecording: 'Recording',
+  catTranscription: 'Transcription',
+  catSpeakers: 'Speakers',
+  catConnections: 'Connections',
+  langRowLabel: 'Interface language',
+  mcpRowLabel: 'MCP server',
+  micTestRowLabel: 'Microphone test',
   voicesHeading: (n: number) => `Voices I recognise (${n})`,
   voicesEmpty: 'No voices yet — name a speaker after a meeting and I will know them next time',
   voicesForget: 'Forget',
@@ -27,6 +49,12 @@ const en = {
   micTestSpeech: 'hearing speech',
   micTestDropped: 'ignoring this',
   micTestNothing: 'Nothing survived the filter.',
+  micTestFailed: (msg: string) => `Couldn't test the microphone: ${msg}`,
+  // Batch running is stable enough to disable the button outright, with a reason —
+  // unlike a non-live recording, which the renderer only finds out via the rejection
+  // this same button's own transcribeMic call gets back (main is the source of truth
+  // there, see toggleMicTest).
+  micTestLockedReason: 'Unavailable while meetings are being transcribed in the background.',
   micVerdictQuiet: 'The microphone barely picked anything up. This is not the filter — check the input device, or speak closer.',
   micLevelNow: (pct: number) => `input level ${pct}%`,
   micTooQuiet: 'Barely any input — check the input device in System Settings › Sound, or move closer to the mic.',
@@ -52,6 +80,36 @@ const en = {
   // misleading.
   portTakenUsingAnyIsDefault: (wanted: number, actual: number) =>
     `Port ${wanted} is already in use, so the server took ${actual}. Pick a free port — this one changes every launch.`,
+  transcribeModeLabel: 'Transcribe',
+  transcribeModeAfter: 'After the meeting',
+  transcribeModeLive: 'Live, as it happens',
+  transcribeModeManual: "I'll pick which meetings, myself",
+  transcribeModeHint: {
+    after: 'The default. Nothing is transcribed while you record — the whole recording turns into a transcript in one pass once the meeting ends. Keeps memory use low while recording.',
+    live: 'The transcript fills in while people talk, but a 3 GB model stays loaded for the whole meeting.',
+    manual: "Nothing is transcribed automatically, ever — not during the meeting, not after it ends. Pick the meetings you want transcribed from the list below, whenever you want, one at a time or several at once.",
+  } as Record<string, string>,
+  transcribeAfterPlaceholder: 'The transcript appears once the meeting ends.',
+  transcribeManualPlaceholder: "This won't be transcribed automatically — pick it from the meetings list below when you're ready.",
+  transcribing: (pct: number) => `Transcribing… ${pct}%`,
+  asrModelLabel: 'Transcription model',
+  asrModelName: { turbo: 'Turbo (light)', medium: 'Medium', large: 'Large (accurate)' } as Record<AsrModel, string>,
+  asrModelDetail: {
+    turbo:
+      'Lightest and fastest by far: 0.78 GB while transcribing, about 2 minutes for 30 minutes of audio. Weakest of the three on technical jargon — 22 of 27 terms right in our test.',
+    medium:
+      'Sits between the other two on memory (1.96 GB), but is the slowest of the three — about 8 minutes for 30 minutes of audio. Catches more jargon than Turbo (25 of 27 terms) without needing as much RAM as Large. Worth it only if that trade matters to you.',
+    large:
+      'Most accurate: 26 of 27 terms right in our test, lowest transcription error rate. Also the most RAM — 3.43 GB while transcribing — and about 6 minutes for 30 minutes of audio.',
+  } as Record<AsrModel, string>,
+  asrModelDownloaded: 'On this machine',
+  asrModelPartial: (progress: string) => `Partially downloaded (${progress}) — will resume from there`,
+  asrModelNeedsDownload: (size: string) => `Not downloaded yet — ${size}`,
+  asrModelTimingNote: 'Times are approximate, measured on an Apple Silicon Mac — yours may differ.',
+  meetingLangLabel: 'Meeting language',
+  meetingLangName: { th: 'Thai', en: 'English' } as Record<MeetingLanguage, string>,
+  meetingLangHint:
+    'The language people speak in the meeting — not the interface language above. Picking wrong is costly: in our tests, an English meeting decoded as Thai came out with 9.0% of characters wrong and missed a technical term (17/18); decoded as English, 0.6% wrong and every term right (18/18). A Thai meeting decoded as English came out 34.0% wrong (21/27 terms); decoded as Thai, 15.7% wrong (22/27 terms).',
   noiseLabel: 'Ignore noise',
   noiseLow: 'Keep everything',
   noiseMedium: 'Balanced',
@@ -61,11 +119,22 @@ const en = {
     medium: 'The default. Room tone ignored, quiet and distant speech still transcribed.',
     high: 'Also drops very faint speech in a noisy room. Use this if lines appear when nobody is talking.',
   } as Record<string, string>,
+  // Not threaded per meeting the way meetingLanguage is (spec item 2's noiseFilter
+  // decision) — locked instead, for as long as a recording or batch pass is using it,
+  // so this is what explains the greyed-out control rather than leaving it mysteriously
+  // inert.
+  noiseLockedHint: 'Locked while a transcription is running — this setting affects chunks still in flight. Try again once it finishes.',
   mcpLabel: 'Turn on the MCP server so a local AI assistant can pull the transcript to summarize it',
+  mcpUrlLabel: 'URL',
+  mcpTokenLabel: 'Bearer token',
   permWhy: {
     screen: 'Needed to record system audio — everyone else in the meeting',
     microphone: 'Needed to record your microphone',
   },
+  // Names of the macOS System Settings privacy panes, as Apple's own Thai
+  // localization renders them — kept in sync with what a Thai-system user
+  // actually sees on screen, not a literal translation of the English pane name.
+  permName: { screen: 'Screen Recording', microphone: 'Microphone' } as Record<'screen' | 'microphone', string>,
   permNeverAsked: (name: string, why: string) => `Never asked for ${name} access — ${why}`,
   permDenied: (name: string, why: string) => `${name} access is off — ${why}`,
   permGrant: (name: string) => `Allow ${name}`,
@@ -92,12 +161,71 @@ const en = {
   copy: 'Copy',
   copied: 'Copied',
   speakerDefaults: { me: 'You', them: 'Others' },
+  meetingsHeading: 'Meetings',
+  meetingsEmpty: 'No meetings recorded yet.',
+  meetingsStatus: {
+    'not-transcribed': 'Not transcribed',
+    transcribing: 'Transcribing…',
+    done: 'Done',
+    failed: 'Failed — try again',
+  } as Record<TranscribeStatus, string>,
+  meetingsSelectAll: 'Select all',
+  meetingsSelectNone: 'Clear selection',
+  meetingsTranscribe: (n: number) => (n === 0 ? 'Transcribe' : `Transcribe ${n} meeting${n === 1 ? '' : 's'}`),
+  meetingsStop: 'Stop',
+  meetingsProgress: (title: string, index: number, total: number, pct: number) =>
+    `Transcribing ${title} (${index}/${total}) — ${pct}%`,
+  // Second pass of the batch queue (MEDIUM 4), once every meeting is transcribed and
+  // whisper-server has been let go — this is what puts speaker names on the transcript.
+  meetingsDiarizing: (title: string, index: number, total: number) =>
+    `Identifying speakers in ${title} (${index}/${total})…`,
+  // Shown the instant Stop is clicked (MEDIUM 5) — diarizing a meeting cannot be
+  // interrupted mid-pass, so this is the honest "we heard you, finishing this one
+  // first" state instead of the button reading as hung until batch:done arrives.
+  meetingsStopping: 'Stopping…',
+  meetingsCancelled: 'Stopped — meetings still in the queue were left untouched.',
   modelNames: {
+    'ggml-large-v3-turbo-q5_0.bin': 'Whisper large-v3-turbo (q5) — transcribes speech',
+    'ggml-medium.bin': 'Whisper medium — transcribes speech',
     'ggml-large-v3.bin': 'Whisper large-v3 — transcribes speech',
     'ggml-silero-v5.1.2.bin': 'Silero VAD — keeps silence from sounding like speech',
     'pyannote-segmentation-3-0.onnx': 'pyannote — splits the audio by who is talking',
     'campplus-sv-zh_en.onnx': 'CAM++ — tells speakers apart',
   } as Record<string, string>,
+  // The models banner used to live on the main page for exactly this reason — a first
+  // run with no models yet — but onboarding now covers that, so a failure caused by a
+  // still-missing model needs its own path back to where it can be fixed instead.
+  modelMissingWarning: "Couldn't run — the selected model isn't downloaded yet.",
+  modelsGoToSettings: 'Manage models in Settings',
+  onbWelcomeTitle: 'Welcome to Meeting Inspector',
+  onbWelcomeBody:
+    'Everything this app does happens on this machine. Your audio never leaves it, and the app makes no outbound calls of its own — the only thing that reaches the internet is downloading a transcription model, once, when you choose to. A few quick questions and you will be ready to record.',
+  onbLanguageTitle: 'Interface language',
+  onbMeetingLangTitle: 'Meeting language',
+  onbModelTitle: 'Transcription model',
+  onbModelSkipHint: "You can download this later from Settings › Transcription — recording works without it, but nothing can be transcribed until it's downloaded.",
+  onbPermissionsTitle: 'Permissions',
+  onbPermissionsSkipHint: "You can grant these later — until you do, recording system audio or your microphone will fail, and this app's own warnings on the main screen will tell you which one and send you back to System Settings.",
+  onbPermissionsGranted: 'Both permissions are already granted.',
+  onbTranscribeModeTitle: 'When should meetings be transcribed?',
+  onbFinishTitle: "You're set up",
+  onbFinishBody: 'Start a recording any time from the main screen. Everything here can be changed later from Settings.',
+  onbBack: 'Back',
+  onbNext: 'Continue',
+  onbSkip: 'Skip for now',
+  onbGetStarted: 'Get started',
+  onbStepOf: (i: number, n: number) => `Step ${i} of ${n}`,
+  onboardingRerunLabel: 'First-run setup',
+  onboardingRerun: 'Run setup again',
+  // MEDIUM 2: onboarding has no way to stop a recording (Start/Stop, the meetings
+  // batch queue, the elapsed timer, and the meters all live in #main-view, which
+  // onboarding hides) — so the button that opens it is locked instead, the same way
+  // the microphone test already locks during a batch.
+  onboardingRerunLockedReason: 'Unavailable while a recording or meetings are in progress.',
+  // LOW 7: shown if saving that onboarding finished fails (e.g. a read-only userData
+  // volume) — without this, onboarding used to fail silently and reopen on every
+  // launch forever with nothing explaining why.
+  onboardingSaveFailed: (msg: string) => `Could not save that setup is done: ${msg} — you may see this screen again next launch.`,
 }
 
 const th: typeof en = {
@@ -107,6 +235,15 @@ const th: typeof en = {
   meterOthers: 'คนอื่น',
   meterUs: 'เรา',
   settingsSummary: 'ตั้งค่า',
+  settingsBack: 'กลับ',
+  catGeneral: 'ทั่วไป',
+  catRecording: 'การอัดเสียง',
+  catTranscription: 'การถอดเสียง',
+  catSpeakers: 'ผู้พูด',
+  catConnections: 'การเชื่อมต่อ',
+  langRowLabel: 'ภาษาที่ใช้ในแอป',
+  mcpRowLabel: 'เซิร์ฟเวอร์ MCP',
+  micTestRowLabel: 'ทดสอบไมโครโฟน',
   voicesHeading: (n: number) => `เสียงที่จำได้ (${n} คน)`,
   voicesEmpty: 'ยังไม่จำเสียงใคร — ตั้งชื่อคนพูดหลังประชุมสักครั้ง ครั้งหน้าจะเติมชื่อให้เอง',
   voicesForget: 'ลืมเสียงนี้',
@@ -122,6 +259,8 @@ const th: typeof en = {
   micTestSpeech: 'ได้ยินเป็นเสียงพูด',
   micTestDropped: 'กำลังทิ้งเสียงนี้',
   micTestNothing: 'ไม่มีอะไรรอดผ่านตัวกรอง',
+  micTestFailed: (msg) => `ทดสอบไมค์ไม่ได้: ${msg}`,
+  micTestLockedReason: 'ใช้ไม่ได้ตอนนี้ — กำลังถอดเสียงการประชุมอยู่เบื้องหลัง',
   micVerdictQuiet: 'ไมค์แทบไม่ได้ยินอะไรเลย อันนี้ไม่ใช่เรื่องระดับกรอง ลองเช็คว่าเลือกไมค์ถูกตัวไหม หรือพูดใกล้ขึ้น',
   micLevelNow: (pct: number) => `ระดับเสียงเข้า ${pct}%`,
   micTooQuiet: 'เสียงเข้าเบามาก — เช็คว่าเลือกไมค์ถูกตัวไหมใน System Settings › Sound หรือขยับเข้าใกล้ไมค์',
@@ -144,6 +283,36 @@ const th: typeof en = {
     `port ${wanted} ไม่ว่าง และ port เริ่มต้นก็ไม่ว่าง ระบบจึงใช้ ${actual} — ควรเลือก port ที่ว่าง เพราะเลขนี้จะเปลี่ยนทุกครั้งที่เปิดแอป`,
   portTakenUsingAnyIsDefault: (wanted: number, actual: number) =>
     `port ${wanted} มีแอปอื่นใช้อยู่ ระบบจึงใช้ ${actual} แทน — ควรเลือก port ที่ว่าง เพราะเลขนี้จะเปลี่ยนทุกครั้งที่เปิดแอป`,
+  transcribeModeLabel: 'ถอดเสียง',
+  transcribeModeAfter: 'หลังจบประชุม',
+  transcribeModeLive: 'สด ระหว่างประชุม',
+  transcribeModeManual: 'เลือกเองว่าประชุมไหนจะถอด',
+  transcribeModeHint: {
+    after: 'ค่าเริ่มต้น ระหว่างอัดจะยังไม่ถอดเสียงอะไรเลย พอจบประชุมค่อยถอดทั้งหมดในรอบเดียว ทำให้ใช้แรมน้อยระหว่างอัด',
+    live: 'ข้อความจะขึ้นระหว่างที่คนพูด แต่โมเดล 3GB จะค้างอยู่ในแรมตลอดการประชุม',
+    manual: 'จะไม่ถอดเสียงให้อัตโนมัติเลย ทั้งระหว่างอัดและหลังจบ — เลือกเองจากรายการประชุมด้านล่างว่าจะถอดตัวไหน เมื่อไหร่ก็ได้ ทีละตัวหรือหลายตัวพร้อมกัน',
+  } as Record<string, string>,
+  transcribeAfterPlaceholder: 'transcript จะขึ้นตอนจบประชุม',
+  transcribeManualPlaceholder: 'ประชุมนี้จะไม่ถอดเสียงให้อัตโนมัติ — เลือกจากรายการประชุมด้านล่างเมื่อพร้อม',
+  transcribing: (pct) => `กำลังถอดเสียง… ${pct}%`,
+  asrModelLabel: 'โมเดลถอดเสียง',
+  asrModelName: { turbo: 'Turbo (เบา)', medium: 'Medium', large: 'Large (แม่นยำ)' } as Record<AsrModel, string>,
+  asrModelDetail: {
+    turbo:
+      'เบาที่สุด เร็วที่สุด ใช้แรมระหว่างถอดเสียง 0.78GB ถอดเสียง 30 นาทีใช้เวลาประมาณ 2 นาที จับศัพท์เทคนิคได้น้อยสุดในสามตัว (ทดสอบได้ 22 จาก 27 คำ)',
+    medium:
+      'ใช้แรม 1.96GB อยู่กลางๆ ระหว่างอีกสองตัว แต่ช้าที่สุดในสามตัว — ถอดเสียง 30 นาทีใช้เวลาประมาณ 8 นาที จับศัพท์เทคนิคได้ดีกว่า Turbo (25 จาก 27 คำ) โดยไม่ต้องใช้แรมเท่า Large คุ้มก็ต่อเมื่ออยากได้ความแม่นยำศัพท์เทคนิคที่ดีกว่าจริงๆ',
+    large:
+      'แม่นยำที่สุด จับศัพท์เทคนิคได้ดีที่สุด (26 จาก 27 คำ) error rate ต่ำสุด แต่ก็ใช้แรมมากที่สุด — 3.43GB ระหว่างถอดเสียง ถอดเสียง 30 นาทีใช้เวลาประมาณ 6 นาที',
+  } as Record<AsrModel, string>,
+  asrModelDownloaded: 'มีอยู่ในเครื่องแล้ว',
+  asrModelPartial: (progress) => `โหลดค้างไว้ (${progress}) — จะโหลดต่อจากเดิม`,
+  asrModelNeedsDownload: (size) => `ยังไม่ได้โหลด — ${size}`,
+  asrModelTimingNote: 'เวลาที่บอกเป็นค่าประมาณ วัดจาก Mac Apple Silicon เครื่องจริงอาจต่างไปบ้าง',
+  meetingLangLabel: 'ภาษาที่ใช้ในที่ประชุม',
+  meetingLangName: { th: 'ไทย', en: 'อังกฤษ' } as Record<MeetingLanguage, string>,
+  meetingLangHint:
+    'ภาษาที่คนพูดในที่ประชุม — ไม่ใช่ภาษาของหน้าจอด้านบน เลือกผิดมีต้นทุนจริง: จากการทดสอบ ประชุมภาษาอังกฤษที่ถอดเป็นไทยผิดพลาด 9.0% ของตัวอักษร และจับศัพท์เทคนิคพลาดไปหนึ่งคำ (ได้ 17/18) แต่ถอดเป็นอังกฤษผิดพลาดแค่ 0.6% จับศัพท์ได้ครบ (18/18) ส่วนประชุมภาษาไทยที่ถอดเป็นอังกฤษผิดพลาด 34.0% (จับศัพท์ได้ 21/27) แต่ถอดเป็นไทยผิดพลาด 15.7% (จับศัพท์ได้ 22/27)',
   noiseLabel: 'กรองเสียงรบกวน',
   noiseLow: 'เก็บทุกอย่าง',
   noiseMedium: 'สมดุล',
@@ -153,11 +322,15 @@ const th: typeof en = {
     medium: 'ค่าเริ่มต้น กรองเสียงห้องออก แต่ยังถอดเสียงคนที่พูดเบาหรืออยู่ไกลไมค์',
     high: 'ตัดเสียงพูดที่แผ่วมากในห้องที่มีเสียงรบกวนออกด้วย ใช้เมื่อมีบรรทัดโผล่ทั้งที่ไม่มีใครพูด',
   } as Record<string, string>,
+  noiseLockedHint: 'ล็อกไว้ระหว่างกำลังถอดเสียงอยู่ — ตัวกรองนี้มีผลกับท่อนที่กำลังประมวลผลอยู่ รอให้เสร็จก่อนแล้วค่อยเปลี่ยน',
   mcpLabel: 'เปิด MCP server ให้ AI ในเครื่องดึง transcript ไปสรุป',
+  mcpUrlLabel: 'URL',
+  mcpTokenLabel: 'Bearer token',
   permWhy: {
     screen: 'ต้องมีเพื่ออัดเสียงระบบ (เสียงคนอื่นในที่ประชุม)',
     microphone: 'ต้องมีเพื่ออัดเสียงเรา',
   },
+  permName: { screen: 'การบันทึกหน้าจอ', microphone: 'ไมโครโฟน' } as Record<'screen' | 'microphone', string>,
   permNeverAsked: (name, why) => `ยังไม่เคยขอสิทธิ์ ${name} — ${why}`,
   permDenied: (name, why) => `ไม่ได้สิทธิ์ ${name} — ${why}`,
   permGrant: (name) => `ขอสิทธิ์ ${name}`,
@@ -183,12 +356,54 @@ const th: typeof en = {
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
   speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
+  meetingsHeading: 'การประชุม',
+  meetingsEmpty: 'ยังไม่มีการประชุมที่บันทึกไว้',
+  meetingsStatus: {
+    'not-transcribed': 'ยังไม่ถอดเสียง',
+    transcribing: 'กำลังถอดเสียง…',
+    done: 'ถอดเสร็จแล้ว',
+    failed: 'ถอดไม่สำเร็จ — ลองใหม่',
+  } as Record<TranscribeStatus, string>,
+  meetingsSelectAll: 'เลือกทั้งหมด',
+  meetingsSelectNone: 'ล้างที่เลือก',
+  meetingsTranscribe: (n) => (n === 0 ? 'ถอดเสียง' : `ถอดเสียง ${n} การประชุม`),
+  meetingsStop: 'หยุด',
+  meetingsProgress: (title, index, total, pct) => `กำลังถอดเสียง ${title} (${index}/${total}) — ${pct}%`,
+  meetingsDiarizing: (title, index, total) => `กำลังแยกว่าใครพูดใน ${title} (${index}/${total})…`,
+  meetingsStopping: 'กำลังหยุด…',
+  meetingsCancelled: 'หยุดแล้ว — ประชุมที่ยังค้างในคิวจะยังไม่ถูกแตะต้อง',
   modelNames: {
+    'ggml-large-v3-turbo-q5_0.bin': 'Whisper large-v3-turbo (q5) — ถอดเสียง',
+    'ggml-medium.bin': 'Whisper medium — ถอดเสียง',
     'ggml-large-v3.bin': 'Whisper large-v3 — ถอดเสียง',
     'ggml-silero-v5.1.2.bin': 'Silero VAD — กันหลอนตอนเงียบ',
     'pyannote-segmentation-3-0.onnx': 'pyannote — แบ่งช่วงคนพูด',
     'campplus-sv-zh_en.onnx': 'CAM++ — จำแนกว่าใครเป็นใคร',
   } as Record<string, string>,
+  modelMissingWarning: 'ทำไม่ได้ — ยังไม่ได้โหลดโมเดลที่เลือกไว้',
+  modelsGoToSettings: 'จัดการโมเดลในหน้าตั้งค่า',
+  onbWelcomeTitle: 'ยินดีต้อนรับสู่ Meeting Inspector',
+  onbWelcomeBody:
+    'ทุกอย่างที่แอปนี้ทำเกิดขึ้นบนเครื่องนี้เครื่องเดียว เสียงของคุณไม่ถูกส่งออกไปไหน และแอปไม่มีการเชื่อมต่อออกอินเทอร์เน็ตเองเลย ยกเว้นตอนโหลดโมเดลถอดเสียง ซึ่งจะเกิดขึ้นแค่ตอนที่คุณเลือกโหลดเท่านั้น ตอบคำถามสั้นๆ ไม่กี่ข้อ แล้วก็เริ่มอัดเสียงได้เลย',
+  onbLanguageTitle: 'ภาษาที่ใช้ในแอป',
+  onbMeetingLangTitle: 'ภาษาที่ใช้ในที่ประชุม',
+  onbModelTitle: 'โมเดลถอดเสียง',
+  onbModelSkipHint: 'โหลดทีหลังได้จากหน้าตั้งค่า › การถอดเสียง — อัดเสียงได้ตามปกติแม้ยังไม่โหลด แต่จะถอดเสียงไม่ได้จนกว่าจะโหลดเสร็จ',
+  onbPermissionsTitle: 'สิทธิ์การเข้าถึง',
+  onbPermissionsSkipHint: 'ขอสิทธิ์ทีหลังได้ — แต่ถ้ายังไม่ได้ให้ การอัดเสียงระบบหรือไมโครโฟนจะไม่สำเร็จ และแอปจะแจ้งเตือนที่หน้าแรกพร้อมพาไปที่ System Settings ให้เอง',
+  onbPermissionsGranted: 'ได้สิทธิ์ทั้งสองอย่างแล้ว',
+  onbTranscribeModeTitle: 'ให้ถอดเสียงตอนไหน',
+  onbFinishTitle: 'ตั้งค่าเสร็จแล้ว',
+  onbFinishBody: 'เริ่มอัดเสียงได้ทุกเมื่อจากหน้าแรก ทุกอย่างที่ตั้งไว้ตรงนี้เปลี่ยนทีหลังได้จากหน้าตั้งค่า',
+  onbBack: 'กลับ',
+  onbNext: 'ถัดไป',
+  onbSkip: 'ข้ามไปก่อน',
+  onbGetStarted: 'เริ่มใช้งาน',
+  onbStepOf: (i, n) => `ขั้นตอน ${i} จาก ${n}`,
+  onboardingRerunLabel: 'ตั้งค่าเริ่มต้นใช้งาน',
+  onboardingRerun: 'ทำใหม่อีกครั้ง',
+  onboardingRerunLockedReason: 'ใช้ไม่ได้ตอนนี้ — กำลังอัดเสียงหรือถอดเสียงการประชุมอยู่',
+  onboardingSaveFailed: (msg) => `บันทึกสถานะตั้งค่าเสร็จไม่สำเร็จ: ${msg} — ครั้งหน้าอาจเจอหน้านี้อีก`,
 }
 
 const STR: Record<Language, typeof en> = { en, th }
@@ -213,7 +428,6 @@ const mcpToggle = $<HTMLInputElement>('mcp')
 const mcpStateEl = $('mcpstate')
 const meters: Record<Track, HTMLElement> = { loopback: $('m-loopback'), mic: $('m-mic') }
 const meterLabels: Record<Track, HTMLElement> = { loopback: $('meter-others-label'), mic: $('meter-us-label') }
-const settingsSummary = $('settings-summary')
 const voicesEl = $('voices')
 const portInput = $<HTMLInputElement>('port')
 const portSave = $<HTMLButtonElement>('port-save')
@@ -221,15 +435,399 @@ const portLabel = $('port-label')
 const noiseSelect = $<HTMLSelectElement>('noise')
 const noiseLabel = $('noise-label')
 const noiseHint = $('noisehint')
+const transcribeModeRadios: Record<TranscribeMode, HTMLInputElement> = {
+  after: $<HTMLInputElement>('transcribe-mode-after'),
+  live: $<HTMLInputElement>('transcribe-mode-live'),
+  manual: $<HTMLInputElement>('transcribe-mode-manual'),
+}
+const transcribeModeNames: Record<TranscribeMode, HTMLElement> = {
+  after: $('transcribe-mode-after-name'),
+  live: $('transcribe-mode-live-name'),
+  manual: $('transcribe-mode-manual-name'),
+}
+const transcribeModeLabelEl = $('transcribe-mode-label')
+const transcribeModeHint = $('transcribe-mode-hint')
+
+/** A three-way choice, not a toggle: selectable rows with a checkmark, same
+ * pattern as the ASR model picker below. These three helpers stand in for the
+ * `.value`/`.disabled`/`.options` a `<select>` used to give for free. */
+const getTranscribeMode = (): TranscribeMode =>
+  (Object.entries(transcribeModeRadios).find(([, r]) => r.checked)?.[0] as TranscribeMode | undefined) ?? 'after'
+const setTranscribeModeValue = (v: TranscribeMode): void => {
+  for (const [key, r] of Object.entries(transcribeModeRadios)) r.checked = key === v
+}
+const setTranscribeModeDisabled = (disabled: boolean): void => {
+  for (const r of Object.values(transcribeModeRadios)) r.disabled = disabled
+}
+const asrModelLabelEl = $('asr-model-label')
+const asrModelEl = $('asr-model')
+const asrModelNoteEl = $('asr-model-note')
+const meetingLangSelect = $<HTMLSelectElement>('meeting-lang')
+const meetingLangLabelEl = $('meeting-lang-label')
+const meetingLangHintEl = $('meeting-lang-hint')
 const micToggle = $<HTMLButtonElement>('mictest-toggle')
+const micTestLockHint = $('mictest-lock-hint')
+const micTestRowLabel = $('mictest-row-label')
 const micLevel = $('mictest-level')
 const micVerdictEl = $('mictest-verdict')
 const micLine = $('mictest-line')
 const micHeard = $('mictest-heard')
 const mcpLabel = $('mcp-label')
+const mcpRowLabel = $('mcp-row-label')
+const langRowLabel = $('lang-row-label')
+const meetingsHeadingEl = $('meetings-heading')
+const meetingsListEl = $('meetings-list')
+const meetingsSelectAllBtn = $<HTMLButtonElement>('meetings-select-all')
+const meetingsSelectNoneBtn = $<HTMLButtonElement>('meetings-select-none')
+const meetingsTranscribeBtn = $<HTMLButtonElement>('meetings-transcribe')
+const meetingsStopBtn = $<HTMLButtonElement>('meetings-stop')
+const meetingsProgressEl = $('meetings-progress')
 const langRadios: Record<Language, HTMLInputElement> = {
   en: $<HTMLInputElement>('lang-en'),
   th: $<HTMLInputElement>('lang-th'),
+}
+
+/** Settings became its own page (iPadOS-style sidebar of categories + grouped
+ * cards) rather than the old single `<details>` disclosure — see the report
+ * for why. Everything below wires that page open/closed and switches which
+ * category's cards are visible. */
+type SettingsCategory = 'general' | 'recording' | 'transcription' | 'speakers' | 'connections'
+const SETTINGS_CATEGORIES: SettingsCategory[] = ['general', 'recording', 'transcription', 'speakers', 'connections']
+
+const mainView = $('main-view')
+const settingsPage = $('settings-page')
+const settingsOpenBtn = $<HTMLButtonElement>('settings-open')
+const settingsOpenLabel = $('settings-open-label')
+const settingsBackBtn = $<HTMLButtonElement>('settings-back')
+const settingsBackLabel = $('settings-back-label')
+const settingsTitleEl = $('settings-title')
+const settingsCatButtons: Record<SettingsCategory, HTMLButtonElement> = {
+  general: $<HTMLButtonElement>('cat-general'),
+  recording: $<HTMLButtonElement>('cat-recording'),
+  transcription: $<HTMLButtonElement>('cat-transcription'),
+  speakers: $<HTMLButtonElement>('cat-speakers'),
+  connections: $<HTMLButtonElement>('cat-connections'),
+}
+const settingsPanels: Record<SettingsCategory, HTMLElement> = {
+  general: $('panel-general'),
+  recording: $('panel-recording'),
+  transcription: $('panel-transcription'),
+  speakers: $('panel-speakers'),
+  connections: $('panel-connections'),
+}
+const settingsPanelTitles: Record<SettingsCategory, HTMLElement> = {
+  general: $('panel-general-title'),
+  recording: $('panel-recording-title'),
+  transcription: $('panel-transcription-title'),
+  speakers: $('panel-speakers-title'),
+  connections: $('panel-connections-title'),
+}
+const catLabel: Record<SettingsCategory, () => string> = {
+  general: () => t().catGeneral,
+  recording: () => t().catRecording,
+  transcription: () => t().catTranscription,
+  speakers: () => t().catSpeakers,
+  connections: () => t().catConnections,
+}
+
+let activeSettingsCategory: SettingsCategory = 'general'
+
+function showSettingsCategory(cat: SettingsCategory): void {
+  // The mic test opens the mic and polls it every 0.5-4s with nothing else in the app
+  // showing it is still open — leaving the Recording category (where its controls
+  // live) has to stop it, or it just keeps capturing unseen.
+  if (cat !== 'recording') stopMicTest()
+  activeSettingsCategory = cat
+  for (const key of SETTINGS_CATEGORIES) {
+    settingsPanels[key].hidden = key !== cat
+    if (key === cat) settingsCatButtons[key].setAttribute('aria-current', 'true')
+    else settingsCatButtons[key].removeAttribute('aria-current')
+  }
+}
+
+function openSettings(): void {
+  showSettingsCategory(activeSettingsCategory)
+  // A batch started from the main view can still be running once Settings opens —
+  // reflect that immediately rather than waiting for the next onBatchItem tick.
+  updateTranscriptionLocks()
+  settingsPage.hidden = false
+  mainView.hidden = true
+}
+
+function closeSettings(): void {
+  stopMicTest()
+  settingsPage.hidden = true
+  mainView.hidden = false
+}
+
+settingsOpenBtn.onclick = () => openSettings()
+settingsBackBtn.onclick = () => closeSettings()
+for (const key of SETTINGS_CATEGORIES) settingsCatButtons[key].onclick = () => showSettingsCategory(key)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || settingsPage.hidden) return
+  // Don't steal Escape from a form control the user is actively editing — e.g. typing
+  // a port number should let Escape do its native "cancel this edit" thing, not also
+  // close the whole Settings page and discard it.
+  const el = document.activeElement
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return
+  closeSettings()
+})
+
+/**
+ * First-run onboarding (spec item: no settings on the main page, but a first run has
+ * to get to a working state somehow) — a fourth top-level page alongside main-view and
+ * settings-page, one step at a time. Reuses Settings' own building blocks wherever a
+ * step needs the same thing Settings already offers (the ASR model picker + download
+ * panel, the permission boxes) rather than building second copies of either.
+ */
+type OnboardingStep =
+  | 'welcome'
+  | 'language'
+  | 'meetingLanguage'
+  | 'model'
+  | 'permissions'
+  | 'transcribeMode'
+  | 'finish'
+const ONBOARDING_STEPS: OnboardingStep[] = [
+  'welcome',
+  'language',
+  'meetingLanguage',
+  'model',
+  'permissions',
+  'transcribeMode',
+  'finish',
+]
+// Only these two can genuinely fail to complete right now (a download the user wants
+// to defer, a permission they want to grant later) — every other step always has a
+// sensible current value (a language, a mode), so "Next" alone already covers it.
+const ONBOARDING_SKIPPABLE = new Set<OnboardingStep>(['model', 'permissions'])
+const ONBOARDING_SKIP_HINT: Partial<Record<OnboardingStep, () => string>> = {
+  model: () => t().onbModelSkipHint,
+  permissions: () => t().onbPermissionsSkipHint,
+}
+
+const onboardingPage = $('onboarding-page')
+const onbStepsEl = $('onboarding-steps')
+const onbBackBtn = $<HTMLButtonElement>('onb-back')
+const onbNextBtn = $<HTMLButtonElement>('onb-next')
+const onbSkipBtn = $<HTMLButtonElement>('onb-skip')
+const onbSkipHintEl = $('onb-skip-hint')
+
+const onbStepSections: Record<OnboardingStep, HTMLElement> = {
+  welcome: $('onb-welcome'),
+  language: $('onb-language'),
+  meetingLanguage: $('onb-meeting-lang'),
+  model: $('onb-model'),
+  permissions: $('onb-permissions'),
+  transcribeMode: $('onb-transcribe-mode'),
+  finish: $('onb-finish'),
+}
+
+const onbWelcomeTitleEl = $('onb-welcome-title')
+const onbWelcomeBodyEl = $('onb-welcome-body')
+
+const onbLanguageTitleEl = $('onb-language-title')
+const onbLangRadios: Record<Language, HTMLInputElement> = {
+  en: $<HTMLInputElement>('onb-lang-en'),
+  th: $<HTMLInputElement>('onb-lang-th'),
+}
+
+const onbMeetingLangTitleEl = $('onb-meeting-lang-title')
+const onbMeetingLangSelect = $<HTMLSelectElement>('onb-meeting-lang-select')
+const onbMeetingLangHintEl = $('onb-meeting-lang-hint')
+
+const onbModelTitleEl = $('onb-model-title')
+const onbAsrModelEl = $('onb-asr-model')
+const onbAsrModelNoteEl = $('onb-asr-model-note')
+const onbModelsEl = $('onb-models')
+
+const onbPermissionsTitleEl = $('onb-permissions-title')
+const onbPermsEl = $('onb-perms')
+
+const onbTranscribeModeTitleEl = $('onb-transcribe-mode-title')
+const onbTranscribeModeRadios: Record<TranscribeMode, HTMLInputElement> = {
+  after: $<HTMLInputElement>('onb-mode-after'),
+  live: $<HTMLInputElement>('onb-mode-live'),
+  manual: $<HTMLInputElement>('onb-mode-manual'),
+}
+const onbTranscribeModeNames: Record<TranscribeMode, HTMLElement> = {
+  after: $('onb-mode-after-name'),
+  live: $('onb-mode-live-name'),
+  manual: $('onb-mode-manual-name'),
+}
+const onbTranscribeModeHintEl = $('onb-transcribe-mode-hint')
+const getOnbTranscribeMode = (): TranscribeMode =>
+  (Object.entries(onbTranscribeModeRadios).find(([, r]) => r.checked)?.[0] as TranscribeMode | undefined) ?? 'after'
+const setOnbTranscribeModeValue = (v: TranscribeMode): void => {
+  for (const [key, r] of Object.entries(onbTranscribeModeRadios)) r.checked = key === v
+}
+
+const onbFinishTitleEl = $('onb-finish-title')
+const onbFinishBodyEl = $('onb-finish-body')
+
+const onboardingRerunLabelEl = $('onboarding-rerun-label')
+const onboardingRerunBtn = $<HTMLButtonElement>('onboarding-rerun')
+const onboardingRerunLockHint = $('onboarding-rerun-lock-hint')
+
+let onbIndex = 0
+
+/** Delegates to the exact same picker + download panel Settings > Transcription uses
+ * (renderAsrModel/renderModels, generalized above to take a container) rather than a
+ * second copy of either. */
+async function renderOnboardingModelStep(): Promise<void> {
+  onbAsrModelNoteEl.textContent = t().asrModelTimingNote
+  await Promise.all([renderAsrModel(onbAsrModelEl, onbModelsEl), renderModels('', onbModelsEl)])
+}
+
+/** Same permission boxes the main page shows once a capture actually fails (spec item
+ * 1) — here shown proactively, before either has been asked for, since a first run has
+ * no meeting yet to fail. */
+async function renderOnboardingPermissions(): Promise<void> {
+  onbPermsEl.replaceChildren()
+  await appendPermissionWarnings(true, onbPermsEl, renderOnboardingPermissions)
+  if (!onbPermsEl.hasChildNodes()) {
+    const ok = document.createElement('div')
+    ok.className = 'hint'
+    ok.textContent = t().onbPermissionsGranted
+    onbPermsEl.append(ok)
+  }
+}
+
+function renderOnboardingStep(): void {
+  const step = ONBOARDING_STEPS[onbIndex]!
+  for (const key of ONBOARDING_STEPS) onbStepSections[key].hidden = key !== step
+
+  onbStepsEl.replaceChildren(
+    ...ONBOARDING_STEPS.map((_, i) => {
+      const dot = document.createElement('span')
+      dot.className = `onb-dot${i === onbIndex ? ' active' : i < onbIndex ? ' done' : ''}`
+      return dot
+    }),
+  )
+  onbStepsEl.setAttribute('aria-label', t().onbStepOf(onbIndex + 1, ONBOARDING_STEPS.length))
+
+  onbBackBtn.hidden = onbIndex === 0
+  onbBackBtn.textContent = t().onbBack
+  onbNextBtn.textContent = onbIndex === ONBOARDING_STEPS.length - 1 ? t().onbGetStarted : t().onbNext
+  onbSkipBtn.hidden = !ONBOARDING_SKIPPABLE.has(step)
+  onbSkipBtn.textContent = t().onbSkip
+  onbSkipHintEl.textContent = ONBOARDING_SKIP_HINT[step]?.() ?? ''
+
+  onbWelcomeTitleEl.textContent = t().onbWelcomeTitle
+  onbWelcomeBodyEl.textContent = t().onbWelcomeBody
+
+  onbLanguageTitleEl.textContent = t().onbLanguageTitle
+  onbLangRadios.en.checked = lang === 'en'
+  onbLangRadios.th.checked = lang === 'th'
+
+  onbMeetingLangTitleEl.textContent = t().onbMeetingLangTitle
+  const onbMeetingLangOptions = onbMeetingLangSelect.options
+  onbMeetingLangOptions[0]!.textContent = t().meetingLangName.th
+  onbMeetingLangOptions[1]!.textContent = t().meetingLangName.en
+  // The exact same hint Settings > Transcription shows — it already carries every
+  // measured number the spec wants here, for both directions of getting this wrong.
+  onbMeetingLangHintEl.textContent = t().meetingLangHint
+
+  onbModelTitleEl.textContent = t().onbModelTitle
+  onbPermissionsTitleEl.textContent = t().onbPermissionsTitle
+  onbTranscribeModeTitleEl.textContent = t().onbTranscribeModeTitle
+  onbTranscribeModeNames.after.textContent = t().transcribeModeAfter
+  onbTranscribeModeNames.live.textContent = t().transcribeModeLive
+  onbTranscribeModeNames.manual.textContent = t().transcribeModeManual
+  onbTranscribeModeHintEl.textContent = t().transcribeModeHint[getOnbTranscribeMode()] ?? ''
+
+  onbFinishTitleEl.textContent = t().onbFinishTitle
+  onbFinishBodyEl.textContent = t().onbFinishBody
+
+  if (step === 'model') void renderOnboardingModelStep()
+  if (step === 'permissions') void renderOnboardingPermissions()
+}
+
+async function showOnboarding(): Promise<void> {
+  // Hidden before the await below, not after — otherwise "Run setup again" (which
+  // closes Settings, itself synchronous, right before calling this) would flash the
+  // main page for a frame while the settings round-trip is in flight.
+  settingsPage.hidden = true
+  mainView.hidden = true
+  onboardingPage.hidden = false
+  // Seeded from disk rather than assumed — "Run setup again" from Settings can open
+  // this long after the defaults were last touched.
+  const settings = await window.api.getSettings()
+  onbMeetingLangSelect.value = settings.meetingLanguage
+  setOnbTranscribeModeValue(settings.transcribeMode)
+  onbIndex = 0
+  renderOnboardingStep()
+}
+
+function hideOnboarding(): void {
+  onboardingPage.hidden = true
+  mainView.hidden = false
+}
+
+for (const [code, radio] of Object.entries(onbLangRadios) as [Language, HTMLInputElement][]) {
+  radio.onchange = async () => {
+    if (!radio.checked) return
+    applyLanguage((await window.api.setLanguage(code)).language)
+  }
+}
+
+onbMeetingLangSelect.onchange = async () => {
+  onbMeetingLangSelect.disabled = true
+  try {
+    await window.api.setMeetingLanguage(onbMeetingLangSelect.value as MeetingLanguage)
+  } finally {
+    onbMeetingLangSelect.disabled = false
+  }
+}
+
+const onOnbTranscribeModeChange = async (): Promise<void> => {
+  for (const r of Object.values(onbTranscribeModeRadios)) r.disabled = true
+  try {
+    await window.api.setTranscribeMode(getOnbTranscribeMode())
+    onbTranscribeModeHintEl.textContent = t().transcribeModeHint[getOnbTranscribeMode()] ?? ''
+  } finally {
+    for (const r of Object.values(onbTranscribeModeRadios)) r.disabled = false
+  }
+}
+for (const r of Object.values(onbTranscribeModeRadios)) r.onchange = onOnbTranscribeModeChange
+
+onbBackBtn.onclick = () => {
+  if (onbIndex === 0) return
+  onbIndex -= 1
+  renderOnboardingStep()
+}
+onbNextBtn.onclick = () => {
+  if (onbIndex === ONBOARDING_STEPS.length - 1) {
+    void finishOnboarding()
+    return
+  }
+  onbIndex += 1
+  renderOnboardingStep()
+}
+
+/** LOW 7: the old version fired setOnboarded un-awaited and un-caught — on a
+ * read-only userData volume it fails silently and the user is dropped back into
+ * onboarding on every launch forever, with nothing ever telling them why. Hides the
+ * page either way (the user did finish the flow; a write failure is this app's
+ * problem, not something worth trapping them behind), but now at least says so. */
+async function finishOnboarding(): Promise<void> {
+  try {
+    await window.api.setOnboarded(true)
+  } catch (err) {
+    setWarning({ text: () => t().onboardingSaveFailed(reason(err)) })
+  }
+  hideOnboarding()
+}
+onbSkipBtn.onclick = () => {
+  onbIndex = Math.min(onbIndex + 1, ONBOARDING_STEPS.length - 1)
+  renderOnboardingStep()
+}
+
+// Settings > General's own way back in, for someone who wants to revisit a choice made
+// during onboarding (or never went through it, having upgraded from before it existed).
+onboardingRerunBtn.onclick = () => {
+  closeSettings()
+  void showOnboarding()
 }
 
 let recorder: Recorder | null = null
@@ -243,23 +841,40 @@ let segments: Transcript['segments'] = []
 let speakers: Record<string, string> = { ...en.speakerDefaults }
 let meetingDir: string | null = null
 
-const PERMISSION_NAME = { screen: 'Screen Recording', microphone: 'Microphone' } as const
-
 /** Remembered so a language switch re-renders the panel with the same screen/mic scope. */
 let permissionsIncludeScreen = false
+
+/**
+ * `warnings` shows two independent things at once: the permission boxes below, and
+ * (at most) one ad-hoc message — track-lost, whisper-server failing to start, or a
+ * diarize failure. Both used to be written with `.textContent =`/`.replaceChildren()`
+ * straight onto the same element, so whichever ran last wiped the other, and a
+ * language switch (which always re-derives the permission boxes) silently discarded
+ * a live ad-hoc message. Fixing this for `warnings` only would leave `done`, `queue`
+ * and the mic-test verdict with the identical bug, so the shape is the same
+ * everywhere: keep the message as a thunk that re-reads `t()`, not as rendered text,
+ * and give each panel one render function that is the only thing allowed to touch
+ * its DOM. `AdHocWarning`/`adHocWarning` itself are declared further down, next to
+ * the render function that is their only reader.
+ */
 
 /**
  * macOS has no not-determined state for Screen Recording — never-granted reads back
  * as "denied". So at launch we only speak up about the mic, which does distinguish
  * the two; the screen box appears once a capture attempt has actually failed.
  */
-async function showPermissionWarnings(includeScreen = false): Promise<void> {
-  permissionsIncludeScreen = includeScreen
+/** `container`/`onChange` default to the main page's own warnings box; onboarding's
+ * permissions step passes its own element and its own re-render function, so granting
+ * (or being sent to System Settings for) a permission there refreshes the right panel. */
+async function appendPermissionWarnings(
+  includeScreen: boolean,
+  container: HTMLElement = warnings,
+  onChange: () => void | Promise<void> = () => renderWarnings(),
+): Promise<void> {
   const status = await window.api.permissions()
-  warnings.replaceChildren()
   for (const which of includeScreen ? (['screen', 'microphone'] as const) : (['microphone'] as const)) {
     if (status[which] === 'granted') continue
-    const name = PERMISSION_NAME[which]
+    const name = t().permName[which]
     const why = t().permWhy[which]
 
     // not-determined means macOS has never asked. Sending someone to System Settings
@@ -276,11 +891,86 @@ async function showPermissionWarnings(includeScreen = false): Promise<void> {
       action.disabled = true
       if (canAsk) await window.api.requestPermissions()
       else await window.api.openPrivacySettings(which)
-      await showPermissionWarnings(includeScreen)
+      await onChange()
     }
     box.append(document.createElement('br'), action)
+    container.append(box)
+  }
+}
+
+/** Every whisper/diarize error that traces back to a missing model file carries this
+ * exact hint (whisper.ts, diarize.ts's requireFiles calls) — the one reliable marker
+ * for "send them to Settings" instead of showing the raw backend text. */
+const MODEL_MISSING_MARKER = 'use the download button in the app'
+const isModelMissing = (message: string): boolean => message.includes(MODEL_MISSING_MARKER)
+
+/** The ad-hoc warning is a thunk (so a language switch can re-derive it) plus an
+ * optional action button — used by the one case (a missing-model failure) that needs
+ * more than text: somewhere to send the user, not just something to tell them. */
+type AdHocWarning = { text: () => string; action?: () => void; actionLabel?: () => string }
+let adHocWarning: AdHocWarning | null = null
+
+async function renderWarnings(includeScreen = permissionsIncludeScreen): Promise<void> {
+  permissionsIncludeScreen = includeScreen
+  warnings.replaceChildren()
+  if (adHocWarning) {
+    const { text, action, actionLabel } = adHocWarning
+    const box = document.createElement('div')
+    box.textContent = text()
+    if (action) {
+      const button = document.createElement('button')
+      button.textContent = actionLabel ? actionLabel() : t().modelsGoToSettings
+      button.onclick = action
+      box.append(document.createElement('br'), button)
+    }
     warnings.append(box)
   }
+  await appendPermissionWarnings(includeScreen)
+}
+
+/** Sets (or clears, with `null`) the ad-hoc warning and re-renders. */
+function setWarning(msg: AdHocWarning | null): void {
+  adHocWarning = msg
+  void renderWarnings()
+}
+
+/** Wired to every ad-hoc warning that can be caused by a missing model (whisperError,
+ * diarizeError) — jumps straight to the one place that can actually fix it. */
+function modelMissingAction(): void {
+  activeSettingsCategory = 'transcription'
+  openSettings()
+}
+
+/** `queue` holds at most one of: backlog depth, transcribing %, or "diarizing…" — same
+ * thunk-not-string treatment as `adHocWarning`, so applyLanguage() can re-derive it. */
+let queueMsg: (() => string) | null = null
+function renderQueue(): void {
+  queue.textContent = queueMsg ? queueMsg() : ''
+}
+function setQueueMsg(msg: (() => string) | null): void {
+  queueMsg = msg
+  renderQueue()
+}
+
+/** `done` goes through the same "hold the data, not the rendered text" treatment —
+ * either mid-stop ("Transcribing what's left…") or the finished "Saved … · N segments"
+ * line with its reveal link. */
+type DoneState = { kind: 'pending' } | { kind: 'saved'; durationSec: number; segments: number; dir: string; id: string }
+let doneState: DoneState | null = null
+function renderDone(): void {
+  done.replaceChildren()
+  const state = doneState
+  if (!state) return
+  if (state.kind === 'pending') {
+    done.textContent = t().transcribingRest
+    return
+  }
+  done.textContent = t().saved(fmt(state.durationSec), state.segments)
+  const open = document.createElement('a')
+  open.href = '#'
+  open.textContent = titleOf(state.id)
+  open.onclick = () => void window.api.reveal(state.dir)
+  done.append(open)
 }
 
 function fmt(sec: number): string {
@@ -307,24 +997,53 @@ const modelName = (file: string) => t().modelNames[file] ?? file
  */
 let overallTotal = 0
 const received = new Map<string, number>()
-let overallFill: HTMLElement | null = null
-let overallName: HTMLElement | null = null
-let overallSize: HTMLElement | null = null
+/**
+ * LOW 8: keyed by container, not three bare module-level refs — Settings and
+ * onboarding each pass their own container (renderModels' own doc comment), but a
+ * single shared `overallFill`/`overallName`/`overallSize` meant whichever container
+ * rendered *last* silently stole them from whichever rendered first: start a download
+ * at onboarding's model step, switch language (applyLanguage always re-renders
+ * Settings' copy too), and `onModelProgress` below kept writing into Settings' now-
+ * live refs while onboarding's own bar sat frozen, still showing the last container
+ * that actually held the refs. Each container's own entry is independent, so a
+ * re-render of one can never blank out the other's.
+ */
+const bars = new Map<HTMLElement, { fill: HTMLElement; name: HTMLElement; size: HTMLElement }>()
 
+/**
+ * Whether a download is in flight — same pattern as `batchRunning`/`selectedMeetings`
+ * for the meetings queue: state that lives at module level, independent of the DOM, so
+ * it survives `renderModels()` being called again mid-download (a language switch, or
+ * the ASR-model radio's onchange re-rendering this panel). Without this, every
+ * re-render rebuilt the panel from scratch assuming idle, snapping "Downloading… /
+ * Cancel" back to "Download models" while the download kept running underneath —
+ * and a second click then hit main's "a download is already running" with no way
+ * back to the progress bar or the cancel button.
+ */
+let downloadRunning = false
+
+/** Updates every container currently tracking a bar — there is only ever one download
+ * in flight (`received`/`overallTotal` are legitimately global, unlike the DOM refs
+ * above), so every live bar should move together. */
 function updateOverallBar(): void {
-  if (!overallFill || !overallSize) return
   const sum = [...received.values()].reduce((a, b) => a + b, 0)
-  overallFill.style.width = `${overallTotal ? (sum / overallTotal) * 100 : 0}%`
-  overallSize.textContent = `${size(sum)} / ${size(overallTotal)}`
+  for (const { fill, size: sizeEl } of bars.values()) {
+    fill.style.width = `${overallTotal ? (sum / overallTotal) * 100 : 0}%`
+    sizeEl.textContent = `${size(sum)} / ${size(overallTotal)}`
+  }
 }
 
-async function renderModels(note = ''): Promise<void> {
+/** `container` defaults to the Settings > Transcription copy of this panel; onboarding's
+ * model step passes its own element so the two never fight over the same DOM node. */
+async function renderModels(note = '', container: HTMLElement = modelsEl): Promise<void> {
   const missing = (await window.api.modelStatus()).filter((m) => !m.present)
-  modelsEl.replaceChildren()
-  overallFill = overallName = overallSize = null
-  received.clear()
+  container.replaceChildren()
+  // This container's own bar refs are always rebuilt from here on (or dropped, if
+  // nothing is missing) — never another container's.
+  bars.delete(container)
   if (missing.length === 0) {
-    if (note) modelsEl.textContent = note
+    downloadRunning = false
+    if (note) container.textContent = note
     return
   }
 
@@ -336,31 +1055,41 @@ async function renderModels(note = ''): Promise<void> {
     t().modelsMissing(missing.length, size(overallTotal)) +
     (resumable.length > 0 ? t().modelsResumable(size(resumable.reduce((s, m) => s + m.resumeFrom, 0))) : '')
 
-  for (const spec of missing) received.set(spec.file, spec.resumeFrom)
+  // Seed newly-missing files from their resumeFrom, but keep whatever a running
+  // download has already accumulated for files still in progress — an unconditional
+  // received.clear() here is what snapped the bar back to resumeFrom (e.g. 122 MB)
+  // on every re-render instead of showing the bytes that had arrived since (140 MB).
+  for (const file of [...received.keys()]) {
+    if (!missing.some((m) => m.file === file)) received.delete(file)
+  }
+  for (const spec of missing) if (!received.has(spec.file)) received.set(spec.file, spec.resumeFrom)
 
   const barRow = document.createElement('div')
   barRow.className = 'file'
-  overallName = document.createElement('span')
-  overallSize = document.createElement('span')
-  overallSize.className = 'size'
+  const nameEl = document.createElement('span')
+  const sizeEl = document.createElement('span')
+  sizeEl.className = 'size'
   const bar = document.createElement('span')
   bar.className = 'bar'
-  overallFill = document.createElement('i')
-  bar.append(overallFill)
-  barRow.append(overallName, overallSize, bar)
+  const fillEl = document.createElement('i')
+  bar.append(fillEl)
+  barRow.append(nameEl, sizeEl, bar)
   box.append(barRow)
+  bars.set(container, { fill: fillEl, name: nameEl, size: sizeEl })
   updateOverallBar()
 
   const button = document.createElement('button')
   button.textContent = t().downloadModels
   const cancel = document.createElement('button')
   cancel.textContent = t().cancel
-  cancel.hidden = true
   const status = document.createElement('div')
   status.className = 'hint'
-  if (note) status.textContent = note
+  button.hidden = downloadRunning
+  cancel.hidden = !downloadRunning
+  status.textContent = downloadRunning ? t().downloading : note
 
   button.onclick = async () => {
+    downloadRunning = true
     button.hidden = true
     cancel.hidden = false
     status.textContent = t().downloading
@@ -369,10 +1098,16 @@ async function renderModels(note = ''): Promise<void> {
       outcome = (await window.api.downloadModels()).cancelled ? t().downloadCancelled : t().downloadComplete
     } catch (err) {
       outcome = reason(err)
+    } finally {
+      downloadRunning = false
     }
     // Re-rendering replaces this panel, so the outcome has to be handed forward
     // rather than written into an element that is about to be thrown away.
-    await renderModels(outcome)
+    await renderModels(outcome, container)
+    // A download can complete a model the picker was showing as "not downloaded" —
+    // refresh whichever ASR-model picker (Settings, or onboarding's own copy) is
+    // currently live, so it never lags behind a download that just finished.
+    void renderAsrModel(container === modelsEl ? asrModelEl : onbAsrModelEl, container)
   }
   cancel.onclick = () => void window.api.cancelModels()
 
@@ -380,7 +1115,85 @@ async function renderModels(note = ''): Promise<void> {
   row.className = 'row'
   row.append(button, cancel, status)
   box.append(row)
-  modelsEl.append(box)
+  container.append(box)
+}
+
+const ASR_MODEL_KEYS: AsrModel[] = ['turbo', 'medium', 'large']
+
+/**
+ * The three ASR models, each showing what it costs (RAM/speed/accuracy — asrModelDetail)
+ * and whether it needs downloading, so switching is an informed choice made right here
+ * rather than a surprise the next time a meeting tries to transcribe.
+ */
+/** `container`/`modelsContainer` default to the Settings > Transcription copy of this
+ * picker; onboarding's model step passes its own pair so picking a model there updates
+ * onboarding's own radio list and download panel, not the (hidden) Settings ones. */
+async function renderAsrModel(
+  container: HTMLElement = asrModelEl,
+  modelsContainer: HTMLElement = modelsEl,
+): Promise<void> {
+  const [settings, statuses] = await Promise.all([window.api.getSettings(), window.api.asrModelStatus()])
+  // LOW 8: only Settings' own label/note elements — onboarding's model step has its
+  // own copies (onbAsrModelNoteEl, set in renderOnboardingModelStep) and never reads
+  // these two, so writing them unconditionally for every call was wasted work with the
+  // same smell as the shared download-bar refs above, even though nothing was visibly
+  // wrong from it.
+  if (container === asrModelEl) {
+    asrModelLabelEl.textContent = t().asrModelLabel
+    asrModelNoteEl.textContent = t().asrModelTimingNote
+  }
+  container.replaceChildren()
+
+  for (const key of ASR_MODEL_KEYS) {
+    const st: ModelStatus | undefined = statuses[key]
+    // A selectable full row (not a control collapsed into one line): each model
+    // carries RAM / time-per-30-min / accuracy / download-state the user needs
+    // while choosing, so it stays visible for every row, not just the checked one.
+    const label = document.createElement('label')
+    label.className = 'option-row'
+
+    const radio = document.createElement('input')
+    radio.type = 'radio'
+    radio.name = 'asr-model'
+    radio.value = key
+    radio.checked = settings.asrModel === key
+    radio.onchange = async () => {
+      for (const input of container.querySelectorAll('input')) (input as HTMLInputElement).disabled = true
+      try {
+        await window.api.setAsrModel(key)
+      } finally {
+        // The models panel is what actually offers the download — re-rendering it here
+        // means picking an undownloaded model surfaces that immediately, instead of
+        // only failing once a meeting tries to use it.
+        await Promise.all([renderAsrModel(container, modelsContainer), renderModels('', modelsContainer)])
+      }
+    }
+
+    const head = document.createElement('span')
+    head.className = 'option-row-head'
+    const name = document.createElement('span')
+    name.textContent = t().asrModelName[key]
+    const check = document.createElement('span')
+    check.className = 'option-row-check'
+    check.setAttribute('aria-hidden', 'true')
+    check.textContent = '✓'
+    head.append(name, check)
+
+    const state = document.createElement('span')
+    state.className = 'asr-state'
+    state.textContent = st?.present
+      ? t().asrModelDownloaded
+      : st && st.resumeFrom > 0
+        ? t().asrModelPartial(`${size(st.resumeFrom)} / ${size(st.bytes)}`)
+        : t().asrModelNeedsDownload(size(st?.bytes ?? 0))
+
+    const detail = document.createElement('div')
+    detail.className = 'hint'
+    detail.textContent = t().asrModelDetail[key]
+
+    label.append(radio, head, state, detail)
+    container.append(label)
+  }
 }
 
 const content = $('content')
@@ -499,8 +1312,8 @@ function showMcpState(state: McpState): void {
   if (!state.url || !state.token) return
 
   mcpStateEl.append(
-    copyRow('URL', state.url),
-    copyRow('Bearer token', state.token),
+    copyRow(t().mcpUrlLabel, state.url),
+    copyRow(t().mcpTokenLabel, state.token),
     // Claude Code speaks HTTP and can send a header.
     copyRow(
       'Claude Code',
@@ -617,6 +1430,62 @@ function micVerdict(text: string): { message: string; move?: 'low' | 'medium' | 
   return { message: `${t().micVerdictGood(pct)} ${harder ? t().micVerdictTryStricter : ''}`.trim(), move: undefined }
 }
 
+/** The final verdict block (transcript comparison + move-a-level button) is the one
+ * piece of `micHeard` a language switch must be able to re-derive — `micVerdict` is
+ * pure over `micProbes` (already module state) and this stored transcript, so no
+ * further state is needed. The transient "listening…"/"…"/too-quiet lines elsewhere
+ * in this file are fine as plain text: they get overwritten every probe tick anyway. */
+let micTestText: string | null = null
+
+function renderMicHeard(): void {
+  micHeard.replaceChildren()
+  const text = micTestText
+  if (text === null) return
+  const { message, move } = micVerdict(text)
+  if (text.trim()) {
+    // Both sentences, together. Whether the transcription is any good is a
+    // comparison, and clearing the prompt made that impossible to see.
+    micHeard.append(line(t().micTestExpected, MIC_TEST_SENTENCE, true))
+    micHeard.append(line(t().micTestGot, text.trim()))
+    const lower = text.toLowerCase()
+    const found = MIC_TEST_TERMS.filter((term) => lower.includes(term))
+    micHeard.append(line('', t().micTestTerms(found, MIC_TEST_TERMS.filter((term) => !found.includes(term))), true))
+  }
+  const verdict = document.createElement('div')
+  verdict.textContent = message
+  micHeard.append(verdict)
+  if (move) {
+    const fix = document.createElement('button')
+    const goingDown = LEVELS.indexOf(move) < LEVELS.indexOf(noiseSelect.value as (typeof LEVELS)[number])
+    fix.textContent = goingDown ? t().micLower : t().micRaise
+    fix.onclick = async () => {
+      noiseSelect.value = move
+      noiseSelect.dispatchEvent(new Event('change'))
+      micTestText = null
+      renderMicHeard()
+    }
+    micHeard.append(fix)
+  }
+}
+
+/** Forced stop — used when Settings closes or navigates away from the Recording
+ * category while a test is running (MEDIUM 4). Unlike the manual stop below, nobody
+ * is looking at the panel any more, so this skips the final transcribe-and-verdict
+ * round trip and just releases the mic. */
+function stopMicTest(): void {
+  if (!micStop) return
+  micStop()
+  micStop = null
+  micFrames = []
+  micToggle.textContent = t().micTest
+  micLine.textContent = ''
+  micVerdictEl.textContent = ''
+  micVerdictEl.className = ''
+  micLevel.className = ''
+  micLevel.style.width = '0%'
+  void window.api.endMicTest()
+}
+
 async function toggleMicTest(): Promise<void> {
   if (micStop) {
     micStop()
@@ -635,38 +1504,23 @@ async function toggleMicTest(): Promise<void> {
     micFrames = []
     if (total > 16000) {
       micHeard.textContent = '…'
-      const text = await window.api.transcribeMic(all.buffer as ArrayBuffer)
-      const { message, move } = micVerdict(text)
-      micHeard.replaceChildren()
-      if (text.trim()) {
-        // Both sentences, together. Whether the transcription is any good is a
-        // comparison, and clearing the prompt made that impossible to see.
-        micHeard.append(line(t().micTestExpected, MIC_TEST_SENTENCE, true))
-        micHeard.append(line(t().micTestGot, text.trim()))
-        const lower = text.toLowerCase()
-        const found = MIC_TEST_TERMS.filter((term) => lower.includes(term))
-        micHeard.append(
-          line('', t().micTestTerms(found, MIC_TEST_TERMS.filter((term) => !found.includes(term))), true),
-        )
-      }
-      const verdict = document.createElement('div')
-      verdict.textContent = message
-      micHeard.append(verdict)
-      if (move) {
-        const fix = document.createElement('button')
-        const goingDown = LEVELS.indexOf(move) < LEVELS.indexOf(noiseSelect.value as (typeof LEVELS)[number])
-        fix.textContent = goingDown ? t().micLower : t().micRaise
-        fix.onclick = async () => {
-          noiseSelect.value = move
-          noiseSelect.dispatchEvent(new Event('change'))
-          micHeard.replaceChildren()
-        }
-        micHeard.append(fix)
+      // main can refuse this (micTestLocked, index.ts) — e.g. a batch pass started
+      // from the main view while this test was already open. Without a catch here the
+      // rejection propagated straight out of this handler, raw, AND skipped
+      // endMicTest() below, leaving whisper-server held for a mic test the user had
+      // already stopped.
+      try {
+        micTestText = await window.api.transcribeMic(all.buffer as ArrayBuffer)
+        renderMicHeard()
+      } catch (err) {
+        micHeard.textContent = t().micTestFailed(reason(err))
       }
     }
+    void window.api.endMicTest()
     return
   }
 
+  micTestText = null
   micHeard.replaceChildren()
   micFrames = []
   micProbes = { checks: 0, heard: 0, loudest: 0 }
@@ -756,10 +1610,19 @@ function setLevel(track: Track, rms: number): void {
 }
 
 async function start(): Promise<void> {
-  done.replaceChildren()
+  doneState = null
+  renderDone()
   speakerPanel.replaceChildren()
-  transcript.replaceChildren()
   segments = []
+  // 'after'/'manual' modes: say so up front rather than leaving the panel looking
+  // broken until segments land — which, in 'manual' mode, only happens once the user
+  // picks this meeting from the meetings list.
+  transcript.textContent =
+    getTranscribeMode() === 'after'
+      ? t().transcribeAfterPlaceholder
+      : getTranscribeMode() === 'manual'
+        ? t().transcribeManualPlaceholder
+        : ''
   speakers = { ...t().speakerDefaults }
   meetingDir = null
   await window.api.requestPermissions()
@@ -768,13 +1631,15 @@ async function start(): Promise<void> {
     const started = await Recorder.start(title.value, {
       onLevel: setLevel,
       onTrackLost: (track) => {
-        warnings.textContent = t().trackLost(track)
+        setWarning({ text: () => t().trackLost(track) })
       },
     })
     recorder = started.recorder
+    updateTranscriptionLocks()
   } catch (err) {
-    await showPermissionWarnings(true)
-    warnings.prepend(t().startFailed(reason(err)))
+    const msg = reason(err)
+    adHocWarning = { text: () => t().startFailed(msg) }
+    await renderWarnings(true)
     return
   } finally {
     toggle.disabled = false
@@ -784,7 +1649,7 @@ async function start(): Promise<void> {
   ticker = window.setInterval(() => (elapsed.textContent = fmt((Date.now() - t0) / 1000)), 500)
   toggle.textContent = t().stop
   title.disabled = true
-  warnings.replaceChildren()
+  setWarning(null)
   document.body.classList.add('recording')
 }
 
@@ -795,7 +1660,12 @@ async function stop(): Promise<void> {
   toggle.disabled = true
   // stop() only resolves once the queued tail chunks have come back and the
   // transcript is on disk, which can take a chunk or two.
-  done.textContent = t().transcribingRest
+  doneState = { kind: 'pending' }
+  renderDone()
+  // recorder is already null above, but session:stop's own offline pass ('after' mode)
+  // is still running in main for the whole span of this await — doneState.kind ===
+  // 'pending' is what transcriptionBusy() reads to keep the lock on through it.
+  updateTranscriptionLocks()
   const result = await r?.stop()
   document.body.classList.remove('recording')
   toggle.disabled = false
@@ -804,18 +1674,234 @@ async function stop(): Promise<void> {
   elapsed.textContent = ''
   for (const track of ['loopback', 'mic'] as const) setLevel(track, 0)
   if (!result) {
-    done.replaceChildren()
+    doneState = null
+    renderDone()
+    updateTranscriptionLocks()
     return
   }
 
   meetingDir = result.dir
-  done.textContent = t().saved(fmt(result.durationSec), result.segments)
-  const open = document.createElement('a')
-  open.href = '#'
-  open.textContent = titleOf(result.id)
-  open.onclick = () => void window.api.reveal(result.dir)
-  done.append(open)
+  doneState = { kind: 'saved', durationSec: result.durationSec, segments: result.segments, dir: result.dir, id: result.id }
+  renderDone()
+  updateTranscriptionLocks()
+  void renderMeetings() // the meeting just finished now belongs in the list too
 }
+
+/**
+ * The meetings list (spec item 3/5) — every recorded meeting, with checkboxes for
+ * picking several to transcribe at once while the user is away from the app. Only a
+ * meeting that actually needs transcribing (not-transcribed or failed) is selectable;
+ * queuing work that is already done would need a deliberate re-run, not a checkbox.
+ */
+let meetingItems: MeetingItem[] = []
+const selectedMeetings = new Set<string>()
+let batchRunning = false
+
+const meetingSelectable = (m: MeetingItem): boolean => m.status === 'not-transcribed' || m.status === 'failed'
+
+function fmtMeetingWhen(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function renderMeetingRows(): void {
+  meetingsListEl.replaceChildren(
+    ...meetingItems.map((m) => {
+      const row = document.createElement('div')
+      row.className = 'meeting-row'
+
+      const checkbox = document.createElement('input')
+      checkbox.type = 'checkbox'
+      checkbox.disabled = !meetingSelectable(m) || batchRunning
+      checkbox.checked = selectedMeetings.has(m.id)
+      checkbox.onchange = () => {
+        if (checkbox.checked) selectedMeetings.add(m.id)
+        else selectedMeetings.delete(m.id)
+        updateMeetingsActions()
+      }
+
+      const title = document.createElement('span')
+      title.className = 'meeting-title'
+      title.textContent = m.title
+
+      const when = document.createElement('span')
+      when.className = 'meeting-when'
+      when.textContent = fmtMeetingWhen(m.startedAt)
+
+      const dur = document.createElement('span')
+      dur.className = 'meeting-dur'
+      dur.textContent = fmt(m.durationSec)
+
+      // Which language this meeting will be (or was) decoded in — so picking a meeting
+      // recorded under an old setting to transcribe now is an informed choice, not a
+      // surprise (spec item 1).
+      const language = document.createElement('span')
+      language.className = 'meeting-lang'
+      language.textContent = t().meetingLangName[m.language]
+
+      const status = document.createElement('span')
+      status.className = `meeting-status ${m.status}`
+      status.textContent = t().meetingsStatus[m.status]
+
+      row.append(checkbox, title, when, dur, language, status)
+      return row
+    }),
+  )
+  if (meetingItems.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'hint'
+    empty.textContent = t().meetingsEmpty
+    meetingsListEl.append(empty)
+  }
+}
+
+/**
+ * Mirrors index.ts's `transcriptionBusy`/`micTestLocked` guards (spec item 2): a live
+ * recording, session:stop's own offline pass (still ongoing while `doneState` reads
+ * 'pending' — recorder is already null by then, see stop()), or a running batch, are
+ * all main-side reasons a pass-disturbing setting would be refused. Kept in one place
+ * so every call site below agrees on what "busy" means.
+ */
+function transcriptionBusy(): boolean {
+  return recorder !== null || doneState?.kind === 'pending' || batchRunning
+}
+
+/**
+ * Disables the controls transcriptionBusy() above would otherwise let the user click
+ * only to have main refuse — with a reason shown, not just a dead control (spec item
+ * 2). Called wherever recorder/doneState/batchRunning changes, and once more on every
+ * language switch so the reason text re-renders in the right language.
+ */
+function updateTranscriptionLocks(): void {
+  const busy = transcriptionBusy()
+  noiseSelect.disabled = busy
+  noiseHint.textContent = busy ? t().noiseLockedHint : (t().noiseHint[noiseSelect.value] ?? '')
+  // Only the batch case is disabled proactively — whether a non-live *recording*
+  // blocks the mic test depends on which mode that particular recording started in,
+  // and the mode selector stays free to change mid-recording (spec item 2's own
+  // "safe to change mid-run" list), so the renderer cannot always predict it in
+  // advance. Main is the source of truth there; toggleMicTest handles that rejection
+  // instead of trying to guess it here. `!micStop` is just a safety net — batchRunning
+  // cannot actually turn true while a mic test is open (mic test only lives in
+  // Settings, and the meetings-list Transcribe button only lives in the main view,
+  // hidden while Settings is open), so a test in progress should never be found here.
+  micToggle.disabled = batchRunning && !micStop
+  micTestLockHint.textContent = batchRunning ? t().micTestLockedReason : ''
+
+  // MEDIUM 2: onboarding has no cancel of its own, and Start/Stop, the batch queue,
+  // the timer, and the meters all live in #main-view, which onboarding hides — so
+  // "Run setup again" is locked out here instead, the same way the mic test above is
+  // locked out for a running batch. Recording is included (unlike micToggle's own
+  // lock, which only cares about a batch) because a live recording is exactly the
+  // other way into this trap: Start, then Settings › General › "Run setup again".
+  onboardingRerunBtn.disabled = busy
+  onboardingRerunLockHint.textContent = busy ? t().onboardingRerunLockedReason : ''
+}
+
+function updateMeetingsActions(): void {
+  // Labels, not just disabled/hidden — this is the only place these three buttons'
+  // text ever gets set, so it has to run on first paint (called from renderMeetings(),
+  // itself called from applyLanguage() at boot) and again on every language switch.
+  meetingsSelectAllBtn.textContent = t().meetingsSelectAll
+  meetingsSelectNoneBtn.textContent = t().meetingsSelectNone
+  meetingsStopBtn.textContent = t().meetingsStop
+  meetingsSelectAllBtn.disabled = batchRunning
+  meetingsSelectNoneBtn.disabled = batchRunning || selectedMeetings.size === 0
+  meetingsTranscribeBtn.disabled = batchRunning || selectedMeetings.size === 0
+  meetingsTranscribeBtn.textContent = t().meetingsTranscribe(selectedMeetings.size)
+  meetingsStopBtn.hidden = !batchRunning
+}
+
+/** Refetches the list from disk — cheap (a directory walk + small JSON reads), called
+ * after every meeting the batch queue finishes so statuses stay current without
+ * polling. */
+async function renderMeetings(): Promise<void> {
+  meetingItems = await window.api.listMeetings()
+  for (const id of [...selectedMeetings]) {
+    const m = meetingItems.find((x) => x.id === id)
+    if (!m || !meetingSelectable(m)) selectedMeetings.delete(id)
+  }
+  meetingsHeadingEl.textContent = t().meetingsHeading
+  renderMeetingRows()
+  updateMeetingsActions()
+}
+
+meetingsSelectAllBtn.onclick = () => {
+  for (const m of meetingItems) if (meetingSelectable(m)) selectedMeetings.add(m.id)
+  renderMeetingRows()
+  updateMeetingsActions()
+}
+meetingsSelectNoneBtn.onclick = () => {
+  selectedMeetings.clear()
+  renderMeetingRows()
+  updateMeetingsActions()
+}
+/** Same "text + optional action" shape as the ad-hoc warning box above, for the one
+ * spot in the meetings panel that can also be caused by a missing model. */
+function renderMeetingsProgress(text: string, action?: () => void): void {
+  meetingsProgressEl.replaceChildren(document.createTextNode(text))
+  if (!action) return
+  const button = document.createElement('button')
+  button.textContent = t().modelsGoToSettings
+  button.onclick = action
+  meetingsProgressEl.append(document.createElement('br'), button)
+}
+
+// Set on any 'failed' batch item whose error names a missing model (isModelMissing) —
+// the per-row status already says "Failed — try again" (meetingsStatus.failed), but
+// retrying without the model is a dead end, so onBatchDone below replaces the normal
+// idle/cancelled line with something that actually explains why and where to fix it.
+let batchModelMissing = false
+
+meetingsTranscribeBtn.onclick = async () => {
+  if (selectedMeetings.size === 0) return
+  batchRunning = true
+  batchModelMissing = false
+  renderMeetingsProgress('')
+  renderMeetingRows()
+  updateMeetingsActions()
+  updateTranscriptionLocks()
+  try {
+    await window.api.transcribeMeetings([...selectedMeetings])
+  } catch (err) {
+    batchRunning = false
+    renderMeetingsProgress(reason(err))
+    renderMeetingRows()
+    updateMeetingsActions()
+    updateTranscriptionLocks()
+  }
+}
+meetingsStopBtn.onclick = () => {
+  // MEDIUM 5: immediate, honest feedback — diarizing a meeting cannot be interrupted
+  // mid-pass (diarize.ts), so without this the button gave no sign it had registered
+  // the click until batch:done eventually arrived, possibly minutes later, and read as
+  // hung in the meantime.
+  renderMeetingsProgress(t().meetingsStopping)
+  void window.api.cancelTranscribeMeetings()
+}
+
+window.api.onBatchItem((item: BatchItem) => {
+  if (item.status === 'failed' && item.error && isModelMissing(item.error)) batchModelMissing = true
+  // The status change (running/done/failed/cancelled) is worth a fresh read from disk —
+  // a progress tick alone is not, see onBatchProgress below.
+  void renderMeetings()
+})
+window.api.onBatchProgress(({ id, index, total, fraction }: BatchTick) => {
+  const title = meetingItems.find((m) => m.id === id)?.title ?? id
+  renderMeetingsProgress(t().meetingsProgress(title, index, total, Math.round(fraction * 100)))
+})
+window.api.onBatchDiarizing(({ id, index, total }: BatchDiarizing) => {
+  const title = meetingItems.find((m) => m.id === id)?.title ?? id
+  renderMeetingsProgress(t().meetingsDiarizing(title, index, total))
+})
+window.api.onBatchDone(({ cancelled }) => {
+  batchRunning = false
+  if (batchModelMissing) renderMeetingsProgress(t().modelMissingWarning, modelMissingAction)
+  else renderMeetingsProgress(cancelled ? t().meetingsCancelled : '')
+  updateTranscriptionLocks()
+  void renderMeetings()
+})
 
 window.api.onSegments((track, incoming) => {
   segments.push(...incoming.map((s) => ({ ...s, speaker: track === 'mic' ? 'me' : 'them' })))
@@ -824,17 +1910,26 @@ window.api.onSegments((track, incoming) => {
 })
 window.api.onQueue((depth) => {
   // Nothing is dropped; a deep queue just means the transcript lags further behind.
-  queue.textContent = depth > 3 ? t().queueBacklog(depth) : ''
+  setQueueMsg(depth > 3 ? () => t().queueBacklog(depth) : null)
 })
 window.api.onTranscriptError((message) => {
-  warnings.textContent = t().whisperError(message)
+  setWarning(
+    isModelMissing(message)
+      ? { text: () => t().modelMissingWarning, action: modelMissingAction }
+      : { text: () => t().whisperError(message) },
+  )
+})
+window.api.onTranscribing((fraction) => {
+  // Overwritten by onDiarizing's message moments later, the same way onQueue's
+  // backlog text already gets replaced once diarization starts.
+  setQueueMsg(() => t().transcribing(Math.round(fraction * 100)))
 })
 
 window.api.onDiarizing(() => {
-  queue.textContent = t().diarizing
+  setQueueMsg(() => t().diarizing)
 })
 window.api.onDiarized((dir, updated) => {
-  queue.textContent = ''
+  setQueueMsg(null)
   meetingDir = dir
   segments = updated.segments
   speakers = updated.speakers
@@ -842,14 +1937,18 @@ window.api.onDiarized((dir, updated) => {
   renderSpeakerPanel()
 })
 window.api.onDiarizeError((message) => {
-  queue.textContent = ''
-  warnings.textContent = t().diarizeError(message)
+  setQueueMsg(null)
+  setWarning(
+    isModelMissing(message)
+      ? { text: () => t().modelMissingWarning, action: modelMissingAction }
+      : { text: () => t().diarizeError(message) },
+  )
 })
 
 window.api.onModelProgress(({ file, received: bytes }) => {
-  if (!overallFill) return
+  if (bars.size === 0) return
   received.set(file, bytes)
-  if (overallName) overallName.textContent = modelName(file)
+  for (const { name: nameEl } of bars.values()) nameEl.textContent = modelName(file)
   updateOverallBar()
 })
 
@@ -892,7 +1991,26 @@ function applyLanguage(l: Language): void {
   toggle.textContent = recorder ? t().stop : t().start
   meterLabels.loopback.textContent = t().meterOthers
   meterLabels.mic.textContent = t().meterUs
-  settingsSummary.textContent = t().settingsSummary
+  settingsOpenLabel.textContent = t().settingsSummary
+  settingsBackLabel.textContent = t().settingsBack
+  settingsTitleEl.textContent = t().settingsSummary
+  for (const key of SETTINGS_CATEGORIES) {
+    settingsCatButtons[key].textContent = catLabel[key]()
+    settingsPanelTitles[key].textContent = catLabel[key]()
+  }
+  langRowLabel.textContent = t().langRowLabel
+  micTestRowLabel.textContent = t().micTestRowLabel
+  mcpRowLabel.textContent = t().mcpRowLabel
+  transcribeModeLabelEl.textContent = t().transcribeModeLabel
+  transcribeModeNames.after.textContent = t().transcribeModeAfter
+  transcribeModeNames.live.textContent = t().transcribeModeLive
+  transcribeModeNames.manual.textContent = t().transcribeModeManual
+  transcribeModeHint.textContent = t().transcribeModeHint[getTranscribeMode()] ?? ''
+  meetingLangLabelEl.textContent = t().meetingLangLabel
+  const meetingLangOptions = meetingLangSelect.options
+  meetingLangOptions[0]!.textContent = t().meetingLangName.th
+  meetingLangOptions[1]!.textContent = t().meetingLangName.en
+  meetingLangHintEl.textContent = t().meetingLangHint
   noiseLabel.textContent = t().noiseLabel
   portLabel.textContent = t().portLabel
   portSave.textContent = t().portSave
@@ -905,11 +2023,22 @@ function applyLanguage(l: Language): void {
   micLine.textContent = micStop ? `${t().micTestPrompt}: ${MIC_TEST_SENTENCE}` : ''
   void renderVoices()
   mcpLabel.textContent = t().mcpLabel
+  onboardingRerunLabelEl.textContent = t().onboardingRerunLabel
+  onboardingRerunBtn.textContent = t().onboardingRerun
 
-  void showPermissionWarnings(permissionsIncludeScreen)
+  void renderWarnings()
+  renderQueue()
+  renderDone()
+  renderMicHeard()
+  updateTranscriptionLocks()
   void renderModels()
+  void renderAsrModel()
   renderSpeakerPanel()
+  void renderMeetings()
   void window.api.mcpState().then(showMcpState)
+  // Harmless (and cheap) even when onboarding isn't open — re-derives whichever step
+  // is current, so a language switch mid-onboarding does not leave it half-translated.
+  renderOnboardingStep()
 }
 
 for (const [code, radio] of Object.entries(langRadios) as [Language, HTMLInputElement][]) {
@@ -926,15 +2055,52 @@ noiseSelect.onchange = async () => {
   noiseSelect.disabled = true
   try {
     // Applies to the next chunk, not the next launch — the whole point is trying a
-    // level and hearing whether it helped.
+    // level and hearing whether it helped. Refused by main (spec item 2) if a pass
+    // started in the brief window since this control was last enabled; the control is
+    // disabled again below regardless of outcome, so there is nothing further to do
+    // here beyond not leaving the rejection raw.
     await window.api.setNoiseFilter(noiseSelect.value as 'low' | 'medium' | 'high')
-    noiseHint.textContent = t().noiseHint[noiseSelect.value] ?? ''
+  } catch {
+    // The only way this rejects is the lock above (a pass started in the brief window
+    // since the control was last enabled) — same reason, same hint.
+    noiseHint.textContent = t().noiseLockedHint
   } finally {
-    noiseSelect.disabled = false
+    // Not a bare `= false`: transcriptionBusy() may have gone true in the time this
+    // await took, and this is what keeps the control (and its hint) honest either way.
+    updateTranscriptionLocks()
   }
 }
 
+meetingLangSelect.onchange = async () => {
+  meetingLangSelect.disabled = true
+  try {
+    // Applies to the next chunk sent to whisper-server, not the next launch.
+    await window.api.setMeetingLanguage(meetingLangSelect.value as MeetingLanguage)
+  } finally {
+    meetingLangSelect.disabled = false
+  }
+}
+
+const onTranscribeModeChange = async (): Promise<void> => {
+  setTranscribeModeDisabled(true)
+  try {
+    // Takes effect on the next recording — this one, if nobody has pressed Start yet.
+    await window.api.setTranscribeMode(getTranscribeMode())
+    transcribeModeHint.textContent = t().transcribeModeHint[getTranscribeMode()] ?? ''
+  } finally {
+    setTranscribeModeDisabled(false)
+  }
+}
+for (const r of Object.values(transcribeModeRadios)) r.onchange = onTranscribeModeChange
+
 void window.api.getSettings().then((settings) => {
   noiseSelect.value = settings.noiseFilter
+  setTranscribeModeValue(settings.transcribeMode)
+  meetingLangSelect.value = settings.meetingLanguage
   applyLanguage(settings.language)
+  // A genuine first run (no settings.json at all — settings.ts's getSettings tells that
+  // apart from an existing user simply upgrading into this build) lands here instead of
+  // the main page. Everything onboarding sets is applied immediately as the user picks
+  // it (see each step's own onchange above), so there is nothing left to apply here.
+  if (!settings.onboarded) void showOnboarding()
 })

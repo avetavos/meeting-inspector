@@ -76,11 +76,16 @@ h1.app-title {
   font-weight: 600;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin: 0 0 14px;
+  margin: 0;
 }
 
+/* ---------- main-view header: title + settings entry point -------------- */
+.view-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.view-header .app-title { flex: 1; min-width: 0; }
+.settings-open { flex: 0 0 auto; padding: 7px 14px; font-size: 13px; }
+
 /* ---------- secondary glass cards (warnings, models, speakers, settings) - */
-.warn, #speakers, details {
+.warn, #speakers, #meetings {
   padding: 14px 16px;
   margin-top: 14px;
   background: var(--glass-fill);
@@ -137,6 +142,23 @@ button:disabled { opacity: 0.4; cursor: default; }
 #models .bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); }
 #models .size { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
+/* ---------- ASR model picker: one .option-row per model (see below), state ---- */
+/* + detail beneath — layout/checkmark come from the shared .option-row rules. -- */
+#asr-model .asr-state { font-size: 13px; color: var(--text-dim); }
+
+/* ---------- meetings panel: list + batch transcription ------------------- */
+#meetings-list { margin-top: 10px; }
+.meeting-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
+.meeting-row + .meeting-row { border-top: 1px solid var(--line-lo); }
+.meeting-row .meeting-title { flex: 1; }
+.meeting-row .meeting-when, .meeting-row .meeting-dur { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meeting-status, .meeting-lang { font-size: 12px; padding: 2px 8px; border-radius: var(--radius-pill); background: rgba(127, 127, 127, 0.14); color: var(--text-dim); white-space: nowrap; }
+.meeting-status.done { color: var(--accent); }
+.meeting-status.failed { color: var(--accent-rec); }
+.meeting-status.transcribing { color: var(--accent); }
+#meetings .row { flex-wrap: wrap; }
+#meetings-transcribe, #meetings-select-all, #meetings-select-none, #meetings-stop { padding: 7px 14px; font-size: 13px; }
+
 /* ---------- speaker naming ------------------------------------------------ */
 #speakers .who { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
 #speakers .who code { font-size: 12px; color: var(--text-dim); width: 90px; }
@@ -149,12 +171,14 @@ button:disabled { opacity: 0.4; cursor: default; }
 #transcript .who { color: var(--text-dim); font-size: 13px; }
 #transcript .me .who { color: var(--text); font-weight: 600; }
 
-/* ---------- settings disclosure ------------------------------------------ */
-details summary { cursor: pointer; color: var(--text-dim); font-size: 14px; }
-details label { display: flex; gap: 8px; align-items: center; cursor: pointer; margin-top: 4px; font-size: 14px; }
+/* ---------- MCP connection state (settings > Connections) ---------------- */
 #mcpstate { font-size: 13px; line-height: 1.6; color: var(--text-dim); margin-top: 10px; }
 #mcpstate code { user-select: all; word-break: break-all; }
-.copyrow { margin-top: 8px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
+/* Stacked (not a 2-column grid): the settings page's narrower card width made a
+   long label + a long code snippet fight for space on one row. */
+.copyrow { margin-top: 10px; }
+.copyrow > span { display: block; color: var(--text-dim); font-size: 13px; margin-bottom: 3px; }
+.copyrow > code { display: block; margin-bottom: 6px; }
 .copyrow button { padding: 3px 10px; font-size: 12px; }
 a { color: inherit; -webkit-app-region: no-drag; }
 
@@ -220,7 +244,7 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 
 /* ---------- reduced transparency: opaque, no blur ------------------------- */
 @media (prefers-reduced-transparency: reduce) {
-  .capsule, .warn, #speakers, details {
+  .capsule, .warn, #speakers, #meetings {
     background: var(--opaque-bg);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -239,7 +263,7 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
   @media (prefers-color-scheme: dark) {
     :root { --line-hi: rgba(255, 255, 255, 0.9); --line-lo: rgba(255, 255, 255, 0.9); }
   }
-  .capsule, .warn, #speakers, details, input, button, .meters {
+  .capsule, .warn, #speakers, #meetings, input, button, .meters {
     border: 1.5px solid var(--text);
   }
 }
@@ -251,9 +275,12 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 
 select { font: inherit; color: inherit; padding: 7px 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--line-lo); background: rgba(127, 127, 127, 0.12); -webkit-app-region: no-drag; }
+select:disabled { opacity: 0.4; cursor: default; }
 
 /* microphone test — see what the current noise setting does to your own voice */
-#mictest { margin-top: 14px; }
+/* #mictest's own card-to-card spacing now comes from .settings-panel's `gap` (this
+   card is one of its children) — a separate margin-top here would just stack on top
+   of that gap instead of matching it, uneven against every other pair of cards. */
 #mictest-line { margin-top: 10px; font-size: 15px; line-height: 1.7; }
 #mictest-verdict { font-size: 13px; width: 8em; color: var(--text-dim); }
 #mictest-verdict.speech { color: var(--accent); font-weight: 600; }
@@ -270,3 +297,236 @@ select { font: inherit; color: inherit; padding: 7px 10px; border-radius: var(--
 
 #port { max-width: 8em; }
 #mcpstate .warn { margin: 0 0 10px; }
+
+/* ======================================================================= */
+/* Settings page — iPadOS-style sidebar of categories + stacked grouped    */
+/* cards, one row per setting, control right-aligned.                      */
+/* ======================================================================= */
+
+.settings-page { display: flex; align-items: flex-start; gap: 18px; }
+/* `display: flex` above is author CSS, which always beats the UA stylesheet's
+   `[hidden] { display: none }` regardless of specificity — so toggling the
+   `hidden` property from main.ts silently did nothing without this override. */
+.settings-page[hidden] { display: none; }
+
+.settings-sidebar {
+  position: sticky;
+  top: 10px;
+  flex: 0 0 200px;
+  padding: 14px;
+  background: var(--glass-fill);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 1px 0 var(--line-hi),
+    inset 0 -1px 0 var(--line-lo),
+    0 10px 26px -12px var(--shadow-color);
+}
+
+.settings-back { padding: 6px 10px; font-size: 13px; background: transparent; box-shadow: none; }
+.settings-title { font-size: 22px; font-weight: 700; margin: 14px 4px 12px; }
+
+.settings-cats { display: flex; flex-direction: column; gap: 2px; }
+.settings-cat {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  font-size: 14px;
+}
+.settings-cat[aria-current='true'] { background: var(--glass-fill-strong); box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo); font-weight: 600; }
+
+/* `gap` here only ever separated .settings-panel sections from each other — moot,
+   since exactly one is ever unhidden at a time. The stacked look in the screenshot
+   (cards flush, zero gap) was .settings-panel itself never getting a gap of its own,
+   so its .settings-card children (and its own -title) had nothing between them. */
+.settings-panels { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; padding-bottom: 18px; }
+.settings-panel { display: flex; flex-direction: column; gap: 18px; }
+/* Same reason .settings-page[hidden] needs this above: author CSS setting `display`
+   always wins over the UA stylesheet's `[hidden] { display: none }`, so without this
+   override every category's panel would render at once, stacked, the moment
+   .settings-panel got a `display` of its own. */
+.settings-panel[hidden] { display: none; }
+.settings-panel-title { font-size: 20px; font-weight: 700; margin: 0 0 2px 4px; }
+
+.settings-card {
+  padding: 6px 16px 18px;
+  background: var(--glass-fill);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 1px 0 var(--line-hi),
+    inset 0 -1px 0 var(--line-lo),
+    0 10px 26px -12px var(--shadow-color);
+}
+.settings-card-title { font-size: 13px; font-weight: 600; text-transform: uppercase; color: var(--text-dim); margin: 14px 0 0; }
+
+.settings-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.settings-row:first-child { margin-top: 14px; }
+.settings-row-label { flex: 1; min-width: 0; }
+.settings-row select, .settings-row input:not([type='checkbox']):not([type='radio']) { width: auto; flex: 0 0 auto; min-width: 8em; }
+.settings-hint { margin-top: 8px; }
+
+/* ---------- toggle switch (checkbox/radio -> real on/off) ---------------- */
+input.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 46px;
+  height: 27px;
+  border-radius: var(--radius-pill);
+  background: var(--track-bg);
+  box-shadow: inset 0 1px 3px var(--line-lo);
+  position: relative;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+input.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 150ms ease;
+}
+input.switch:checked { background: var(--accent); }
+input.switch:checked::after { transform: translateX(19px); }
+input.switch:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------- segmented control (short, comparable choices) ---------------- */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--track-bg);
+  box-shadow: inset 0 1px 3px var(--line-lo);
+}
+.segmented-opt {
+  display: block;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+.segmented-opt input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.segmented-opt:has(input:checked) { background: var(--glass-fill-strong); box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo); font-weight: 600; }
+.segmented-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- selectable rows with a checkmark (a 3-way choice is not a     */
+/* toggle): transcribe mode, and the ASR model picker built in main.ts ----- */
+.option-rows { margin-top: 10px; }
+.option-row {
+  display: block;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  margin-top: 8px;
+  background: rgba(127, 127, 127, 0.08);
+  transition: background 150ms ease;
+}
+.option-row:first-child { margin-top: 0; }
+.option-row input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.option-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.option-row-check { color: var(--accent); font-weight: 700; opacity: 0; flex: none; }
+.option-row .asr-state, .option-row .hint { margin-top: 4px; }
+.option-row:has(input:checked) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.option-row:has(input:checked) .option-row-check { opacity: 1; }
+.option-row:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-transparency: reduce) {
+  .settings-sidebar, .settings-card {
+    background: var(--opaque-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .settings-sidebar, .settings-card, input.switch, .segmented, .option-row {
+    border: 1.5px solid var(--text);
+  }
+}
+
+/* ---------- narrow window: sidebar collapses above the panels as a row of */
+/* wrapping chips instead of a fixed-width column --------------------------- */
+@media (max-width: 560px) {
+  .settings-page { flex-direction: column; }
+  .settings-sidebar { position: static; flex: none; width: 100%; }
+  .settings-cats { flex-direction: row; flex-wrap: wrap; }
+  .settings-cat { width: auto; }
+  .settings-row { flex-wrap: wrap; }
+}
+
+/* ======================================================================= */
+/* First-run onboarding — same glass-card language as Settings, one step   */
+/* at a time, centered over the content column.                            */
+/* ======================================================================= */
+
+.onboarding-page { display: flex; justify-content: center; padding-top: 4px; }
+.onboarding-page[hidden] { display: none; }
+
+.onboarding-card {
+  width: 100%;
+  max-width: 480px;
+  padding: 22px 24px 20px;
+  background: var(--glass-fill);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    inset 0 1px 0 var(--line-hi),
+    inset 0 -1px 0 var(--line-lo),
+    0 16px 32px -14px var(--shadow-color);
+}
+
+.onboarding-steps { display: flex; justify-content: center; gap: 6px; margin-bottom: 18px; }
+.onb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--track-bg); }
+.onb-dot.done { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.onb-dot.active { background: var(--accent); }
+
+.onboarding-body h1 { font-size: 20px; font-weight: 700; margin: 0 0 10px; }
+.onboarding-body p { margin: 0 0 4px; line-height: 1.7; }
+.onboarding-body select { margin-top: 4px; }
+.onboarding-step[hidden] { display: none; }
+
+.onboarding-nav { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
+.onb-skip-hint { flex: 1; min-width: 0; margin-top: 0; }
+.onb-back { background: transparent; box-shadow: none; }
+.onb-next { margin-left: auto; background: var(--accent); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px -4px rgba(10, 132, 255, 0.6); }
+.onb-skip { font-size: 13px; }
+
+@media (prefers-reduced-transparency: reduce) {
+  .onboarding-card { background: var(--opaque-bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+@media (prefers-contrast: more) {
+  .onboarding-card { border: 1.5px solid var(--text); }
+}
+
+@media (max-width: 560px) {
+  .onboarding-card { max-width: 100%; padding: 18px 16px 16px; }
+  .onboarding-nav { flex-wrap: wrap; }
+  .onb-skip-hint { order: 3; flex-basis: 100%; }
+  .onb-next { margin-left: 0; }
+}

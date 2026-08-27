@@ -1,5 +1,4 @@
 import { timingSafeEqual } from 'node:crypto'
-import { readFile, readdir } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import {
@@ -8,14 +7,8 @@ import {
   localhostOriginValidation,
 } from '@modelcontextprotocol/node'
 import { McpServer } from '@modelcontextprotocol/server'
-import {
-  registerTools,
-  safeId,
-  titleOf,
-  type MeetingMeta,
-  type MeetingStore,
-  type Transcript,
-} from '../shared/meetings.ts'
+import { registerTools, safeId, titleOf, type MeetingMeta, type MeetingStore } from '../shared/meetings.ts'
+import { readTranscript, walkMeetings } from './store.ts'
 
 /**
  * Streamable HTTP on loopback only — one server every client can reach through a
@@ -29,24 +22,30 @@ export type McpHandle = { url: string; port: number; close: () => Promise<void> 
 function diskStore(root: string): MeetingStore {
   const transcript = async (id: string) => {
     if (!safeId(id)) return null
-    const raw = await readFile(join(root, id, 'transcript.json'), 'utf8').catch(() => null)
-    return raw === null ? null : (JSON.parse(raw) as Transcript)
+    // Reuses store.ts's own reader rather than a second readFile+JSON.parse here.
+    return readTranscript(join(root, id)).catch(() => null)
   }
 
   return {
     transcript,
     async list() {
-      const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+      // Reuses store.ts's walk of the same folder rather than a second one here.
+      // Unlike the meetings panel (store.ts's listMeetings), a meeting with no usable
+      // transcript has nothing to summarize, so it is skipped here rather than shown.
+      const walked = await walkMeetings(root)
       const found: MeetingMeta[] = []
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        const t = await transcript(entry.name)
-        if (!t) continue
+      for (const { id, transcript: t } of walked) {
+        // walkMeetings walks every directory entry with no filter of its own — unlike
+        // store.ts's old transcript(entry.name) route this used to go through, which
+        // applied safeId() on the way in. Without it, a folder name get_transcript
+        // would refuse (id.length===0, a leading '.', etc. — safeId's own doc comment)
+        // could still be listed here, "found" but never fetchable.
+        if (!t || !safeId(id)) continue
         found.push({
           // The folder name, not the id inside the file: `get_transcript` resolves by
           // folder, so reporting anything else lets a stray file rename a meeting.
-          id: entry.name,
-          title: titleOf(entry.name),
+          id,
+          title: titleOf(id),
           startedAt: t.startedAt,
           durationSec: t.durationSec,
         })

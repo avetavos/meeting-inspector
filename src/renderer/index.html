@@ -10,61 +10,274 @@
     <div class="app">
       <div class="titlebar"></div>
       <main id="content" class="content">
-        <h1 class="app-title">Meeting Inspector</h1>
-        <div id="capsule" class="capsule">
-          <div class="capsule-top">
-            <input id="title" placeholder="Meeting title" autocomplete="off" />
-            <button id="toggle">Start recording</button>
-            <span id="elapsed"></span>
+        <div id="main-view">
+          <div class="view-header">
+            <h1 class="app-title">Meeting Inspector</h1>
+            <button id="settings-open" class="settings-open">
+              <span aria-hidden="true">⚙</span> <span id="settings-open-label"></span>
+            </button>
           </div>
-          <div class="meters">
-            <div class="meter-channel"><span class="label" id="meter-others-label">Others</span><span class="meter"><i id="m-loopback"></i></span></div>
-            <div class="meter-channel"><span class="label" id="meter-us-label">You</span><span class="meter"><i id="m-mic"></i></span></div>
+          <div id="capsule" class="capsule">
+            <div class="capsule-top">
+              <input id="title" placeholder="Meeting title" autocomplete="off" />
+              <button id="toggle">Start recording</button>
+              <span id="elapsed"></span>
+            </div>
+            <div class="meters">
+              <div class="meter-channel"><span class="label" id="meter-others-label">Others</span><span class="meter"><i id="m-loopback"></i></span></div>
+              <div class="meter-channel"><span class="label" id="meter-us-label">You</span><span class="meter"><i id="m-mic"></i></span></div>
+            </div>
+          </div>
+
+          <div class="content-inner">
+            <div id="warnings"></div>
+            <div id="queue"></div>
+            <div id="done"></div>
+            <div id="speakers"></div>
+            <div id="transcript"></div>
+            <div id="meetings">
+              <span id="meetings-heading" class="label"></span>
+              <div id="meetings-list"></div>
+              <div class="row">
+                <button id="meetings-select-all"></button>
+                <button id="meetings-select-none"></button>
+                <button id="meetings-transcribe"></button>
+                <button id="meetings-stop" hidden></button>
+              </div>
+              <div id="meetings-progress" class="hint"></div>
+            </div>
           </div>
         </div>
 
-        <div class="content-inner">
-          <div id="models"></div>
-          <div id="warnings"></div>
-          <div id="queue"></div>
-          <div id="done"></div>
-          <div id="speakers"></div>
-          <div id="transcript"></div>
-          <details>
-            <summary id="settings-summary">Settings</summary>
-            <div class="row">
-              <label><input type="radio" name="lang" id="lang-en" /> English</label>
-              <label><input type="radio" name="lang" id="lang-th" /> ไทย</label>
+        <div id="settings-page" class="settings-page" hidden>
+          <nav class="settings-sidebar" aria-label="Settings">
+            <button id="settings-back" class="settings-back">
+              <span aria-hidden="true">‹</span> <span id="settings-back-label"></span>
+            </button>
+            <h1 id="settings-title" class="settings-title"></h1>
+            <div class="settings-cats">
+              <button class="settings-cat" id="cat-general" data-cat="general"></button>
+              <button class="settings-cat" id="cat-recording" data-cat="recording"></button>
+              <button class="settings-cat" id="cat-transcription" data-cat="transcription"></button>
+              <button class="settings-cat" id="cat-speakers" data-cat="speakers"></button>
+              <button class="settings-cat" id="cat-connections" data-cat="connections"></button>
             </div>
-            <div class="row">
-              <label><input type="checkbox" id="mcp" /> <span id="mcp-label">Turn on the MCP server so a local AI assistant can pull the transcript to summarize it</span></label>
-            </div>
-            <div class="row">
-              <span class="label" id="port-label"></span>
-              <input id="port" type="number" min="1024" max="65535" />
-              <button id="port-save"></button>
-            </div>
-            <div id="mcpstate"></div>
-            <div class="row" style="margin-top:20px">
-              <span class="label" id="noise-label"></span>
-              <select id="noise">
-                <option value="low"></option>
-                <option value="medium"></option>
-                <option value="high"></option>
-              </select>
-            </div>
-            <div id="noisehint" class="hint"></div>
-            <div id="mictest">
-              <div class="row">
-                <button id="mictest-toggle"></button>
-                <span class="meter"><i id="mictest-level"></i></span>
-                <span id="mictest-verdict"></span>
+          </nav>
+
+          <div class="settings-panels">
+            <section class="settings-panel" id="panel-general" data-cat="general" hidden>
+              <h2 class="settings-panel-title" id="panel-general-title"></h2>
+              <div class="settings-card">
+                <div class="settings-row">
+                  <span class="settings-row-label" id="lang-row-label"></span>
+                  <div class="segmented" role="radiogroup" aria-labelledby="lang-row-label">
+                    <label class="segmented-opt">
+                      <input type="radio" name="lang" id="lang-en" />
+                      <span>English</span>
+                    </label>
+                    <label class="segmented-opt">
+                      <input type="radio" name="lang" id="lang-th" />
+                      <span>ไทย</span>
+                    </label>
+                  </div>
+                </div>
               </div>
-              <div id="mictest-line"></div>
-              <div id="mictest-heard" class="hint"></div>
+              <div class="settings-card">
+                <div class="settings-row">
+                  <span class="settings-row-label" id="onboarding-rerun-label"></span>
+                  <button id="onboarding-rerun"></button>
+                </div>
+                <div id="onboarding-rerun-lock-hint" class="hint settings-hint"></div>
+              </div>
+            </section>
+
+            <section class="settings-panel" id="panel-recording" data-cat="recording" hidden>
+              <h2 class="settings-panel-title" id="panel-recording-title"></h2>
+              <div class="settings-card">
+                <div class="settings-row">
+                  <label class="settings-row-label" id="noise-label" for="noise"></label>
+                  <select id="noise">
+                    <option value="low"></option>
+                    <option value="medium"></option>
+                    <option value="high"></option>
+                  </select>
+                </div>
+                <div id="noisehint" class="hint settings-hint"></div>
+              </div>
+              <div class="settings-card" id="mictest">
+                <div class="settings-row">
+                  <label class="settings-row-label" id="mictest-row-label" for="mictest-toggle"></label>
+                  <button id="mictest-toggle"></button>
+                </div>
+                <div id="mictest-lock-hint" class="hint settings-hint"></div>
+                <div class="row">
+                  <span class="meter"><i id="mictest-level"></i></span>
+                  <span id="mictest-verdict"></span>
+                </div>
+                <div id="mictest-line"></div>
+                <div id="mictest-heard" class="hint"></div>
+              </div>
+            </section>
+
+            <section class="settings-panel" id="panel-transcription" data-cat="transcription" hidden>
+              <h2 class="settings-panel-title" id="panel-transcription-title"></h2>
+              <div class="settings-card">
+                <div class="settings-row">
+                  <label class="settings-row-label" id="meeting-lang-label" for="meeting-lang"></label>
+                  <select id="meeting-lang">
+                    <option value="th"></option>
+                    <option value="en"></option>
+                  </select>
+                </div>
+                <div id="meeting-lang-hint" class="hint settings-hint"></div>
+              </div>
+              <div class="settings-card">
+                <h3 class="settings-card-title" id="transcribe-mode-label"></h3>
+                <div class="option-rows" role="radiogroup" aria-labelledby="transcribe-mode-label">
+                  <label class="option-row">
+                    <input type="radio" name="transcribe-mode" id="transcribe-mode-after" value="after" />
+                    <span class="option-row-head">
+                      <span id="transcribe-mode-after-name"></span>
+                      <span class="option-row-check" aria-hidden="true">✓</span>
+                    </span>
+                  </label>
+                  <label class="option-row">
+                    <input type="radio" name="transcribe-mode" id="transcribe-mode-live" value="live" />
+                    <span class="option-row-head">
+                      <span id="transcribe-mode-live-name"></span>
+                      <span class="option-row-check" aria-hidden="true">✓</span>
+                    </span>
+                  </label>
+                  <label class="option-row">
+                    <input type="radio" name="transcribe-mode" id="transcribe-mode-manual" value="manual" />
+                    <span class="option-row-head">
+                      <span id="transcribe-mode-manual-name"></span>
+                      <span class="option-row-check" aria-hidden="true">✓</span>
+                    </span>
+                  </label>
+                </div>
+                <div id="transcribe-mode-hint" class="hint settings-hint"></div>
+              </div>
+              <div class="settings-card">
+                <h3 class="settings-card-title" id="asr-model-label"></h3>
+                <div id="asr-model" role="radiogroup" aria-labelledby="asr-model-label"></div>
+                <div id="asr-model-note" class="hint settings-hint"></div>
+              </div>
+              <div id="models"></div>
+            </section>
+
+            <section class="settings-panel" id="panel-speakers" data-cat="speakers" hidden>
+              <h2 class="settings-panel-title" id="panel-speakers-title"></h2>
+              <div class="settings-card">
+                <div id="voices"></div>
+              </div>
+            </section>
+
+            <section class="settings-panel" id="panel-connections" data-cat="connections" hidden>
+              <h2 class="settings-panel-title" id="panel-connections-title"></h2>
+              <div class="settings-card">
+                <div class="settings-row">
+                  <label class="settings-row-label" id="mcp-row-label" for="mcp"></label>
+                  <input type="checkbox" id="mcp" class="switch" />
+                </div>
+                <div id="mcp-label" class="hint settings-hint"></div>
+                <div class="settings-row">
+                  <label class="settings-row-label" id="port-label" for="port"></label>
+                  <input id="port" type="number" min="1024" max="65535" />
+                  <button id="port-save"></button>
+                </div>
+                <div id="mcpstate"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div id="onboarding-page" class="onboarding-page" hidden>
+          <div class="onboarding-card">
+            <div id="onboarding-steps" class="onboarding-steps" role="tablist" aria-label="Setup progress"></div>
+
+            <div class="onboarding-body">
+              <section class="onboarding-step" id="onb-welcome" data-step="welcome">
+                <h1 id="onb-welcome-title"></h1>
+                <p id="onb-welcome-body"></p>
+              </section>
+
+              <section class="onboarding-step" id="onb-language" data-step="language" hidden>
+                <h1 id="onb-language-title"></h1>
+                <div class="segmented" role="radiogroup" aria-labelledby="onb-language-title">
+                  <label class="segmented-opt">
+                    <input type="radio" name="onb-lang" id="onb-lang-en" />
+                    <span>English</span>
+                  </label>
+                  <label class="segmented-opt">
+                    <input type="radio" name="onb-lang" id="onb-lang-th" />
+                    <span>ไทย</span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="onboarding-step" id="onb-meeting-lang" data-step="meetingLanguage" hidden>
+                <h1 id="onb-meeting-lang-title"></h1>
+                <select id="onb-meeting-lang-select">
+                  <option value="th"></option>
+                  <option value="en"></option>
+                </select>
+                <p id="onb-meeting-lang-hint" class="hint"></p>
+              </section>
+
+              <section class="onboarding-step" id="onb-model" data-step="model" hidden>
+                <h1 id="onb-model-title"></h1>
+                <div id="onb-asr-model" role="radiogroup" aria-labelledby="onb-model-title"></div>
+                <div id="onb-asr-model-note" class="hint"></div>
+                <div id="onb-models"></div>
+              </section>
+
+              <section class="onboarding-step" id="onb-permissions" data-step="permissions" hidden>
+                <h1 id="onb-permissions-title"></h1>
+                <div id="onb-perms"></div>
+              </section>
+
+              <section class="onboarding-step" id="onb-transcribe-mode" data-step="transcribeMode" hidden>
+                <h1 id="onb-transcribe-mode-title"></h1>
+                <div class="option-rows" role="radiogroup" aria-labelledby="onb-transcribe-mode-title">
+                  <label class="option-row">
+                    <input type="radio" name="onb-transcribe-mode" id="onb-mode-after" value="after" />
+                    <span class="option-row-head">
+                      <span id="onb-mode-after-name"></span>
+                      <span class="option-row-check" aria-hidden="true">✓</span>
+                    </span>
+                  </label>
+                  <label class="option-row">
+                    <input type="radio" name="onb-transcribe-mode" id="onb-mode-live" value="live" />
+                    <span class="option-row-head">
+                      <span id="onb-mode-live-name"></span>
+                      <span class="option-row-check" aria-hidden="true">✓</span>
+                    </span>
+                  </label>
+                  <label class="option-row">
+                    <input type="radio" name="onb-transcribe-mode" id="onb-mode-manual" value="manual" />
+                    <span class="option-row-head">
+                      <span id="onb-mode-manual-name"></span>
+                      <span class="option-row-check" aria-hidden="true">✓</span>
+                    </span>
+                  </label>
+                </div>
+                <div id="onb-transcribe-mode-hint" class="hint"></div>
+              </section>
+
+              <section class="onboarding-step" id="onb-finish" data-step="finish" hidden>
+                <h1 id="onb-finish-title"></h1>
+                <p id="onb-finish-body"></p>
+              </section>
             </div>
-            <div id="voices"></div>
-          </details>
+
+            <div class="onboarding-nav">
+              <button id="onb-back" class="onb-back"></button>
+              <span id="onb-skip-hint" class="hint onb-skip-hint"></span>
+              <button id="onb-skip" class="onb-skip" hidden></button>
+              <button id="onb-next" class="onb-next"></button>
+            </div>
+          </div>
         </div>
       </main>
     </div>

@@ -14,7 +14,15 @@ export const UNKNOWN = 'them'
 const SEGMENTATION = model('pyannote-segmentation-3-0.onnx')
 const EMBEDDING = model('campplus-sv-zh_en.onnx')
 
-export async function diarize(wavPath: string): Promise<Turn[]> {
+/**
+ * `signal`, if given, is only checked right before the one call below that actually
+ * costs anything (MEDIUM 5) — `engine.process()` is a synchronous native call that
+ * blocks the whole event loop for the length of the pass, so it cannot be interrupted
+ * once started; checking here only skips starting it at all if the caller already gave
+ * up first (e.g. it was queued behind another meeting in the batch's diarize pass and
+ * cancel landed before its turn came).
+ */
+export async function diarize(wavPath: string, signal?: AbortSignal): Promise<Turn[]> {
   await requireFiles([SEGMENTATION, EMBEDDING], 'use the download button in the app')
   // Required late: this pulls in a ~30MB native addon nobody needs until a meeting ends.
   // It is CommonJS, so depending on who does the loading the class arrives either as a
@@ -32,6 +40,7 @@ export async function diarize(wavPath: string): Promise<Turn[]> {
   const pcm = new Int16Array(wav.buffer, wav.byteOffset + 44, (wav.length - 44) / 2)
   const samples = new Float32Array(pcm.length)
   for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i]! / 32768
+  if (signal?.aborted) throw new Error('cancelled')
   return engine.process(samples) as Turn[]
 }
 

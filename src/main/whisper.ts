@@ -21,13 +21,12 @@ const BIN =
     join(process.cwd(), 'resources', 'whisper', 'whisper-server'),
   ].find((path) => path && existsSync(path)) ??
   '/opt/homebrew/bin/whisper-server'
-const MODEL = model('ggml-large-v3.bin')
 // Silero, run inside whisper-server. Measured on 30s of digital silence:
 // without it large-v3 emits "โปรดติดตามตอนต่อไป"; with it, an empty segment list
 // in 0.07s. That is spec risk #2 closed by a flag (spec §7.3 wanted our own gate).
 const VAD_MODEL = model('ggml-silero-v5.1.2.bin')
 
-type Job = Chunk & { track: string }
+type Job = Chunk & { track: string; language: string; signal?: AbortSignal }
 
 /**
  * Seed vocabulary for the decoder. Measured on 125s of read Thai dev-meeting speech
@@ -45,10 +44,29 @@ export const DEFAULT_PROMPT = [
 ].join(', ')
 
 export type WhisperOptions = {
+  /** Only the spawn-time `-l` flag whisper-server starts with — every request's own
+   * `language` argument (enqueue()/transcribeOnce() below) overrides it per-request, so
+   * this value barely matters beyond "something whisper_lang_id() accepts" until the
+   * first chunk arrives. Deliberately not a per-request field on this options object
+   * (the way it used to be, as a `meetingLanguage: () => Promise<string>` callback read
+   * fresh on every chunk): a batch can run several meetings recorded under different
+   * languages through this one shared queue, so the language has to travel with each
+   * Job, resolved once by the caller (index.ts) from that meeting's own Session/
+   * Transcript, not read live off settings mid-pass. */
   language: string
+  /** Absolute path to the .bin file to load — Settings.asrModel picks which, resolved
+   * by the caller (models.ts's `model()` + download.ts's ASR_MODELS) so this module
+   * does not need to know about the settings/download registries. */
+  model: string
   /** Initial prompt: vocabulary to bias decoding toward (spec §13 risk #3). */
   prompt?: string
-  /** Read per chunk, so changing it in settings applies without a restart. */
+  /** Read per chunk, so changing it in settings applies without a restart. Unlike the
+   * per-request language below, this is still a global: it only gates whether a chunk
+   * is sent at all (silence vs. speech), not what a sent chunk decodes as, and
+   * index.ts now refuses to change it in settings while a pass is in flight (spec item
+   * 2) — so "read fresh" and "read once at the top of the meeting" come out the same
+   * here, and threading it through every Job the way language is below would just be
+   * extra plumbing for no behavioural difference. */
   noiseFilter?: () => Promise<NoiseFilter>
   onSegments: (track: string, segments: Segment[]) => void
   onDepth: (depth: number) => void
@@ -73,6 +91,8 @@ async function freePort(): Promise<number> {
 export class Whisper {
   private queue: Job[] = []
   private pumping = false
+  /** Chunks pump() has lost since the last takeFailures() call — see that method. */
+  private failedChunks = 0
 
   private constructor(
     private readonly proc: ChildProcess,
@@ -81,13 +101,13 @@ export class Whisper {
   ) {}
 
   static async start(opts: WhisperOptions): Promise<Whisper> {
-    const { language } = opts
+    const { language, model } = opts
     await requireFiles([BIN], 'run `npm run build:whisper` or `brew install whisper-cpp`')
-    await requireFiles([MODEL, VAD_MODEL], 'use the download button in the app')
+    await requireFiles([model, VAD_MODEL], 'use the download button in the app')
     const port = await freePort()
     const proc = spawn(
       BIN,
-      ['-m', MODEL, '--vad', '-vm', VAD_MODEL, '-l', language, '--host', '127.0.0.1', '--port', String(port)],
+      ['-m', model, '--vad', '-vm', VAD_MODEL, '-l', language, '--host', '127.0.0.1', '--port', String(port)],
       { stdio: ['ignore', 'ignore', 'inherit'] },
     )
     // Without a listener an ENOENT surfaces as an unhandled 'error' event and takes
@@ -112,9 +132,16 @@ export class Whisper {
     return this.queue.length + (this.pumping ? 1 : 0)
   }
 
-  /** FIFO, nothing dropped (spec §7). The server handles one request at a time anyway. */
-  enqueue(track: string, chunk: Chunk): void {
-    this.queue.push({ track, ...chunk })
+  /** FIFO, nothing dropped (spec §7). The server handles one request at a time anyway.
+   * `language` is the meeting's own — resolved by the caller (index.ts) from the
+   * Session or stored Transcript this chunk belongs to, not read from settings here, so
+   * a batch transcribing several meetings in different languages through this one
+   * queue decodes each chunk as whatever its own meeting was actually spoken in.
+   * `signal`, if given, aborts this chunk's in-flight /inference call — the offline
+   * replay (index.ts's transcribeTrack) passes its cancel signal through so a cancel
+   * does not have to wait out whichever chunk happens to be mid-request. */
+  enqueue(track: string, chunk: Chunk, language: string, signal?: AbortSignal): void {
+    this.queue.push({ track, ...chunk, language, signal })
     this.opts.onDepth(this.depth)
     void this.pump()
   }
@@ -135,6 +162,13 @@ export class Whisper {
           const segments = await this.transcribe(job)
           if (segments.length > 0) this.opts.onSegments(job.track, segments)
         } catch (err) {
+          // A deliberate cancel is not a failure — the caller already knows (it's the
+          // one that aborted) and will report it as such; only count chunks whisper
+          // actually lost, so a caller checking takeFailures() can tell a 500 or a dead
+          // server apart from its own cancel (finding: transcribeRecorded/transcribeOne
+          // used to have no way to learn a chunk failed at all, and stamped
+          // transcribedAt on a partial or empty transcript regardless).
+          if (!job.signal?.aborted) this.failedChunks++
           console.error(`whisper: chunk at ${job.startSec}s failed`, err)
         }
         this.opts.onDepth(this.queue.length)
@@ -145,19 +179,17 @@ export class Whisper {
     }
   }
 
+  /** Chunks that have failed since the last call, then resets the count — the only way
+   * a caller can turn pump()'s console.error into something it can act on. */
+  takeFailures(): number {
+    const n = this.failedChunks
+    this.failedChunks = 0
+    return n
+  }
+
   private async transcribe(job: Job): Promise<Segment[]> {
-    const body = new FormData()
-    body.set('file', new Blob([toWav(job.pcm)], { type: 'audio/wav' }), 'chunk.wav')
-    body.set('response_format', 'verbose_json')
-    // whisper-server caps a segment at 60 characters and chops mid-word to do it —
-    // and `max_len=0` does not mean "no cap", it means "use 60" (server.cpp:933), so
-    // the cap has to be raised out of the way instead of switched off. Segments are
-    // already bounded by the chunk length; this just lets a sentence stay whole.
-    body.set('max_len', '100000')
-    // Whisper conditions on this as if it were the text just before the chunk, which
-    // is how a team's own jargon gets a chance against a phonetically similar word.
-    if (this.opts.prompt) body.set('prompt', this.opts.prompt)
-    const res = await fetch(`${this.url}/inference`, { method: 'POST', body })
+    const body = await inferenceBody(job.pcm, job.language, this.opts)
+    const res = await fetch(`${this.url}/inference`, { method: 'POST', body, signal: job.signal })
     if (!res.ok) throw new Error(`whisper ${res.status}: ${await res.text()}`)
     const json = (await res.json()) as { segments?: { start: number; end: number; text: string }[] }
     return (json.segments ?? [])
@@ -165,9 +197,12 @@ export class Whisper {
       .filter((s) => s.text.length > 0)
   }
 
-  /** One-off, outside the queue — the microphone test in settings, not a meeting. */
-  async transcribeOnce(pcm: Int16Array): Promise<string> {
-    const segments = await this.transcribe({ track: 'test', pcm, startSec: 0 })
+  /** One-off, outside the queue — the microphone test in settings, not a meeting. Its
+   * caller (index.ts's mic:transcribe) always passes the *current* meetingLanguage
+   * setting: this is a live test of today's configuration, not a recording, so there is
+   * no meeting to carry a language of its own. */
+  async transcribeOnce(pcm: Int16Array, language: string): Promise<string> {
+    const segments = await this.transcribe({ track: 'test', pcm, startSec: 0, language })
     return segments.map((s) => s.text).join(' ')
   }
 
@@ -180,6 +215,31 @@ export class Whisper {
     this.queue = []
     this.proc.kill()
   }
+}
+
+/**
+ * The exact multipart body a chunk sends to whisper-server's /inference. Split out of
+ * `transcribe()` so a test can assert the chosen language reaches the request without
+ * spawning a real server (spec: prove a Job's own language isn't silently ignored in
+ * favour of the spawn-time `-l` flag).
+ */
+export async function inferenceBody(pcm: Int16Array, language: string, opts: Pick<WhisperOptions, 'prompt'>): Promise<FormData> {
+  const body = new FormData()
+  body.set('file', new Blob([toWav(pcm)], { type: 'audio/wav' }), 'chunk.wav')
+  body.set('response_format', 'verbose_json')
+  // Per-request, overrides the -l flag whisper-server was spawned with (see
+  // WhisperOptions.language above) — this job's own language, resolved once by the
+  // caller before it ever reached the queue (Whisper.enqueue's doc comment).
+  body.set('language', language)
+  // whisper-server caps a segment at 60 characters and chops mid-word to do it —
+  // and `max_len=0` does not mean "no cap", it means "use 60" (server.cpp:933), so
+  // the cap has to be raised out of the way instead of switched off. Segments are
+  // already bounded by the chunk length; this just lets a sentence stay whole.
+  body.set('max_len', '100000')
+  // Whisper conditions on this as if it were the text just before the chunk, which
+  // is how a team's own jargon gets a chance against a phonetically similar word.
+  if (opts.prompt) body.set('prompt', opts.prompt)
+  return body
 }
 
 function toWav(pcm: Int16Array): Uint8Array<ArrayBuffer> {

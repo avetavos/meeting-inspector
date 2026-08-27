@@ -1,21 +1,42 @@
 import { mkdir, open, rename, stat } from 'node:fs/promises'
 import { MODELS_DIR, model } from './models.ts'
+import type { AsrModel } from './settings.ts'
 
 export type ModelSpec = { file: string; url: string; bytes: number }
 export type ModelStatus = ModelSpec & { present: boolean; resumeFrom: number }
 export type Progress = { file: string; received: number; total: number }
 
 /**
- * Downloaded on first run rather than shipped in the installer (spec §12) — three
- * gigabytes of it. Sizes are for the progress bar; the real total comes from the
- * response, so a republished file does not break the download.
+ * The three ASR models on offer (spec: settings.ts's AsrModel doc has the measured
+ * RAM/speed/accuracy numbers). Alternatives, not additions — exactly one is ever
+ * required or loaded at a time, picked by Settings.asrModel.
  */
-export const MODELS: ModelSpec[] = [
-  {
+export const ASR_MODELS: Record<AsrModel, ModelSpec> = {
+  turbo: {
+    file: 'ggml-large-v3-turbo-q5_0.bin',
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin',
+    bytes: 574_041_195,
+  },
+  medium: {
+    file: 'ggml-medium.bin',
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin',
+    bytes: 1_533_763_059,
+  },
+  large: {
     file: 'ggml-large-v3.bin',
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin',
     bytes: 3_095_033_483,
   },
+}
+
+/**
+ * Downloaded on first run rather than shipped in the installer (spec §12). Needed no
+ * matter which ASR model is selected — voice-activity gating, diarization, and speaker
+ * embedding. The ASR model itself is not in this list; see ASR_MODELS. Sizes are for
+ * the progress bar; the real total comes from the response, so a republished file does
+ * not break the download.
+ */
+export const MODELS: ModelSpec[] = [
   {
     file: 'ggml-silero-v5.1.2.bin',
     url: 'https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin',
@@ -40,9 +61,12 @@ export const MODELS: ModelSpec[] = [
 
 const sizeOf = async (path: string): Promise<number> => stat(path).then((s) => s.size, () => 0)
 
-export async function modelStatus(): Promise<ModelStatus[]> {
+/** Callers pick the specs that matter to them — the always-needed MODELS, one or all
+ * of ASR_MODELS, or a mix — rather than this function guessing which ASR model, if
+ * any, is relevant right now. */
+export async function modelStatus(specs: ModelSpec[]): Promise<ModelStatus[]> {
   return Promise.all(
-    MODELS.map(async (spec) => ({
+    specs.map(async (spec) => ({
       ...spec,
       present: (await sizeOf(model(spec.file))) > 0,
       // A half-finished file is kept as .part, so an interrupted download picks up

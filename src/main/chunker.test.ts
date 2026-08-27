@@ -13,8 +13,7 @@ function audio(seconds: number, ...gaps: [number, number][]): Int16Array {
 function feed(c: Chunker, pcm: Int16Array): Chunk[] {
   const out: Chunk[] = []
   for (let i = 0; i < pcm.length; i += 1600) {
-    const chunk = c.push(pcm.subarray(i, Math.min(i + 1600, pcm.length)))
-    if (chunk) out.push(chunk)
+    out.push(...c.push(pcm.subarray(i, Math.min(i + 1600, pcm.length))))
   }
   return out
 }
@@ -53,6 +52,24 @@ test('chunker: every sample comes out exactly once, in order', () => {
   }
   assert.equal(at, total)
   assert.equal(c.flush(), null)
+})
+
+test('chunker: an oversized single push (transcribeTrack reads 1MB ≈ 32.8s at once) never grows an unbounded backlog', () => {
+  // Before the fix, push() cut only once per call no matter how much backlog was
+  // already sitting there, so a caller pushing more than TARGET at once (32.8s > 30s)
+  // gained ~2.8-8.8s of uncollected audio on every single call. Replayed over a whole
+  // 3-hour track (the offline 'after'-mode / batch-queue path in index.ts, one push per
+  // 1MB disk read) that grew into a 30-minute, 58MB tail chunk — measured by the
+  // reviewer on the real Chunker driven exactly as transcribeTrack drives it.
+  const c = new Chunker()
+  const READ = new Int16Array(524_288).fill(8000) // one disk read: 32.8s of PCM16 samples
+  let maxChunk = 0
+  for (let i = 0; i < 350; i++) { // ~330 reads is what a real 3h meeting measured out to
+    for (const chunk of c.push(READ)) maxChunk = Math.max(maxChunk, chunk.pcm.length)
+  }
+  const tail = c.flush()
+  if (tail) maxChunk = Math.max(maxChunk, tail.pcm.length)
+  assert.ok(maxChunk < 40 * SR, `a chunk was ${maxChunk / SR}s, expected under 40s`)
 })
 
 test('signal gate: digital silence is skipped, real audio is not', () => {

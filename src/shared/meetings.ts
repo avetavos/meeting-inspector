@@ -3,6 +3,16 @@ import { z } from 'zod'
 
 export type Segment = { t0: number; t1: number; speaker: string; text: string }
 
+/**
+ * Language spoken IN THE MEETING — what whisper decodes to. Lives here (not
+ * settings.ts) so a Transcript can carry it without main/settings.ts's electron
+ * import following it into every module that just wants the type. A list (not a bare
+ * union) so a third language is one entry here, reused by settings.ts's own
+ * validation, rather than a union repeated at every call site.
+ */
+export const MEETING_LANGUAGES = ['th', 'en'] as const
+export type MeetingLanguage = (typeof MEETING_LANGUAGES)[number]
+
 export type Transcript = {
   id: string
   startedAt: string
@@ -10,6 +20,27 @@ export type Transcript = {
   /** Before diarization: just the two tracks. Step 5 replaces `them` with SPEAKER_xx. */
   speakers: Record<string, string>
   segments: Segment[]
+  /**
+   * Set the moment an ASR pass over this meeting finishes — 'manual' mode (settings.ts)
+   * leaves it unset until the user transcribes the meeting from the meetings list. The
+   * explicit signal, not `segments.length === 0`: a meeting where nobody spoke would
+   * otherwise look untranscribed forever and be re-run on every batch. Absent on
+   * transcripts written before this field existed; store.ts's `meetingDone` reads those
+   * as done when they have segments, done without a migration step.
+   */
+  transcribedAt?: string
+  /**
+   * Captured once, at session:start, the same way Session.mode is (index.ts) — never
+   * re-read from settings mid-meeting, because a meeting recorded under one language
+   * setting and transcribed later under another must decode as what was actually
+   * spoken, not whatever settings.json says today. Written on every path that produces
+   * a transcript, including 'manual' mode's segment-less write at session:stop — that
+   * write is the only chance to record it, since 'manual' meetings are transcribed on
+   * demand, possibly long after the setting has changed again. Absent on transcripts
+   * written before this field existed; store.ts's `resolveLanguage` is the one place
+   * that fallback is applied, explicitly, to the current setting.
+   */
+  language?: MeetingLanguage
 }
 
 export type MeetingMeta = {
@@ -40,6 +71,18 @@ export const titleOf = (id: string): string => {
   if (!stamped) return id
   const [, year, month, day, hour, minute, title] = stamped
   return title ?? `${day}-${month}-${year} ${hour}:${minute}`
+}
+
+/**
+ * Best-effort `startedAt` for a meeting whose transcript.json is missing or corrupt —
+ * parsed straight from the id's own timestamp, so store.ts's meetings list still sorts
+ * and shows something sensible instead of dropping the folder (spec item 3).
+ */
+export const startedAtFromId = (id: string): string | null => {
+  const stamped = STAMPED.exec(id)
+  if (!stamped) return null
+  const [, year, month, day, hour, minute] = stamped
+  return `${year}-${month}-${day}T${hour}:${minute}:00`
 }
 
 /**

@@ -20,8 +20,15 @@ export class Chunker {
   private held = 0
   private emitted = 0
 
-  /** Returns a chunk once one is ready. Callers keep pushing; at most one chunk per push. */
-  push(pcm: Int16Array): Chunk | null {
+  /**
+   * Returns every chunk ready after this push. Almost always 0 or 1 — the live path
+   * feeds ~100ms frames — but looping here (rather than cutting once and leaving the
+   * rest) is what keeps a caller that pushes more than TARGET at once (the offline
+   * replay's 1MB disk reads, ~32.8s) from accumulating an ever-growing backlog: cutting
+   * only once per call left up to ~2.8-8.8s uncollected on every such push, and across a
+   * whole track that grew into a 30-minute tail chunk.
+   */
+  push(pcm: Int16Array): Chunk[] {
     if (this.held + pcm.length > this.buf.length) {
       const grown = new Int16Array((this.held + pcm.length) * 2)
       grown.set(this.buf.subarray(0, this.held))
@@ -29,7 +36,9 @@ export class Chunker {
     }
     this.buf.set(pcm, this.held)
     this.held += pcm.length
-    return this.held >= TARGET ? this.cut(this.quietestCut()) : null
+    const chunks: Chunk[] = []
+    while (this.held >= TARGET) chunks.push(this.cut(this.quietestCut()))
+    return chunks
   }
 
   /** Everything still buffered, as a final short chunk. */
