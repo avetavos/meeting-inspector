@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob:; script-src 'self' blob:" />
+    <title>Meeting Inspector</title>
+    <style>
+      :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 15%, transparent); }
+      body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 28px; }
+      h1 { font-size: 17px; margin: 0 0 20px; }
+      input, button { font: inherit; }
+      input { padding: 8px 10px; width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
+      button { padding: 10px 20px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+      button:disabled { opacity: .4; cursor: default; }
+      .row { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
+      .meter { flex: 1; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+      .meter > i { display: block; height: 100%; width: 0; background: currentColor; transition: width 80ms linear; }
+      .label { width: 88px; opacity: .7; font-size: 13px; }
+      .warn { margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+      .warn button { padding: 4px 10px; font-size: 13px; margin-top: 8px; }
+      #elapsed { font-variant-numeric: tabular-nums; opacity: .7; }
+      #done { margin-top: 16px; font-size: 14px; }
+      a { color: inherit; }
+    </style>
+  </head>
+  <body>
+    <h1>Meeting Inspector</h1>
+    <input id="title" placeholder="ชื่อการประชุม" autocomplete="off" />
+    <div class="row">
+      <button id="toggle">เริ่มอัด</button>
+      <span id="elapsed"></span>
+    </div>
+    <div class="row"><span class="label">คนอื่น</span><span class="meter"><i id="m-loopback"></i></span></div>
+    <div class="row"><span class="label">เรา</span><span class="meter"><i id="m-mic"></i></span></div>
+    <div id="warnings"></div>
+    <div id="done"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

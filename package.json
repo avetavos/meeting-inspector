@@ -1,0 +1,20 @@
+{
+  "name": "meeting-inspector",
+  "version": "0.0.0",
+  "private": true,
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-transform-types --test \"src/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "electron": "38.8.6",
+    "electron-vite": "^4",
+    "typescript": "^5",
+    "vite": "^7"
+  }
+}

@@ -37,5 +37,6 @@ app.whenReady().then(async () => {
     if (msg === 'PHASE:B') spawn('/bin/sh', ['-c', 'for i in 1 2 3 4 5 6 7 8; do afplay /System/Library/Sounds/Submarine.aiff; done'])
     if (msg.startsWith('VERDICT')) setTimeout(() => app.exit(msg.includes('PASS') ? 0 : 1), 300)
   })
+  if (process.env.SPIKE_STOP_VIDEO) win.webContents.on('dom-ready', () => win.webContents.executeJavaScript('window.STOP_VIDEO=1'))
   win.loadFile('index.html')
 })

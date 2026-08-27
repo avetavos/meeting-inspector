@@ -44,6 +44,12 @@ function tone() {
     console.log('VERDICT: FAIL — could not open a display-media stream at all')
     return
   }
+  // Does audio survive without the video track? A 3h meeting should not also
+  // be running a full-res screen capture we never look at.
+  if (window.STOP_VIDEO) {
+    stream.getVideoTracks().forEach(t => t.stop())
+    console.log('stopped video tracks')
+  }
   const at = stream.getAudioTracks()
   console.log(`audio tracks: ${at.length}${at[0] ? ` | label="${at[0].label}"` : ''}`)
   if (!at.length) { console.log('VERDICT: FAIL — stream has no audio track'); return }
