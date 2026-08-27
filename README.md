@@ -68,10 +68,24 @@ token the panel shows. Point any MCP client at that URL with the token.
 The panel gives you the line to paste, per client:
 
 ```
-# Claude Code / Claude Desktop — reach localhost and can send a header
+# Claude Code — speaks HTTP directly
 claude mcp add --scope user --transport http meeting-inspector \
   http://127.0.0.1:8787/ --header "Authorization: Bearer <token>"
 ```
+
+Claude Desktop's chat reads only its own config, and its custom connectors have
+to be reachable from Anthropic's servers — a localhost URL is not. Locally it
+goes through a stdio bridge instead, in
+`~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{ "mcpServers": { "meeting-inspector": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "http://127.0.0.1:8787/<token>"]
+} } }
+```
+
+Restart Claude Desktop after editing it. Nothing leaves the machine.
 
 Cloud clients — ChatGPT, Grok — cannot reach localhost, so there is a tunnel
 toggle that runs `cloudflared tunnel` (`brew install cloudflared`). **Turning it

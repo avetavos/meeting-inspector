@@ -290,10 +290,19 @@ function showMcpState(state: McpState): void {
     mcpStateEl.append(
       copyRow('URL', state.url),
       copyRow('Bearer token', state.token),
-      // Claude Code and Claude Desktop can reach localhost and send a header.
+      // Claude Code speaks HTTP and can send a header.
       copyRow(
         'Claude Code',
-        `claude mcp add --transport http meeting-inspector ${state.url} --header "Authorization: Bearer ${state.token}"`,
+        `claude mcp add --scope user --transport http meeting-inspector ${state.url} --header "Authorization: Bearer ${state.token}"`,
+      ),
+      // Claude Desktop's chat only loads its own config, and its custom connectors
+      // must be reachable from the internet — so locally it goes through a stdio
+      // bridge. Token in the URL, which saves quoting a header inside JSON.
+      copyRow(
+        'Claude Desktop → claude_desktop_config.json',
+        JSON.stringify({
+          'meeting-inspector': { command: 'npx', args: ['-y', 'mcp-remote', `${state.url}${state.token}`] },
+        }),
       ),
     )
   }
