@@ -20,6 +20,7 @@ npm run dev        # electron-vite dev
 npm test           # chunker, wav, store, merge, mcp
 npm run typecheck
 npm run dist       # release/Meeting Inspector-<version>-arm64.dmg
+npm run icon       # redraw build/icon.icns from build/icon.mjs
 ```
 
 The .dmg is unsigned and unnotarized, so the first launch needs right-click →
