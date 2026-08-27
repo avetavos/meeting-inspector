@@ -2,8 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { SAMPLE_RATE, type Chunk } from './chunker.js'
-import { wavHeader } from './wav.js'
+import { SAMPLE_RATE, type Chunk } from './chunker.ts'
+import { wavHeader } from './wav.ts'
 
 export type Segment = { t0: number; t1: number; text: string }
 

@@ -1,9 +1,9 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
 import { join } from 'node:path'
-import { Chunker, type Chunk } from './chunker.js'
-import { createMeetingDir } from './store.js'
-import { WavWriter } from './wav.js'
-import { Whisper } from './whisper.js'
+import { Chunker, type Chunk } from './chunker.ts'
+import { createMeetingDir } from './store.ts'
+import { WavWriter } from './wav.ts'
+import { Whisper } from './whisper.ts'
 
 export type Track = 'loopback' | 'mic'
 
