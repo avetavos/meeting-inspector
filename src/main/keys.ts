@@ -1,5 +1,5 @@
 import { app, safeStorage } from 'electron'
-import { readFile, writeFile } from 'node:fs/promises'
+import { chmod, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const KEYS_FILE = () => join(app.getPath('userData'), 'keys.bin')
@@ -29,6 +29,9 @@ export async function setKey(provider: string, key: string): Promise<void> {
   if (key) keys[provider] = key
   else delete keys[provider]
   await writeFile(KEYS_FILE(), safeStorage.encryptString(JSON.stringify(keys)), { mode: 0o600 })
+  // mode only applies when writeFile creates the file; an existing one keeps whatever
+  // permissions it already had.
+  await chmod(KEYS_FILE(), 0o600)
 }
 
 export async function getKey(provider: string): Promise<string | undefined> {

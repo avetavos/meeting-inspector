@@ -1,9 +1,22 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { Transcript } from '../shared/meetings.ts'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 
 export const NOTES_ROOT = join(homedir(), 'Documents', 'MeetingNotes')
+
+/**
+ * Paths that arrive over IPC are renderer-supplied, so main must not trust them.
+ * Without this, `shell.openPath` would launch anything and the rename handler would
+ * read and write `transcript.json` in any directory on the machine.
+ */
+export function assertMeetingDir(dir: string): string {
+  const resolved = resolve(dir)
+  if (!resolved.startsWith(NOTES_ROOT + sep)) {
+    throw new Error(`ไม่ใช่โฟลเดอร์การประชุม: ${dir}`)
+  }
+  return resolved
+}
 
 /** `2026-08-27-1400-sprint-planning` — sorts by time, still readable in Finder. */
 export function meetingId(title: string, at: Date): string {

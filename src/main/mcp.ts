@@ -43,7 +43,9 @@ function diskStore(root: string): MeetingStore {
         const t = await transcript(entry.name)
         if (!t) continue
         found.push({
-          id: t.id,
+          // The folder name, not the id inside the file: `get_transcript` resolves by
+          // folder, so reporting anything else lets a stray file rename a meeting.
+          id: entry.name,
           title: titleOf(entry.name),
           startedAt: t.startedAt,
           durationSec: t.durationSec,

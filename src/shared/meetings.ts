@@ -32,8 +32,13 @@ export interface MeetingStore {
 /** The id is `<date>-<time>-<title>`; the title is whatever follows the stamp. */
 export const titleOf = (id: string): string => id.replace(/^\d{4}-\d{2}-\d{2}-\d{4}-/, '')
 
-/** Meeting ids address storage keys, so refuse anything that could climb out. */
-export const safeId = (id: string): boolean => !id.includes('/') && !id.includes('\\') && !id.startsWith('.')
+/**
+ * Meeting ids address storage keys, so refuse anything that could climb out — and
+ * anything empty, which would otherwise resolve to a stray file sitting in the notes
+ * root rather than a meeting folder.
+ */
+export const safeId = (id: string): boolean =>
+  id.length > 0 && !id.includes('/') && !id.includes('\\') && !id.startsWith('.')
 
 const who = (t: Transcript, speaker: string) => t.speakers[speaker] ?? speaker
 

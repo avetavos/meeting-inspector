@@ -7,7 +7,15 @@ import { MODELS, downloadModel, modelStatus } from './download.ts'
 import { getKey, setKey } from './keys.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { getSettings, setSettings } from './settings.ts'
-import { NOTES_ROOT, createMeetingDir, localIso, readTranscript, writeTranscript, type Transcript } from './store.ts'
+import {
+  NOTES_ROOT,
+  assertMeetingDir,
+  createMeetingDir,
+  localIso,
+  readTranscript,
+  writeTranscript,
+  type Transcript,
+} from './store.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
 
@@ -216,9 +224,9 @@ function registerIpc(): void {
   // Typing one name for two speakers is how you merge them (spec §8) — the summary
   // sees one person, and nothing has to reshuffle the segments.
   ipcMain.handle('meeting:rename', async (_e, dir: string, speakers: Record<string, string>) => {
-    const previous = await readTranscript(dir)
+    const previous = await readTranscript(assertMeetingDir(dir))
     const updated: Transcript = { ...previous, speakers: { ...previous.speakers, ...speakers } }
-    await writeTranscript(dir, updated)
+    await writeTranscript(assertMeetingDir(dir), updated)
     return updated
   })
 
@@ -257,7 +265,7 @@ function registerIpc(): void {
     return mcpState()
   })
 
-  ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(dir))
+  ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(assertMeetingDir(dir)))
 }
 
 app.whenReady().then(() => {

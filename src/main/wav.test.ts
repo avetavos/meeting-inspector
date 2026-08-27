@@ -3,7 +3,16 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { localIso, meetingId, readTranscript, slug, writeTranscript } from './store.ts'
+import {
+  NOTES_ROOT,
+  assertMeetingDir,
+  localIso,
+  meetingId,
+  readTranscript,
+  slug,
+  writeTranscript,
+} from './store.ts'
+import { safeId } from '../shared/meetings.ts'
 import { WavWriter } from './wav.ts'
 
 test('wav: header matches what was actually written, across many appends', async () => {
@@ -80,4 +89,31 @@ test('store: timestamps keep their local offset', () => {
   const iso = localIso(at)
   assert.match(iso, /^2026-08-27T14:05:09[+-]\d{2}:\d{2}$/)
   assert.equal(new Date(iso).getTime(), at.getTime(), 'must parse back to the same instant')
+})
+
+test('store: a path from the renderer cannot point outside the notes folder', () => {
+  const inside = join(NOTES_ROOT, '2026-08-27-1400-sprint-planning')
+  assert.equal(assertMeetingDir(inside), inside)
+  // Trailing separators and dot segments still resolve to somewhere legitimate.
+  assert.equal(assertMeetingDir(`${inside}/`), inside)
+  assert.equal(assertMeetingDir(`${NOTES_ROOT}/x/../2026-08-27-1400-sprint-planning`), inside)
+
+  // shell.openPath would have launched this one, and rename would have written to it.
+  for (const escape of [
+    '/Applications/Calculator.app',
+    `${NOTES_ROOT}/../Downloads/evil.app`,
+    join(NOTES_ROOT, '..'),
+    NOTES_ROOT,
+    '',
+  ]) {
+    assert.throws(() => assertMeetingDir(escape), /ไม่ใช่โฟลเดอร์การประชุม/, `should refuse ${escape}`)
+  }
+})
+
+test('meetings: an empty id is not a meeting', () => {
+  // join(root, '', 'transcript.json') would read a stray file in the notes root.
+  assert.equal(safeId(''), false)
+  assert.equal(safeId('2026-08-27-1400-sprint-planning'), true)
+  assert.equal(safeId('../etc'), false)
+  assert.equal(safeId('.hidden'), false)
 })
