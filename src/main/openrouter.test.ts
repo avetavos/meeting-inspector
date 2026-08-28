@@ -30,6 +30,30 @@ test('openrouter: a model reply becomes segments placed inside the meeting, howe
   assert.deepEqual(parseSegments('[{"start":10,"end":2,"text":"x"}]', 0, 30), [{ t0: 10, t1: 10, text: 'x' }])
 })
 
+test('openrouter: a reply that overruns the clip is scaled back, not crushed at the end', () => {
+  // Measured against the real thing: gemini-2.5-flash-lite, asked for times inside a
+  // 23.3-second clip, replied with four lines ending at 26. Clamping each value on its
+  // own left the first three stretched and squashed the fourth into 0.3 seconds — and
+  // diarization matches these against speaker turns by overlap, so a timeline of the
+  // wrong SHAPE hands lines to the wrong person.
+  const reply = JSON.stringify([
+    { start: 0, end: 10, text: 'a' },
+    { start: 10, end: 17, text: 'b' },
+    { start: 17, end: 23, text: 'c' },
+    { start: 23, end: 26, text: 'd' },
+  ])
+  const out = parseSegments(reply, 0, 23.3)
+  assert.equal(out.length, 4)
+  assert.ok(Math.abs(out[3]!.t1 - 23.3) < 0.01, 'the last line still ends with the clip')
+  assert.ok(out[3]!.t1 - out[3]!.t0 > 2, 'and keeps a real duration instead of a sliver')
+  // Order and relative spacing survive, which is the property diarization actually uses.
+  for (let i = 1; i < out.length; i++) assert.ok(out[i]!.t0 >= out[i - 1]!.t0)
+  assert.ok(Math.abs(out[1]!.t0 - 10 * (23.3 / 26)) < 0.01)
+
+  // A reply that fits is left exactly as it came — scaling is only for an overrun.
+  assert.deepEqual(parseSegments('[{"start":1,"end":3,"text":"x"}]', 0, 30), [{ t0: 1, t1: 3, text: 'x' }])
+})
+
 test('openrouter: only models that take audio are offered, priced per hour, cheapest first', () => {
   const models = audioModels([
     { id: 'text/only', name: 'Text only', architecture: { input_modalities: ['text'] }, pricing: { prompt: '0.000001' } },

@@ -47,6 +47,12 @@ const PROMPT = (language: string): string =>
     '[{"start": <seconds from the start of THIS clip>, "end": <seconds>, "text": "<what was said>"}]',
     'One entry per sentence or natural pause. Transcribe only what you actually hear —',
     'if the clip contains no speech, reply with [].',
+    // Thai does not space its words, and a model that does anyway produces something
+    // no one can read and nothing can search. Asked for, but not relied on: measured,
+    // gemini-2.5-flash splits every syllable regardless and this line does not stop it,
+    // while gemini-2.5-flash-lite (the default) never needed asking. Which model is
+    // picked matters more here than the prompt does — hence the note in the panel.
+    'Write Thai the way Thai is written: no spaces between words, only between phrases.',
   ].join('\n')
 
 type Job = { track: string; pcm: Int16Array; startSec: number; language: string; signal?: AbortSignal }
@@ -73,20 +79,29 @@ export function parseSegments(reply: string, startSec: number, durationSec: numb
   const text = reply.trim()
   const opens = text.indexOf('[')
   const closes = text.lastIndexOf(']')
-  const clamp = (n: number): number => Math.min(Math.max(n, 0), durationSec)
 
   if (opens !== -1 && closes > opens) {
     try {
       const rows = JSON.parse(text.slice(opens, closes + 1)) as unknown
       if (Array.isArray(rows)) {
-        const segments = rows
+        const raw = rows
           .filter((r): r is { start: unknown; end: unknown; text: unknown } => typeof r === 'object' && r !== null)
-          .map((r) => ({
-            t0: startSec + clamp(Number(r.start)),
-            t1: startSec + clamp(Number(r.end)),
-            text: String(r.text ?? '').trim(),
-          }))
-          .filter((s) => s.text.length > 0 && Number.isFinite(s.t0) && Number.isFinite(s.t1))
+          .map((r) => ({ start: Number(r.start), end: Number(r.end), text: String(r.text ?? '').trim() }))
+          .filter((r) => r.text.length > 0 && Number.isFinite(r.start) && Number.isFinite(r.end))
+
+        // Models overrun the clip: asked for times inside a 23-second clip, one came
+        // back with lines ending at 26. Clamping each value on its own crushed the last
+        // line into a 0.3-second sliver at the end while leaving the earlier ones
+        // stretched, which is worse than being uniformly wrong — diarization matches
+        // these against speaker turns by overlap, so the SHAPE of the timeline is what
+        // has to survive. Scaling the whole reply back to fit keeps the order and the
+        // relative spacing, and measurably lands closer to the real turns.
+        const longest = raw.reduce((max, r) => Math.max(max, r.end, r.start), 0)
+        const scale = longest > durationSec && longest > 0 ? durationSec / longest : 1
+        const clamp = (n: number): number => Math.min(Math.max(n * scale, 0), durationSec)
+
+        const segments = raw
+          .map((r) => ({ t0: startSec + clamp(r.start), t1: startSec + clamp(r.end), text: r.text }))
           .map((s) => ({ ...s, t1: Math.max(s.t1, s.t0) }))
         // An empty array is a real answer ("no speech here"), not a parse failure.
         if (segments.length > 0 || rows.length === 0) return segments

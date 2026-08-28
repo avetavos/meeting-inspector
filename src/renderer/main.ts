@@ -151,6 +151,11 @@ const en = {
   remoteFreeTier: ' This is a free-tier key, so expect rate limits on a long meeting.',
   remoteFailed: (msg: string) => `Could not use that key: ${msg}`,
   remoteModelLabel: 'Model',
+  // Measured on this app's own Thai/English test clip, and worth saying: the cheapest
+  // model here is also the one that writes Thai properly, which is not the ordering
+  // anyone expects.
+  remoteModelAdvice:
+    'Gemini 2.5 Flash Lite is the default and, on Thai, the most accurate of the cheap ones — some larger models put a space between every Thai syllable. Try a short meeting on a new model before trusting it with a long one.',
   remoteModelPrice: (usdPerHour: number, usdPerMillion: number) =>
     `About $${usdPerHour.toFixed(2)} per hour of meeting ($${usdPerMillion.toFixed(2)} per million audio tokens, estimated at 32 tokens a second). Silence is never sent, so a quiet meeting costs less than its length.`,
   remoteModelFree: 'Free at the moment. Free models are rate-limited and can be withdrawn without notice.',
@@ -479,6 +484,8 @@ const th: typeof en = {
   remoteFreeTier: ' เป็นคีย์แบบฟรี ประชุมยาวๆ อาจติดลิมิตระหว่างทาง',
   remoteFailed: (msg) => `ใช้คีย์นี้ไม่ได้: ${msg}`,
   remoteModelLabel: 'โมเดล',
+  remoteModelAdvice:
+    'ค่าเริ่มต้นคือ Gemini 2.5 Flash Lite ซึ่งจากที่ทดสอบเขียนภาษาไทยได้ถูกที่สุดในกลุ่มที่ราคาถูก — บางโมเดลที่ใหญ่กว่าใส่เว้นวรรคระหว่างทุกพยางค์ไทย ถ้าจะเปลี่ยนโมเดล ลองกับประชุมสั้นๆ ก่อนใช้กับไฟล์ยาว',
   remoteModelPrice: (usdPerHour, usdPerMillion) =>
     `ประมาณ $${usdPerHour.toFixed(2)} ต่อการประชุม 1 ชั่วโมง ($${usdPerMillion.toFixed(2)} ต่อ 1 ล้าน audio token คิดที่ 32 token/วินาที) ช่วงเงียบไม่ถูกส่งไป ประชุมที่เงียบมากจะถูกกว่าความยาวจริง`,
   remoteModelFree: 'ตอนนี้ฟรี — โมเดลฟรีมีลิมิตการเรียกและถูกถอดออกเมื่อไหร่ก็ได้',
@@ -3516,6 +3523,7 @@ function renderRemotePrice(): void {
   else if (model.usdPerHour === null || model.usdPerMillionAudio === null) {
     remotePriceEl.textContent = t().remoteModelUnpriced
   } else remotePriceEl.textContent = t().remoteModelPrice(model.usdPerHour, model.usdPerMillionAudio)
+  remotePriceEl.textContent += ` ${t().remoteModelAdvice}`
 }
 
 async function loadRemoteModels(connect?: string): Promise<void> {
