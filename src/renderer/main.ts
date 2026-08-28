@@ -363,6 +363,10 @@ const en = {
   // launch forever with nothing explaining why.
   onboardingSaveFailed: (msg: string) => `Could not save that setup is done: ${msg} — you may see this screen again next launch.`,
   detailReveal: 'Show in Finder',
+  playerPlay: 'Play the recording',
+  playerPause: 'Pause',
+  playLineHint: 'Click to hear this line',
+  playerNoAudio: 'The recording for this meeting has been deleted — the transcript is all that is left.',
 }
 
 const th: typeof en = {
@@ -651,6 +655,10 @@ const th: typeof en = {
   onboardingRerunLockedReason: 'ใช้ไม่ได้ตอนนี้ — กำลังอัดเสียงหรือถอดเสียงการประชุมอยู่',
   onboardingSaveFailed: (msg) => `บันทึกสถานะตั้งค่าเสร็จไม่สำเร็จ: ${msg} — ครั้งหน้าอาจเจอหน้านี้อีก`,
   detailReveal: 'แสดงใน Finder',
+  playerPlay: 'เล่นบันทึกการประชุม',
+  playerPause: 'หยุดชั่วคราว',
+  playLineHint: 'คลิกเพื่อฟังประโยคนี้',
+  playerNoAudio: 'ไฟล์เสียงของการประชุมนี้ถูกลบไปแล้ว เหลือแต่ transcript',
 }
 
 const STR: Record<Language, typeof en> = { en, th }
@@ -1738,6 +1746,111 @@ function speakerDisplayName(speaker: string, names: Record<string, string>, numb
  * t0 order — both callers already guarantee that (writeTranscript on disk, the running
  * session's own sort in onSegments) — so speakerDisplayName's first-appearance
  * numbering is stable across re-renders instead of reshuffling as more lines arrive. */
+const playerEl = $('player')
+const playerPlayBtn = $<HTMLButtonElement>('player-play')
+const playerSeek = $<HTMLInputElement>('player-seek')
+const playerTimeEl = $('player-time')
+
+/**
+ * Plays a past meeting back, and plays one line of it on demand.
+ *
+ * Two <audio> elements, not one: the meeting was recorded as two separate tracks and
+ * was never mixed (spec §4.1), and mixing them here would mean building a whole new WAV
+ * per meeting — 350MB for a long one — to hear something the two tracks already say
+ * together. They start at the same instant, so playing both from the same position is
+ * the mix. Every seek sets both, which also means any drift is corrected the moment the
+ * user touches anything.
+ *
+ * They stream over `meeting://` (index.ts) rather than a Blob URL, so seeking into the
+ * middle of a three-hour recording costs a Range request instead of the whole file.
+ */
+const players: HTMLAudioElement[] = []
+let playerDuration = 0
+/** Segments of the meeting currently open, so the line under the playhead can be lit —
+ * kept beside the players rather than read from detailSegments, because the transcript
+ * can be re-rendered by a speaker rename while playback continues. */
+let playerSegments: Transcript['segments'] = []
+
+const playing = (): boolean => players.some((a) => !a.paused && !a.ended)
+
+function stopPlayer(): void {
+  for (const audio of players) {
+    audio.pause()
+    audio.removeAttribute('src')
+    audio.load()
+  }
+  players.length = 0
+  playerSegments = []
+  playerEl.hidden = true
+  playerDuration = 0
+}
+
+/** Builds the player for one meeting. `tracks` is which WAVs are actually still on
+ * disk — the meetings list can delete the audio and keep the transcript, and that
+ * meeting simply has no player rather than a broken one. */
+function openPlayer(id: string, tracks: Record<string, boolean>, segs: Transcript['segments'], durationSec: number): void {
+  stopPlayer()
+  const present = Object.keys(tracks).filter((track) => tracks[track])
+  if (present.length === 0) return
+
+  playerSegments = segs
+  playerDuration = durationSec
+  for (const track of present) {
+    const audio = new Audio(`meeting://audio/${encodeURIComponent(id)}/${track}.wav`)
+    audio.preload = 'metadata'
+    // The transcript's own times are the source of truth for the scrubber, but a
+    // meeting whose transcript never recorded a duration still has one on disk.
+    audio.addEventListener('loadedmetadata', () => {
+      if (Number.isFinite(audio.duration)) playerDuration = Math.max(playerDuration, audio.duration)
+      renderPlayer()
+    })
+    audio.addEventListener('ended', renderPlayer)
+    players.push(audio)
+  }
+  // One track drives the clock; the others follow it. Whichever it is, they were all
+  // started together, so it speaks for the meeting's position.
+  players[0]!.addEventListener('timeupdate', renderPlayer)
+  playerEl.hidden = false
+  renderPlayer()
+}
+
+function seekPlayer(seconds: number): void {
+  const at = Math.min(Math.max(seconds, 0), Math.max(playerDuration - 0.05, 0))
+  for (const audio of players) audio.currentTime = at
+  renderPlayer()
+}
+
+async function togglePlayer(): Promise<void> {
+  if (playing()) {
+    for (const audio of players) audio.pause()
+  } else {
+    // Both at once rather than one after the other: awaiting the first would start the
+    // second a beat late, and that beat is audible as an echo of the same room.
+    await Promise.allSettled(players.map((a) => a.play()))
+  }
+  renderPlayer()
+}
+
+function renderPlayer(): void {
+  if (players.length === 0) return
+  const at = players[0]!.currentTime
+  playerPlayBtn.textContent = playing() ? '❙❙' : '▶'
+  playerPlayBtn.setAttribute('aria-label', playing() ? t().playerPause : t().playerPlay)
+  playerTimeEl.textContent = `${fmt(at)} / ${fmt(playerDuration)}`
+  if (document.activeElement !== playerSeek) {
+    playerSeek.value = String(playerDuration > 0 ? Math.round((at / playerDuration) * 1000) : 0)
+  }
+
+  // The line under the playhead, lit. Looked up on every tick rather than tracked as
+  // state, because a seek, a rename and a re-render can each move it independently.
+  const rows = detailTranscriptEl.querySelectorAll('p')
+  const current = playerSegments.findIndex((seg) => at >= seg.t0 && at < seg.t1)
+  rows.forEach((row, i) => row.classList.toggle('playing', i === current && playing()))
+}
+
+playerPlayBtn.onclick = () => void togglePlayer()
+playerSeek.oninput = () => seekPlayer((Number(playerSeek.value) / 1000) * playerDuration)
+
 function renderTranscript(
   segs: Transcript['segments'] = segments,
   names: Record<string, string> = speakers,
@@ -1756,6 +1869,16 @@ function renderTranscript(
       who.textContent = speakerDisplayName(s.speaker, names, numbering)
       const text = document.createElement('span')
       text.textContent = s.text
+      // Only the detail page has a player to seek, and only while the audio it plays
+      // still exists — the live panel's rows stay plain text.
+      if (container === detailTranscriptEl && players.length > 0) {
+        row.className = `${row.className} playable`.trim()
+        row.title = t().playLineHint
+        row.onclick = () => {
+          seekPlayer(s.t0)
+          if (!playing()) void togglePlayer()
+        }
+      }
       row.append(at, who, text)
       return row
     }),
@@ -3189,6 +3312,10 @@ let detailSpeakers: Record<string, string> = {}
 let detailSpeakerVoices: Transcript['speakerVoices'] = undefined
 let detailStartedAt = ''
 let detailDurationSec = 0
+/** False once a meeting's audio has been deleted from the meetings list — the words
+ * were kept, the recording was not, and the page has to say so rather than just quietly
+ * have no player. */
+let detailHasAudio = true
 
 /** Static chrome first (always current, even before a meeting is loaded), then the
  * per-meeting header — split out so applyLanguage() can refresh both without knowing
@@ -3198,7 +3325,9 @@ function renderDetailMeta(): void {
   detailRevealBtn.textContent = t().detailReveal
   if (!detailId) return
   detailTitleEl.textContent = titleOf(detailId)
-  detailMetaEl.textContent = `${fmtMeetingWhen(detailStartedAt)} · ${fmt(detailDurationSec)}`
+  detailMetaEl.textContent =
+    `${fmtMeetingWhen(detailStartedAt)} · ${fmt(detailDurationSec)}` +
+    (detailHasAudio ? '' : ` · ${t().playerNoAudio}`)
 }
 
 /** Delegates to the exact same renderSpeakerPanel the live session uses (generalized
@@ -3217,7 +3346,7 @@ function renderDetailSpeakers(): void {
 }
 
 async function openMeetingDetail(id: string): Promise<void> {
-  const { dir, transcript: tr } = await window.api.getTranscript(id)
+  const { dir, audio, transcript: tr } = await window.api.getTranscript(id)
   detailId = id
   detailDir = dir
   detailSegments = tr.segments
@@ -3225,12 +3354,20 @@ async function openMeetingDetail(id: string): Promise<void> {
   detailSpeakerVoices = tr.speakerVoices
   detailStartedAt = tr.startedAt
   detailDurationSec = tr.durationSec
+  detailHasAudio = Object.values(audio).some(Boolean)
   renderDetailMeta()
+  // Before the transcript, not after: whether each line is clickable depends on whether
+  // there is a player for it to seek.
+  openPlayer(id, audio, tr.segments, tr.durationSec)
   renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl)
   renderDetailSpeakers()
   showPage(detailPage)
 }
 function closeMeetingDetail(): void {
+  // Leaving the page has to stop the sound with it — same rule the voice-sample player
+  // in Settings already follows: audio playing with no visible player anywhere is the
+  // app talking to itself.
+  stopPlayer()
   showPage(mainView)
 }
 detailBackBtn.onclick = () => closeMeetingDetail()

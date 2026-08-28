@@ -1,13 +1,14 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, net, protocol, session, shell, systemPreferences, type WebContents } from 'electron'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
 import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
-import { startedAtFromId, titleOf, type MeetingLanguage } from '../shared/meetings.ts'
+import { safeId, startedAtFromId, titleOf, type MeetingLanguage } from '../shared/meetings.ts'
 import { TRACKS, transcribeRecorded, type ReplayServer, type Track } from './replay.ts'
 import { mcpToken, openrouterKey, setOpenrouterKey } from './token.ts'
 import { Remote, connect as connectOpenrouter } from './openrouter.ts'
@@ -48,6 +49,18 @@ import {
 import { bundlePathOf, clearUpdateLeftovers, downloadUpdate, installUpdate, latestUpdate, type UpdateInfo } from './update.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
+
+/**
+ * Lets the detail page's player stream a meeting's WAVs instead of loading them.
+ * `stream` is what makes Range requests work, which is what makes seeking in a
+ * three-hour recording possible at all — a Blob URL would mean holding the whole
+ * ~350MB file in the renderer just to hear thirty seconds of it.
+ *
+ * Registered before `whenReady`, which is the only time Electron accepts this.
+ */
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'meeting', privileges: { stream: true, supportFetchAPI: true, secure: true, bypassCSP: false } },
+])
 
 /** Decision 4.1: two tracks, never mixed — the mic track is "me" without any diarization. */
 type Session = {
@@ -768,7 +781,15 @@ function registerIpc(): void {
     // an old meeting reopened later shows whatever its recognised voices are called
     // *today*, not what they were called when this transcript was written.
     const speakers = await resolveSpeakerNames(transcript.speakers, transcript.speakerVoices)
-    return { dir, transcript: { ...transcript, speakers } }
+    // Which tracks are still on disk: "delete the audio, keep the words" is offered in
+    // the meetings list, so a transcript with no recording behind it any more is a
+    // normal state the player has to be told about rather than discover by failing.
+    const audio = Object.fromEntries(
+      await Promise.all(
+        TRACKS.map(async (track) => [track, await stat(join(dir, `${track}.wav`)).then((st) => st.size > 44, () => false)]),
+      ),
+    ) as Record<Track, boolean>
+    return { dir, audio, transcript: { ...transcript, speakers } }
   })
 
   ipcMain.handle('meeting:list', async () => {
@@ -1115,8 +1136,32 @@ function registerIpc(): void {
   })
 }
 
+/**
+ * `meeting://audio/<id>/<track>.wav` — one meeting's recorded audio, for the detail
+ * page's player. Everything about the path is rebuilt here from an id and a track name
+ * that are both checked first, so the renderer cannot name a file; `net.fetch` over a
+ * file:// URL is what carries Range through, so the player seeks without downloading.
+ *
+ * The id rides in the PATH, behind a fixed host, rather than being the host itself. A
+ * URL host is not a string: parsers lowercase it and may punycode it, and a meeting is
+ * named after its title — "Sprint-Review", "ทดสอบ". A path segment is just bytes.
+ */
+function serveMeetingAudio(): void {
+  protocol.handle('meeting', async (request) => {
+    const parts = new URL(request.url).pathname.replace(/^\//, '').split('/')
+    const id = decodeURIComponent(parts[0] ?? '')
+    const track = parts[1] ?? ''
+    if (parts.length !== 2 || !safeId(id) || !TRACKS.some((t) => `${t}.wav` === track)) {
+      return new Response('not found', { status: 404 })
+    }
+    const path = assertMeetingDir(join(NOTES_ROOT, id, track))
+    return net.fetch(pathToFileURL(path).toString())
+  })
+}
+
 app.whenReady().then(() => {
   installDisplayMediaHandler()
+  serveMeetingAudio()
   registerIpc()
   // An attempt that died mid-swap leaves staging directories next to the app, and the
   // next attempt then fails trying to clear them (seen in the wild as ENOTEMPTY on

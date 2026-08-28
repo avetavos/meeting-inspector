@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob:; script-src 'self' blob:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob: meeting:; script-src 'self' blob:" />
     <title>Meeting Inspector</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
@@ -365,6 +365,11 @@
           </div>
           <div id="detail-meta" class="hint"></div>
           <button id="detail-reveal" class="settings-back"></button>
+          <div id="player" class="player" hidden>
+            <button id="player-play" class="player-play" aria-label="play"></button>
+            <input id="player-seek" class="player-seek" type="range" min="0" max="1000" value="0" step="1" />
+            <span id="player-time" class="player-time"></span>
+          </div>
           <div id="detail-speakers"></div>
           <div id="detail-transcript"></div>
         </div>

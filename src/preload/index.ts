@@ -162,7 +162,10 @@ const api = {
   /** A single meeting's full transcript, for the meetings-list detail view (spec item
    * 1) — takes an id, not a directory: main resolves and guards the path itself
    * (assertMeetingDir), the same way transcribeOne already does. */
-  getTranscript: (id: string): Promise<{ dir: string; transcript: Transcript }> =>
+  /** `audio` says which of the two tracks are still on disk — the meetings list can
+   * delete a meeting's audio and keep its words, and the detail page's player has to
+   * know that rather than find out by failing to load. */
+  getTranscript: (id: string): Promise<{ dir: string; audio: Record<string, boolean>; transcript: Transcript }> =>
     ipcRenderer.invoke('meeting:get', id),
   /** The folder every recording and transcript is saved into, and a way to open it —
    * onboarding's files step shows both. */
