@@ -1658,6 +1658,7 @@ function renderSpeakerPanel(
 ): void {
   container.replaceChildren()
   if (!dir) return
+  void ensureVoiceNames()
 
   const inputs = new Map<string, HTMLInputElement>()
   for (const label of Object.keys(spk)) {
@@ -1677,6 +1678,11 @@ function renderSpeakerPanel(
     }
     const input = document.createElement('input')
     input.value = spk[label] ?? label
+    // Suggests the people the app already knows. This is where a person's name is
+    // actually typed, meeting after meeting, so it is where "พี่เพิร์ด" gets typed for
+    // "พี่เพิร์ช" and becomes a second person — and picking the existing name here is
+    // the same merge the hint below already promises for two speakers in one meeting.
+    input.setAttribute('list', VOICE_NAMES_LIST)
     input.oninput = () => {
       spk[label] = input.value
       onPreview()
@@ -1695,6 +1701,10 @@ function renderSpeakerPanel(
     )
     const result = (await window.api.renameSpeakers(dir, named)).speakers
     onSave(result)
+    // Saving here is one of the ways a voice gets a name in the first place, so the
+    // suggestions are stale the moment it returns.
+    knownVoiceNames = []
+    void ensureVoiceNames()
     save.disabled = false
     save.textContent = t().speakerSaved
   }
@@ -2040,6 +2050,17 @@ async function renderVoices(): Promise<void> {
 /** The id of the one shared <datalist> every name box points at — the Speakers rows and
  * the pending-voice rows all want the same list of people. */
 const VOICE_NAMES_LIST = 'voice-names'
+
+/** The datalist is filled by renderVoices() whenever Settings › Speakers is on screen;
+ * a meeting opened without ever going there has to fetch the names itself. Cached
+ * rather than fetched per render: the speaker panel is rebuilt on every language switch
+ * and every save, and the set of names only changes when something in this file changes
+ * it (which clears the cache at the same time). */
+async function ensureVoiceNames(): Promise<void> {
+  if (knownVoiceNames.length > 0) return
+  knownVoiceNames = (await window.api.knownVoices()).map((v) => v.name)
+  renderVoiceNameOptions()
+}
 
 /** Rebuilt whenever the set of names changes; a single element, appended once, because
  * a <datalist> is referenced by id and does not care where in the document it sits. */
