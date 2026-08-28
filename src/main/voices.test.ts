@@ -187,3 +187,33 @@ test('voices: resolveSpeakerNames resolves the live name, then the stored fallba
   )
   assert.equal(forgotten['SPEAKER_00'], 'Speaker 1 (พี่ซี)')
 })
+
+test('voices: resolveSpeakerNames never resolves a still-pending voice to a name (HIGH 3)', { skip: skip() }, async () => {
+  const pendingId = await voices.trackPending(dir, transcript, 'SPEAKER_00', 'some-meeting')
+  assert.ok(pendingId)
+
+  // Simulates the exact HIGH 3 mechanism end to end: `rec.name` is contaminated with
+  // "Alice", a name typed for a different physical person under the same reused raw
+  // key on an earlier pass — but the live voice this id actually points at is still
+  // pending (name: null). It must never win, even as a fallback: the pending voice
+  // has no name to fall back to at all.
+  const resolved = await voices.resolveSpeakerNames(
+    { SPEAKER_00: 'Speaker 1' },
+    { SPEAKER_00: { voiceId: pendingId!, name: 'Alice' } },
+  )
+  assert.equal(resolved['SPEAKER_00'], 'Speaker 1', 'must not fall back to a name that belongs to someone else entirely')
+  assert.notEqual(resolved['SPEAKER_00'], 'Alice')
+})
+
+test('voices: pcmFor honours an explicit `spans` override over the transcript\'s own speaker filter (MEDIUM 6)', { skip: skip() }, async () => {
+  // SPEAKER_01's real segments are t0=7.2..11.9 and t0=18.4..22.8 (SEGMENTS above) —
+  // pointing `spans` at SPEAKER_00's own timing instead must pull SPEAKER_00's audio,
+  // proving the override — not the current `speaker` key — decides what gets read.
+  const bySpans = await voices.sampleWav(dir, transcript, 'SPEAKER_01', [{ t0: 0.0, t1: 6.6 }])
+  const bySpeaker = await voices.sampleWav(dir, transcript, 'SPEAKER_00')
+  assert.ok(bySpans && bySpeaker)
+  // Compared as Buffers, not deepEqual: these are ~160KB of PCM, and assert's diff
+  // for a mismatch inspects every byte — enough string building to get the test
+  // process OOM-killed instead of reporting a failure.
+  assert.ok(Buffer.from(bySpans).equals(Buffer.from(bySpeaker)), 'an explicit span must win over the speaker-key-derived one')
+})

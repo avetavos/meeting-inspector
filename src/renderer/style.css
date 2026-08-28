@@ -93,6 +93,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-app-region: no-drag;
   padding: 0 var(--space-4xl) var(--space-5xl);
 }
@@ -196,11 +197,22 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 .meetings-action-btn { padding: var(--space-sm) var(--space-xl); font-size: var(--text-secondary); }
 #meetings-view-all { margin-top: var(--space-md); display: block; }
 
+/* Narrow window: the row's five items (checkbox, title, when, duration, two badges)
+   don't fit one line — wrap instead of overflowing #content sideways with no
+   scrollbar cue (same treatment .settings-row/.onboarding-nav already get). */
+@media (max-width: 560px) {
+  .meeting-row { flex-wrap: wrap; }
+}
+
 /* ---------- meeting detail page: a past meeting's transcript, read-only chrome
    aside from renaming speakers ------------------------------------------- */
 .meeting-detail-page { display: flex; flex-direction: column; gap: var(--space-2xs); padding-top: var(--space-md); }
 .meeting-detail-page[hidden] { display: none; }
-.meeting-detail-page .view-header { margin-bottom: 0; }
+/* align-items: flex-start, not the .view-header default of center — the title here
+   is a user-supplied meeting name with no length cap, so it can wrap to several
+   lines at narrow widths; centering would strand the single-line Back button
+   somewhere in the middle of it instead of level with the first line. */
+.meeting-detail-page .view-header { margin-bottom: 0; align-items: flex-start; }
 #detail-reveal { align-self: flex-start; margin: var(--space-2xs) 0 0; }
 
 /* ---------- all meetings page: every recording, newest first ------------- */

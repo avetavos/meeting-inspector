@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { open, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { model } from './models.ts'
 import { wavHeader } from './wav.ts'
@@ -54,12 +54,24 @@ const PREVIEW_SECONDS = 5
  * `firstHeard` exists only on a pending voice — the one meeting/speaker it takes to
  * answer "who is this?" before it has a name (spec item 2). Dropped once a voice is
  * named (see `remember`/`nameVoice`): nothing downstream needs it after that.
+ *
+ * `spans` (MEDIUM 6) freezes the exact segment times this voice was tracked from,
+ * captured once at trackPending() time — `speaker` alone is not enough to dereference
+ * later: shared/meetings.ts's own doc comment on Transcript.speakerVoices says a raw
+ * `SPEAKER_00` key means someone different every diarize pass, and `voices:pending`/
+ * `voices:sample` (index.ts) used to re-read the meeting's *current* transcript and
+ * filter by that key, so after the source meeting was re-diarized they could show the
+ * wrong person's lines/audio for this id. A segment's own t0/t1 never changes across a
+ * diarize pass (only its `speaker` label does — diarizeMeeting reuses `previous.segments`
+ * verbatim into assignSpeakers), so matching by span instead of by key survives that.
+ * Optional so a pending entry written before this field existed still degrades to the
+ * old (occasionally wrong) key-based lookup rather than showing nothing at all.
  */
 type Voice = {
   id: string
   name: string | null
   embedding: number[]
-  firstHeard?: { meetingId: string; speaker: string; at: string }
+  firstHeard?: { meetingId: string; speaker: string; at: string; spans?: { t0: number; t1: number }[] }
 }
 type Extractor = {
   dim: number
@@ -95,25 +107,68 @@ const read = async (): Promise<Voice[]> =>
 const write = async (voices: Voice[]): Promise<void> =>
   writeFile(await voicesFile(), JSON.stringify(voices, null, 2) + '\n', { mode: 0o600 })
 
-/** Raw PCM behind one speaker's own lines, capped at `maxSeconds` — shared by
- * samplesFor (the embedding, always MAX_SECONDS) and sampleWav (a short preview). */
-async function pcmFor(dir: string, transcript: Transcript, speaker: string, maxSeconds: number): Promise<Int16Array | null> {
-  const spans = transcript.segments.filter((s) => s.speaker === speaker)
-  if (spans.length === 0) return null
+// MEDIUM 5: diarizeMeeting is fire-and-forget (index.ts), so two 'after'-mode meetings
+// finishing close together — or a background trackPending() racing meeting:rename's
+// remember() — can interleave read()/read()/write()/write() and drop one side's update,
+// including a name the user just typed. settings.ts's write-then-rename is atomic
+// against a torn file but not against this: two full read-modify-write cycles need to
+// be serialized, not just each individual write. ponytail: one global chain serializes
+// every voices.json mutation regardless of which voice it touches — a per-voice-id lock
+// would let unrelated updates run concurrently, but at this app's single-user scale
+// there is nothing to gain from that complexity.
+let chain: Promise<unknown> = Promise.resolve()
+function locked<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.catch(() => {}).then(fn)
+  chain = run.catch(() => {})
+  return run
+}
+
+/**
+ * Raw PCM behind one speaker's own lines, capped at `maxSeconds` — shared by
+ * samplesFor (the embedding, always MAX_SECONDS) and sampleWav (a short preview).
+ *
+ * MEDIUM 4: ranged reads, not a whole-file `readFile` — a 3-hour meeting's loopback.wav
+ * is ~350MB, and every identify()/trackPending() call in diarizeMeeting's per-speaker
+ * loop used to read the whole thing just to pull out a few seconds. Same idiom
+ * replay.ts already uses for the same reason.
+ *
+ * `spans`, if given, overrides the transcript-derived ones (MEDIUM 6) — a pending
+ * voice's own frozen span times (voices.ts's `Voice.firstHeard.spans`), so a caller can
+ * pull a specific voice's audio without trusting the *current* transcript to still
+ * label the right segments with `speaker`.
+ */
+async function pcmFor(
+  dir: string,
+  transcript: Transcript,
+  speaker: string,
+  maxSeconds: number,
+  spans?: { t0: number; t1: number }[],
+): Promise<Int16Array | null> {
+  const use = spans ?? transcript.segments.filter((s) => s.speaker === speaker)
+  if (use.length === 0) return null
 
   // The mic track is us; everyone else is on the loopback track.
-  const wav = await readFile(join(dir, speaker === 'me' ? 'mic.wav' : 'loopback.wav')).catch(() => null)
-  if (!wav) return null
-  const pcm = new Int16Array(wav.buffer, wav.byteOffset + 44, (wav.length - 44) / 2)
-
-  const out: number[] = []
-  for (const span of spans) {
-    const from = Math.max(0, Math.floor(span.t0 * 16000))
-    const to = Math.min(pcm.length, Math.ceil(span.t1 * 16000))
-    for (let i = from; i < to && out.length < maxSeconds * 16000; i++) out.push(pcm[i]!)
-    if (out.length >= maxSeconds * 16000) break
+  const fh = await open(join(dir, speaker === 'me' ? 'mic.wav' : 'loopback.wav'), 'r').catch(() => null)
+  if (!fh) return null
+  try {
+    const out: number[] = []
+    const cap = maxSeconds * 16000
+    for (const span of use) {
+      if (out.length >= cap) break
+      const fromSample = Math.max(0, Math.floor(span.t0 * 16000))
+      const wantSamples = Math.min(Math.ceil(span.t1 * 16000) - fromSample, cap - out.length)
+      if (wantSamples <= 0) continue
+      const buf = Buffer.alloc(wantSamples * 2)
+      // wav.ts always writes a 44-byte header before the PCM.
+      const { bytesRead } = await fh.read(buf, 0, buf.length, 44 + fromSample * 2).catch(() => ({ bytesRead: 0 }))
+      if (bytesRead === 0) continue
+      const pcm = new Int16Array(buf.buffer, buf.byteOffset, Math.floor(bytesRead / 2))
+      for (let i = 0; i < pcm.length; i++) out.push(pcm[i]!)
+    }
+    return out.length > 0 ? Int16Array.from(out) : null
+  } finally {
+    await fh.close()
   }
-  return out.length > 0 ? Int16Array.from(out) : null
 }
 
 /** Pulls one speaker's own audio out of a meeting, using the times already recorded. */
@@ -132,8 +187,13 @@ async function samplesFor(dir: string, transcript: Transcript, speaker: string):
  * while recording) rather than whisper.ts's toWav, which drags in spawn/whisper-server
  * plumbing this module has nothing to do with. Returns null rather than throwing: a
  * missing/moved meeting folder should read as "no preview", not crash the caller. */
-export async function sampleWav(dir: string, transcript: Transcript, speaker: string): Promise<Uint8Array | null> {
-  const pcm = await pcmFor(dir, transcript, speaker, PREVIEW_SECONDS)
+export async function sampleWav(
+  dir: string,
+  transcript: Transcript,
+  speaker: string,
+  spans?: { t0: number; t1: number }[],
+): Promise<Uint8Array | null> {
+  const pcm = await pcmFor(dir, transcript, speaker, PREVIEW_SECONDS, spans)
   if (!pcm) return null
   const header = wavHeader(pcm.byteLength, 16000)
   const out = new Uint8Array(header.length + pcm.byteLength)
@@ -179,14 +239,18 @@ export async function remember(dir: string, transcript: Transcript, speaker: str
   const embedding = await embed(samples)
   if (!embedding) return null
 
-  const voices = await read()
-  const recognizedId = transcript.speakerVoices?.[speaker]?.voiceId
-  const existing = (recognizedId && voices.find((v) => v.id === recognizedId)) || voices.find((v) => v.name === name)
-  const id = existing?.id ?? randomUUID()
-  const kept = voices.filter((v) => v.id !== id)
-  kept.push({ id, name, embedding: [...embedding] })
-  await write(kept)
-  return id
+  // MEDIUM 5: the read-modify-write below, not the embedding work above, is what a
+  // concurrent trackPending()/forget() can interleave with and lose an update to.
+  return locked(async () => {
+    const voices = await read()
+    const recognizedId = transcript.speakerVoices?.[speaker]?.voiceId
+    const existing = (recognizedId && voices.find((v) => v.id === recognizedId)) || voices.find((v) => v.name === name)
+    const id = existing?.id ?? randomUUID()
+    const kept = voices.filter((v) => v.id !== id)
+    kept.push({ id, name, embedding: [...embedding] })
+    await write(kept)
+    return id
+  })
 }
 
 /** The id and current name of a NAMED voice, or null to leave the speaker unnamed.
@@ -224,25 +288,40 @@ export async function trackPending(dir: string, transcript: Transcript, speaker:
   if (!samples) return null
   const embedding = await embed(samples)
   if (!embedding) return null
+  // MEDIUM 6: frozen now, while `speaker` is still known to mean this voice — a
+  // segment's own t0/t1 survives a later re-diarize pass even though the raw
+  // `speaker` key it's filed under might not (see Voice.firstHeard's own doc comment).
+  const spans = transcript.segments.filter((s) => s.speaker === speaker).map((s) => ({ t0: s.t0, t1: s.t1 }))
 
-  const voices = await read()
-  for (const voice of voices) {
-    if (voice.name === null && cosine(embedding, voice.embedding) >= MATCH_THRESHOLD) return voice.id
-  }
+  return locked(async () => {
+    const voices = await read()
+    for (const voice of voices) {
+      if (voice.name === null && cosine(embedding, voice.embedding) >= MATCH_THRESHOLD) return voice.id
+    }
 
-  const id = randomUUID()
-  voices.push({ id, name: null, embedding: [...embedding], firstHeard: { meetingId, speaker, at: new Date().toISOString() } })
-  await write(voices)
-  return id
+    const id = randomUUID()
+    voices.push({ id, name: null, embedding: [...embedding], firstHeard: { meetingId, speaker, at: new Date().toISOString(), spans } })
+    await write(voices)
+    return id
+  })
 }
 
 /** Every voice waiting to be named (spec item 1's Settings › Speakers list), oldest
- * first-heard first — the order they started waiting on the user. */
-export type PendingVoice = { id: string; meetingId: string; speaker: string; at: string }
+ * first-heard first — the order they started waiting on the user. `spans`, when
+ * present, is how a caller should locate this voice's own lines/audio (MEDIUM 6) —
+ * dereferencing `speaker` against a meeting's *current* transcript can point at the
+ * wrong person if it was re-diarized since this voice was tracked. */
+export type PendingVoice = { id: string; meetingId: string; speaker: string; at: string; spans?: { t0: number; t1: number }[] }
 export async function pendingVoices(): Promise<PendingVoice[]> {
   return (await read())
     .filter((v): v is Voice & { firstHeard: NonNullable<Voice['firstHeard']> } => v.name === null && v.firstHeard !== undefined)
-    .map((v) => ({ id: v.id, meetingId: v.firstHeard.meetingId, speaker: v.firstHeard.speaker, at: v.firstHeard.at }))
+    .map((v) => ({
+      id: v.id,
+      meetingId: v.firstHeard.meetingId,
+      speaker: v.firstHeard.speaker,
+      at: v.firstHeard.at,
+      spans: v.firstHeard.spans,
+    }))
     .sort((a, b) => a.at.localeCompare(b.at))
 }
 
@@ -253,11 +332,13 @@ export async function pendingVoices(): Promise<PendingVoice[]> {
 export async function nameVoice(id: string, name: string): Promise<void> {
   const trimmed = name.trim()
   if (!trimmed) return
-  const voices = await read()
-  const idx = voices.findIndex((v) => v.id === id)
-  if (idx === -1) return
-  voices[idx] = { id, name: trimmed, embedding: voices[idx]!.embedding }
-  await write(voices)
+  await locked(async () => {
+    const voices = await read()
+    const idx = voices.findIndex((v) => v.id === id)
+    if (idx === -1) return
+    voices[idx] = { id, name: trimmed, embedding: voices[idx]!.embedding }
+    await write(voices)
+  })
 }
 
 /**
@@ -270,6 +351,14 @@ export async function nameVoice(id: string, name: string): Promise<void> {
  * Deliberately does not touch disk: called only when handing a transcript to the
  * renderer, never before writeTranscript, so a rename never requires walking and
  * rewriting every transcript that mentions the voice — this is why not.
+ *
+ * HIGH 3: a voice that still exists but is pending (`name: null`) must never resolve
+ * to `rec.name` — that field is only a fallback for a voice that has been forgotten
+ * *entirely* (no longer in voices.json at all), per the doc comment on
+ * Transcript.speakerVoices. A still-pending voice's `rec.name` can be a name inherited
+ * from a completely different person under the same reused speaker key (see
+ * diarize.ts's speakerNames), so trusting it here would be the exact bug MATCH_THRESHOLD
+ * exists to prevent, reached by a path that never consults it.
  */
 export async function resolveSpeakerNames(
   speakers: Record<string, string>,
@@ -280,7 +369,8 @@ export async function resolveSpeakerNames(
   const byId = new Map(voices.map((v) => [v.id, v]))
   const resolved = { ...speakers }
   for (const [speaker, rec] of Object.entries(speakerVoices)) {
-    resolved[speaker] = byId.get(rec.voiceId)?.name ?? rec.name ?? resolved[speaker] ?? speaker
+    const live = byId.get(rec.voiceId)
+    resolved[speaker] = (live ? live.name : rec.name) ?? resolved[speaker] ?? speaker
   }
   return resolved
 }
@@ -291,10 +381,20 @@ export const knownVoices = async (): Promise<string[]> =>
     .map((v) => v.name)
 
 export async function forget(name: string): Promise<void> {
-  await write((await read()).filter((v) => v.name !== name))
+  await locked(async () => {
+    await write((await read()).filter((v) => v.name !== name))
+  })
 }
 
+/** Throws rather than returning `NaN` on a dimension mismatch (LOW 12) — a silent NaN
+ * compares false against MATCH_THRESHOLD forever, indistinguishable from "no match",
+ * which would hide a real bug (an embedding model swap, a corrupt entry) as if it were
+ * ordinary "never seen this voice before" behaviour. Every caller already treats a
+ * thrown error from the embed/identify/trackPending chain as "no match" via its own
+ * `.catch()` (index.ts), so this does not change caller-visible behaviour on the
+ * unreachable-in-practice path — it just stops it from failing silently instead. */
 function cosine(a: Float32Array, b: number[]): number {
+  if (a.length !== b.length) throw new Error(`voices: embedding dimension mismatch (${a.length} vs ${b.length})`)
   let dot = 0
   let na = 0
   let nb = 0

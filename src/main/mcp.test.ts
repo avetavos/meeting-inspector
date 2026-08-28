@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,6 +13,7 @@ let root: string
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), 'mcp-test-'))
+  process.env['VOICES_FILE'] = join(root, 'voices.json')
 
   const sprint = join(root, '2026-08-27-1400-sprint-planning')
   await mkdir(sprint, { recursive: true })
@@ -26,6 +27,9 @@ before(async () => {
       { t0: 19.1, t1: 24.0, speaker: 'me', text: 'เดี๋ยวผมขึ้น staging ให้' },
       { t0: 25.0, t1: 30.0, speaker: 'SPEAKER_00', text: 'อย่าลืม rollback plan' },
     ],
+    // A voice the app tracked and named, at diarize time, as "พี่โจ้" — separate from
+    // `speakers` above, the same way index.ts's diarizeMeeting actually writes both.
+    speakerVoices: { SPEAKER_00: { voiceId: 'v-joe', name: 'พี่โจ้' } },
   })
   const retro = join(root, '2026-08-20-1000-retro')
   await mkdir(retro, { recursive: true })
@@ -36,12 +40,24 @@ before(async () => {
     speakers: { me: 'ผม' },
     segments: [{ t0: 1, t1: 5, speaker: 'me', text: 'sprint ที่แล้วไม่มีปัญหา deploy' }],
   })
+  // The user later renamed "พี่โจ้" to "โจ้" from Settings › Speakers — voices.json
+  // moves on, but the sprint-planning transcript.json above still says "พี่โจ้" verbatim
+  // (writeTranscript is never rewritten by a rename elsewhere — see voices.ts's
+  // resolveSpeakerNames doc comment). Only a live read that resolves through
+  // voices.json picks up the new name.
+  await writeFile(
+    join(root, 'voices.json'),
+    JSON.stringify([{ id: 'v-joe', name: 'โจ้', embedding: [0.1, 0.2] }], null, 2),
+  )
 
   // Port 0 so the suite never fights the running app for 8787.
   server = await startMcp({ token: TOKEN, root, port: 0 })
 })
 
-after(() => server.close())
+after(() => {
+  delete process.env['VOICES_FILE']
+  return server.close()
+})
 
 type Rpc = { status: number; body: { result?: any; error?: any } | null }
 
@@ -112,10 +128,21 @@ test('mcp: list_meetings is newest first', async () => {
   )
 })
 
-test('mcp: get_transcript resolves speakers to the names the user typed', async () => {
+// Previously named "...resolves speakers to the names the user typed", but `who()`
+// (shared/meetings.ts) is a plain `t.speakers[speaker] ?? speaker` lookup and
+// diskStore.transcript() used to hand it the raw transcript straight off disk — the
+// test passed because the fixture's `speakers` already held the typed name, not
+// because anything resolved it. It proved nothing about resolution and would have
+// passed identically whether or not resolveSpeakerNames was wired in at all. Wiring it
+// into diskStore.transcript() (mcp.ts) is what makes a connected assistant see the
+// *current* name after a rename, the same way the app's own UI already does
+// (index.ts's meeting:get/meeting:rename) — this fixture's transcript.json still says
+// "พี่โจ้" (what diarize wrote), but voices.json has since moved on to "โจ้", so a
+// still-passing test after the rename proves the wiring, not just the fixture.
+test('mcp: get_transcript resolves speakers to their current name, not what diarize wrote to disk', async () => {
   const t = JSON.parse((await callTool('get_transcript', { id: '2026-08-27-1400-sprint-planning' })).content[0]!.text)
   assert.equal(t.segments.length, 3)
-  assert.equal(t.segments[0].speakerName, 'พี่โจ้')
+  assert.equal(t.segments[0].speakerName, 'โจ้', 'must reflect the rename, not the stale "พี่โจ้" still on disk')
   assert.equal(t.segments[1].speakerName, 'ผม')
 })
 
@@ -127,7 +154,10 @@ test('mcp: search spans meetings and carries context', async () => {
     ['2026-08-20-1000-retro', '2026-08-27-1400-sprint-planning'],
   )
   const hit = found.hits.find((h: { meetingId: string }) => h.meetingId.endsWith('sprint-planning'))
-  assert.equal(hit.speaker, 'พี่โจ้')
+  // Same live resolution as get_transcript above — search_transcripts also goes
+  // through diskStore.transcript(), so it sees the renamed "โจ้", not the stale
+  // "พี่โจ้" still sitting in transcript.json.
+  assert.equal(hit.speaker, 'โจ้')
   assert.ok(hit.context.some((line: string) => line.includes('rollback')), 'context should include neighbours')
 
   const none = JSON.parse((await callTool('search_transcripts', { query: 'ไม่มีคำนี้แน่นอน' })).content[0]!.text)

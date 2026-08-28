@@ -33,6 +33,7 @@ const en = {
   catSpeakers: 'Speakers',
   catConnections: 'Connections',
   langRowLabel: 'Interface language',
+  languageSaveFailed: (msg: string) => `Could not switch language: ${msg}`,
   mcpRowLabel: 'MCP server',
   micTestRowLabel: 'Microphone test',
   voicesHeading: (n: number) => `Voices I recognise (${n})`,
@@ -280,6 +281,7 @@ const th: typeof en = {
   catSpeakers: 'ผู้พูด',
   catConnections: 'การเชื่อมต่อ',
   langRowLabel: 'ภาษาที่ใช้ในแอป',
+  languageSaveFailed: (msg: string) => `เปลี่ยนภาษาไม่สำเร็จ: ${msg}`,
   mcpRowLabel: 'เซิร์ฟเวอร์ MCP',
   micTestRowLabel: 'ทดสอบไมโครโฟน',
   voicesHeading: (n: number) => `เสียงที่จำได้ (${n} คน)`,
@@ -646,6 +648,9 @@ function showSettingsCategory(cat: SettingsCategory): void {
   // showing it is still open — leaving the Recording category (where its controls
   // live) has to stop it, or it just keeps capturing unseen.
   if (cat !== 'recording') stopMicTest()
+  // Same idea for a playing voice sample (LOW 8) — leaving Speakers without stopping
+  // it left audio playing with no visible player anywhere in the app.
+  if (cat !== 'speakers') stopPendingAudio()
   activeSettingsCategory = cat
   for (const key of SETTINGS_CATEGORIES) {
     settingsPanels[key].hidden = key !== cat
@@ -664,6 +669,14 @@ function openSettings(): void {
 
 function closeSettings(): void {
   stopMicTest()
+  stopPendingAudio()
+  // The secret should not still be on screen next time Settings opens — same as it
+  // not surviving a relaunch, closing the panel closes the reveal too (LOW 6). The
+  // Connections panel is only hidden, not torn down, so flipping the flag alone would
+  // leave the already-revealed DOM sitting there until some unrelated event re-rendered
+  // it — force that re-render now, same call applyLanguage already uses for this.
+  mcpTokenRevealed = false
+  void window.api.mcpState().then(showMcpState)
   showPage(mainView)
 }
 
@@ -875,7 +888,15 @@ function hideOnboarding(): void {
 for (const [code, radio] of Object.entries(onbLangRadios) as [Language, HTMLInputElement][]) {
   radio.onchange = async () => {
     if (!radio.checked) return
-    applyLanguage((await window.api.setLanguage(code)).language)
+    try {
+      applyLanguage((await window.api.setLanguage(code)).language)
+    } catch (err) {
+      // The radio's own checked state already flipped natively on click — put it back
+      // in sync with the language that's actually still active before reporting why.
+      onbLangRadios.en.checked = lang === 'en'
+      onbLangRadios.th.checked = lang === 'th'
+      setWarning({ text: () => t().languageSaveFailed(reason(err)) })
+    }
   }
 }
 
@@ -1496,8 +1517,16 @@ let mcpConnectApp: 'code' | 'desktop' = 'code'
 
 /** The token never sits on screen in plain text by default — masked here, and
  * everywhere else it appears (the per-app snippets below), until explicitly shown.
- * The copy button always copies the real token regardless of reveal state. */
-function mcpTokenField(token: string): HTMLElement {
+ * The copy button always copies the real token regardless of reveal state.
+ *
+ * `mcpTokenRevealed` is the one source of truth for "is the token revealed"; the
+ * reveal button here does not touch its own `code` element directly (that was the
+ * HIGH 1 bug — this field and mcpAppPicker's snippet were two closures each
+ * re-deriving the mask from the flag independently, so toggling one left the other
+ * showing a stale mask). Instead it calls `onToggle`, which re-runs the single
+ * render path (renderMcpConnect) that both this field and the snippet are built
+ * from, so they can never disagree about whether the token is showing. */
+function mcpTokenField(token: string, onToggle: () => void): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'mcp-field'
   const label = document.createElement('span')
@@ -1512,11 +1541,7 @@ function mcpTokenField(token: string): HTMLElement {
   actions.className = 'mcp-code-actions'
   const reveal = document.createElement('button')
   reveal.textContent = mcpTokenRevealed ? t().mcpTokenHide : t().mcpTokenReveal
-  reveal.onclick = () => {
-    mcpTokenRevealed = !mcpTokenRevealed
-    code.textContent = mcpTokenRevealed ? token : TOKEN_MASK
-    reveal.textContent = mcpTokenRevealed ? t().mcpTokenHide : t().mcpTokenReveal
-  }
+  reveal.onclick = onToggle
   actions.append(reveal, copyButton(token))
   row.append(code, actions)
   wrap.append(label, row)
@@ -1619,14 +1644,35 @@ function renderMcpConnect(state: McpState): void {
   if (!ready || !state.url || !state.token) return
   mcpConnectEl.append(
     mcpField(t().mcpUrlLabel, state.url, state.url),
-    mcpTokenField(state.token),
+    mcpTokenField(state.token, () => {
+      mcpTokenRevealed = !mcpTokenRevealed
+      renderMcpConnect(state)
+    }),
     mcpAppPicker(state.url, state.token),
   )
 }
 
+// MEDIUM 3: showMcpState used to stomp portInput unconditionally, so any unrelated
+// re-render (flipping the MCP toggle, switching language) silently threw away a port
+// number the user had typed but not yet saved. `portDirty` tracks "has this input
+// diverged from the last state we synced it from" — set on every keystroke, cleared
+// once the user's edit is actually the thing that produced the new state (portSave).
+// Re-render then only writes portInput.value while it's still in sync with state.
+let portDirty = false
+portInput.oninput = () => {
+  portDirty = true
+}
+
+/** Same "hold the data, not the rendered text" treatment as adHocWarning/queueMsg
+ * above — an ad-hoc mcpStateEl error used to live only as DOM a stray
+ * `replaceChildren()` (from an unrelated toggle or language switch) would erase with
+ * no way back short of retriggering the failure. Held here and re-applied by every
+ * showMcpState call instead. */
+let mcpErrorMsg: string | null = null
+
 function showMcpState(state: McpState): void {
   mcpToggle.checked = state.enabled
-  portInput.value = String(state.requestedPort)
+  if (!portDirty) portInput.value = String(state.requestedPort)
   mcpStateEl.replaceChildren()
   if (state.portMoved && state.port !== null) {
     const moved = document.createElement('div')
@@ -1644,22 +1690,33 @@ function showMcpState(state: McpState): void {
           : t().portTakenUsingAny(state.requestedPort, state.port)
     mcpStateEl.append(moved)
   }
+  renderMcpError()
   renderMcpConnect(state)
 }
 
-/**
- * Renders into a dedicated child node rather than `mcpStateEl.textContent = …`, which
- * would wipe the port-conflict warning — the user would then have no way to get it
- * back short of a relaunch or a language switch.
- */
-function showMcpError(message: string): void {
-  let box = mcpStateEl.querySelector<HTMLElement>('.mcperror')
-  if (!box) {
-    box = document.createElement('div')
-    box.className = 'warn mcperror'
-    mcpStateEl.prepend(box)
+/** The only thing allowed to touch the `.mcperror` box — called after every
+ * `mcpStateEl.replaceChildren()` (showMcpState) as well as whenever the message
+ * itself changes (showMcpError), so the box's presence always matches `mcpErrorMsg`
+ * regardless of which one ran most recently. */
+function renderMcpError(): void {
+  const box = mcpStateEl.querySelector<HTMLElement>('.mcperror')
+  if (!mcpErrorMsg) {
+    box?.remove()
+    return
   }
-  box.textContent = message
+  if (box) {
+    box.textContent = mcpErrorMsg
+    return
+  }
+  const fresh = document.createElement('div')
+  fresh.className = 'warn mcperror'
+  fresh.textContent = mcpErrorMsg
+  mcpStateEl.prepend(fresh)
+}
+
+function showMcpError(message: string): void {
+  mcpErrorMsg = message
+  renderMcpError()
 }
 
 /**
@@ -1705,6 +1762,16 @@ function stopPendingAudio(): void {
   }
 }
 
+/** MEDIUM 4: renderPendingVoices rebuilds every row from scratch on every call —
+ * including from onDiarized/onBatchDone, background IPC pushes that can land at any
+ * moment while this panel is open — and an unconditional `replaceChildren()` was
+ * throwing away whatever anyone had typed but not yet saved in *any* row, not just
+ * the one that triggered the re-render. Same shape as the `adHocWarning`/`queueMsg`
+ * fix above: hold the data outside the DOM instead of trusting the DOM to survive a
+ * rebuild it doesn't know is coming. Keyed by voice id so a rebuild is lossless
+ * regardless of which of the three call sites triggered it. */
+const pendingVoiceDrafts = new Map<string, string>()
+
 /**
  * Voices diarization has clustered but nobody has named yet (spec item 1). Each row
  * lets the user hear the voice before deciding what to call it (spec item 2) — the
@@ -1718,6 +1785,11 @@ async function renderPendingVoices(): Promise<void> {
   const items = await window.api.pendingVoices()
   stopPendingAudio()
   pendingVoicesEl.replaceChildren()
+
+  // Drop drafts for ids that are no longer pending (named, or otherwise gone) so the
+  // map doesn't grow forever.
+  const liveIds = new Set(items.map((i) => i.id))
+  for (const id of pendingVoiceDrafts.keys()) if (!liveIds.has(id)) pendingVoiceDrafts.delete(id)
 
   const heading = document.createElement('div')
   heading.className = 'hint'
@@ -1780,6 +1852,8 @@ async function renderPendingVoices(): Promise<void> {
 
     const input = document.createElement('input')
     input.placeholder = t().pendingNamePlaceholder
+    input.value = pendingVoiceDrafts.get(item.id) ?? ''
+    input.oninput = () => pendingVoiceDrafts.set(item.id, input.value)
 
     const save = document.createElement('button')
     save.textContent = t().pendingSave
@@ -1787,6 +1861,7 @@ async function renderPendingVoices(): Promise<void> {
       const name = input.value.trim()
       if (!name) return
       save.disabled = true
+      pendingVoiceDrafts.delete(item.id)
       await window.api.nameVoice(item.id, name)
       await renderPendingVoices()
       await renderVoices()
@@ -2620,7 +2695,13 @@ portSave.onclick = async () => {
   }
   portSave.disabled = true
   try {
-    showMcpState(await window.api.setMcpPort(port))
+    const state = await window.api.setMcpPort(port)
+    // The save succeeded, so the box's value is now the authoritative one — safe (and
+    // correct) for the next re-render to sync from state again, and whatever error was
+    // showing (most likely portInvalid, from a previous attempt) is now stale.
+    portDirty = false
+    mcpErrorMsg = null
+    showMcpState(state)
   } catch (err) {
     showMcpError(reason(err))
   } finally {
@@ -2714,7 +2795,15 @@ function applyLanguage(l: Language): void {
 for (const [code, radio] of Object.entries(langRadios) as [Language, HTMLInputElement][]) {
   radio.onchange = async () => {
     if (!radio.checked) return
-    applyLanguage((await window.api.setLanguage(code)).language)
+    try {
+      applyLanguage((await window.api.setLanguage(code)).language)
+    } catch (err) {
+      // The radio's own checked state already flipped natively on click — put it back
+      // in sync with the language that's actually still active before reporting why.
+      langRadios.en.checked = lang === 'en'
+      langRadios.th.checked = lang === 'th'
+      setWarning({ text: () => t().languageSaveFailed(reason(err)) })
+    }
   }
 }
 

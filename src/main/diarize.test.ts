@@ -55,3 +55,22 @@ test('speaker names: placeholders follow first appearance, typed names survive',
 test('speaker names: an unattributed segment keeps its own label', () => {
   assert.deepEqual(speakerNames([seg(0, 5)], {}, EN), { me: 'You', them: 'Others' })
 })
+
+test('speaker names (HIGH 3): a key previously tied to a recognised voice does not blindly keep that name', () => {
+  const segments = [seg(0, 5, 'SPEAKER_00')]
+  // Last pass: SPEAKER_00 was recognised as Alice, and speakerVoices recorded that.
+  // This pass reclustered the same raw key onto someone identify() has not yet
+  // checked — the stale name must not be trusted as a placeholder before that check
+  // even runs, or a wrong name can outlive identify() disagreeing with it.
+  const named = speakerNames(segments, { SPEAKER_00: 'Alice' }, EN, { SPEAKER_00: { voiceId: 'v1', name: 'Alice' } })
+  assert.equal(named['SPEAKER_00'], 'Speaker 1', 'must fall back to a neutral placeholder, not the stale name')
+})
+
+test('speaker names: an untracked (manually typed) name is still kept — only voice-tracked keys are distrusted', () => {
+  const segments = [seg(0, 5, 'SPEAKER_00')]
+  // No speakerVoices entry for this key at all (e.g. typed by hand after remember()
+  // itself failed) — nothing this pass can confirm or refute about it, so the
+  // existing "keeps names the user already typed" behaviour must survive.
+  const named = speakerNames(segments, { SPEAKER_00: 'Bob' }, EN)
+  assert.equal(named['SPEAKER_00'], 'Bob')
+})

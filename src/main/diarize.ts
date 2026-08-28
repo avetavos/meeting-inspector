@@ -74,17 +74,33 @@ export function assignSpeakers(
 /** What an unnamed speaker is called, in whichever language the UI is set to. */
 export type SpeakerLabels = { me: string; them: string; speaker: (n: number) => string }
 
-/** Keeps names the user already typed; new speakers get a placeholder worth replacing. */
+/**
+ * Keeps names the user already typed; new speakers get a placeholder worth replacing.
+ *
+ * HIGH 3: `existing[speaker]` is only trustworthy when nothing tied that raw key to a
+ * specific voice last pass. Diarization reclusters from scratch every run, so
+ * `SPEAKER_00` can mean a different person this time — Transcript.speakerVoices' own
+ * doc comment says exactly this, and MATCH_THRESHOLD (voices.ts) exists so identify()
+ * gets the final word on "is this the same voice", not a blind key match. A key
+ * `previousSpeakerVoices` ties to a voice is about to be re-checked by identify()
+ * right after this call (diarizeMeeting, index.ts) — trusting its old name here, before
+ * that check runs, would let a stale name survive identify() disagreeing with it a
+ * moment later. A key with no such entry (a name typed by hand with no voice tracking,
+ * or one identify() has never touched) has nothing this pass can confirm or refute, so
+ * it keeps the old behaviour.
+ */
 export function speakerNames(
   segments: Transcript['segments'],
   existing: Record<string, string>,
   labels: SpeakerLabels,
+  previousSpeakerVoices?: Record<string, unknown>,
 ): Record<string, string> {
   const names: Record<string, string> = { me: existing['me'] ?? labels.me }
   let n = 0
   for (const { speaker } of segments) {
     if (speaker === 'me' || names[speaker]) continue
-    names[speaker] = existing[speaker] ?? (speaker === UNKNOWN ? labels.them : labels.speaker(++n))
+    const trusted = previousSpeakerVoices?.[speaker] === undefined ? existing[speaker] : undefined
+    names[speaker] = trusted ?? (speaker === UNKNOWN ? labels.them : labels.speaker(++n))
   }
   return names
 }

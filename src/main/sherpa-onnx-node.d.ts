@@ -48,7 +48,10 @@ declare module 'sherpa-onnx-node' {
     readonly dim: number
     createStream(): SpeakerEmbeddingStream
     isReady(stream: SpeakerEmbeddingStream): boolean
-    compute(stream: SpeakerEmbeddingStream): Float32Array
+    /** `enableExternalBuffer` defaults to true (a zero-copy, natively-owned result) —
+     * Electron's V8 sandbox rejects that ("External buffers are not allowed"; see
+     * voices.ts's `embed()`), so any caller running inside Electron must pass `false`. */
+    compute(stream: SpeakerEmbeddingStream, enableExternalBuffer?: boolean): Float32Array
   }
 
   const cjs: {

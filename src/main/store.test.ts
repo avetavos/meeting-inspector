@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   createMeetingDir,
+  finishReplayTranscript,
   listMeetings,
   meetingDone,
   micTestLocked,
@@ -41,6 +42,43 @@ test('meetingDone: a pre-existing transcript (no transcribedAt field) with segme
   // has to be inferred from the segments it does have.
   const legacy = { ...base, segments: [{ t0: 0, t1: 1, speaker: 'me', text: 'hi' }] } as Transcript
   assert.equal(meetingDone(legacy), true)
+})
+
+test('meetingDone (HIGH 1): a modern write that withheld transcribedAt on purpose reads as NOT done, even with segments', () => {
+  // Mirrors exactly what finishSessionStop (index.ts) writes for a 'live'/'after' pass
+  // that lost chunks: the successful segments it did get through are kept (pushed live
+  // via onSegments as each chunk succeeded), `language` is always set (Transcript's own
+  // doc comment — written unconditionally on every modern path), and `transcribedAt` is
+  // withheld because transcribeOk was false. Same shape as the "legacy" transcript
+  // above (segments, no transcribedAt) except for `language` — that is the one thing
+  // that must tell them apart, or this reads as falsely "Done" forever.
+  const failedPass: Transcript = {
+    ...base,
+    language: 'th',
+    segments: [{ t0: 0, t1: 1, speaker: 'them', text: 'partial before the chunk that failed' }],
+  }
+  assert.equal(meetingDone(failedPass), false)
+})
+
+test('finishReplayTranscript (HIGH 2): no audio found throws rather than silently wiping an existing transcript', () => {
+  const previous: Transcript = {
+    ...base,
+    language: 'en',
+    transcribedAt: '2026-08-01T09:00:00+07:00',
+    segments: [{ t0: 0, t1: 1, speaker: 'me', text: 'real content from an earlier successful pass' }],
+  }
+  // total === 0: transcribeRecorded found neither track had anything (both WAVs
+  // missing or empty — e.g. deleted to reclaim disk after that earlier pass).
+  assert.throws(() => finishReplayTranscript(previous, [], 'en', 0))
+})
+
+test('finishReplayTranscript: a successful pass stamps transcribedAt and replaces segments/language', () => {
+  const previous: Transcript = { ...base, language: 'th' }
+  const collected = [{ t0: 0, t1: 2, speaker: 'me', text: 'hi' }]
+  const updated = finishReplayTranscript(previous, collected, 'en', 1000)
+  assert.equal(updated.segments, collected)
+  assert.equal(updated.language, 'en')
+  assert.ok(updated.transcribedAt)
 })
 
 test('resolveLanguage: a meeting with its own recorded language uses that, not the fallback', () => {

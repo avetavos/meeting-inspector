@@ -27,6 +27,7 @@ import {
   NOTES_ROOT,
   assertMeetingDir,
   createMeetingDir,
+  finishReplayTranscript,
   listMeetings,
   localIso,
   micTestLocked,
@@ -169,7 +170,11 @@ async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signa
     const turns = await diarize(join(dir, 'loopback.wav'), signal)
     const previous = await readTranscript(dir)
     const segments = assignSpeakers(previous.segments, turns)
-    const named = speakerNames(segments, previous.speakers, await speakerLabels())
+    // HIGH 3: previous.speakerVoices tells speakerNames() which keys not to trust a
+    // stale name from — a key it recognised (named or pending) last pass is about to
+    // be re-checked by identify() below, and a wrong guess in the meantime is worse
+    // than a placeholder (see speakerNames' own doc comment).
+    const named = speakerNames(segments, previous.speakers, await speakerLabels(), previous.speakerVoices)
 
     // A voice the user has named before comes back with its name already on it.
     const withTranscript: Transcript = { ...previous, segments, speakers: named }
@@ -254,26 +259,26 @@ async function fallbackTranscript(id: string, dir: string): Promise<Transcript> 
 
 /**
  * One meeting from the batch queue (spec item 4): transcribes it exactly the way
- * 'after' mode does at session:stop. Only writes transcript.json — with `transcribedAt`
- * set — once the pass finds something to transcribe, so an aborted or failed attempt,
- * or a meeting with no audio in either track (LOW 10 — a WAV missing or emptied out,
- * not silence whisper actually ran over), leaves the meeting reading exactly as "not
- * transcribed yet" instead of falsely "done".
+ * 'after' mode does at session:stop. `finishReplayTranscript` (store.ts) is what
+ * decides whether transcript.json gets written at all — HIGH 2: a meeting whose WAVs
+ * are now missing or empty (e.g. deleted to reclaim disk after an earlier successful
+ * transcription) must not have its existing transcript overwritten with empty
+ * segments, so that case throws instead of returning a value, and this function writes
+ * nothing and rethrows, leaving transcript.json exactly as it was.
  *
  * Deliberately does NOT diarize (unlike the single-recording path at session:stop) —
- * the caller (batch:start) collects `dir` from the returned `hasAudio` flag and
- * diarizes every such meeting itself, in a second pass, only after the whole queue's
- * transcription is done and whisper-server has been released (MEDIUM 4): diarize.ts's
- * ~1GB peak plus voices.ts re-reading each speaker's WAV must never be concurrent with
- * whisper's own 0.8-3.4GB RSS, or the two together blow the RAM budget the settings UI
- * advertises on a 16GB machine.
+ * the caller (batch:start) diarizes every meeting this returns for, in a second pass,
+ * only after the whole queue's transcription is done and whisper-server has been
+ * released (MEDIUM 4): diarize.ts's ~1GB peak plus voices.ts re-reading each speaker's
+ * WAV must never be concurrent with whisper's own 0.8-3.4GB RSS, or the two together
+ * blow the RAM budget the settings UI advertises on a 16GB machine.
  */
 async function transcribeOne(
   wc: WebContents,
   id: string,
   onProgress: (fraction: number) => void,
   signal: AbortSignal,
-): Promise<{ dir: string; hasAudio: boolean }> {
+): Promise<string> {
   const dir = assertMeetingDir(join(NOTES_ROOT, id))
   const previous = await readTranscript(dir).catch(() => fallbackTranscript(id, dir))
   // The meeting's own recorded language wins; only a meeting that predates this field
@@ -288,18 +293,12 @@ async function transcribeOne(
   } finally {
     batchSink = null
   }
-  const updated: Transcript = {
-    ...previous,
-    // writeTranscript (store.ts) sorts by t0 before persisting — no need to do it twice.
-    segments: collected,
-    // Heals a legacy meeting: once resolved (even via the fallback above), the
-    // language is persisted, so a second retroactive pass over the same meeting no
-    // longer needs the fallback at all.
-    language,
-    ...(total > 0 ? { transcribedAt: localIso(new Date()) } : {}),
-  }
-  await writeTranscript(dir, updated)
-  return { dir, hasAudio: total > 0 }
+  // writeTranscript (store.ts) sorts segments by t0 before persisting — no need to do
+  // it twice. Heals a legacy meeting along the way: once `language` is resolved (even
+  // via the fallback above), it is persisted, so a second retroactive pass over the
+  // same meeting no longer needs the fallback at all.
+  await writeTranscript(dir, finishReplayTranscript(previous, collected, language, total))
+  return dir
 }
 
 let downloads: AbortController | null = null
@@ -461,8 +460,12 @@ async function finishSessionStop(
     language: s.language,
     // Only set once an ASR pass has actually run over this meeting AND gotten
     // through every chunk (spec item 2) — 'manual' mode leaves it unset on purpose,
-    // and a failed 'live'/'after' pass now leaves it unset too, both reading as
-    // "not transcribed yet" for the meetings list.
+    // and a failed 'live'/'after' pass now leaves it unset too. Both read as "not
+    // transcribed yet" via meetingDone (store.ts): `language` two lines up is always
+    // set here regardless, which is exactly the signal meetingDone uses to tell this
+    // withheld-on-purpose write apart from a transcript written before either field
+    // existed (segments alone used to read as done either way — the trap this
+    // takeFailures()/transcribeOk plumbing exists to close).
     ...(s.mode !== 'manual' && transcribeOk ? { transcribedAt: localIso(new Date()) } : {}),
   }
   await writeTranscript(s.dir, transcript)
@@ -562,7 +565,15 @@ function registerIpc(): void {
   ipcMain.handle('meeting:rename', async (_e, dir: string, speakers: Record<string, string>) => {
     const guarded = assertMeetingDir(dir)
     const previous = await readTranscript(guarded)
-    const merged = { ...previous.speakers, ...speakers }
+    // LOW 10: today's renderer already falls back to the raw label before sending
+    // (`input.value.trim() || label`), so a blank string never arrives from the app's
+    // own UI — but the IPC handler is the trust boundary, not the renderer, and a
+    // caller sending one directly used to merge it straight into `speakers` (only the
+    // `remember()` loop below skipped it, leaving a blank display name — resolved to
+    // `''` by resolveSpeakerNames/`?? speaker`, since `''` is not nullish). Filtered
+    // out here instead of merged and only guarded against below.
+    const named = Object.fromEntries(Object.entries(speakers).filter(([, name]) => name.trim()))
+    const merged = { ...previous.speakers, ...named }
     // Untouched keys keep whatever they already resolved to — see remember()'s doc
     // comment for why only the id already on `previous.speakerVoices` (not one minted
     // below, mid-loop) decides propagation.
@@ -572,8 +583,8 @@ function registerIpc(): void {
     // the next meeting can fill it in on its own — and, when this speaker was already
     // a voice the app recognised (named or still pending), retarget that same id so
     // every other meeting pointing at it picks up the new name too (spec item 3).
-    for (const [speaker, name] of Object.entries(speakers)) {
-      if (speaker === 'me' || speaker === name || !name.trim()) continue
+    for (const [speaker, name] of Object.entries(named)) {
+      if (speaker === 'me' || speaker === name) continue
       const id = await remember(guarded, { ...previous, speakers: merged }, speaker, name.trim()).catch(() => null)
       if (id) speakerVoices[speaker] = { voiceId: id, name: name.trim() }
     }
@@ -597,7 +608,14 @@ function registerIpc(): void {
     // is safe — but a batch's own requests must not queue behind an unrelated mic-test
     // one either (micTestLocked's doc comment). See releaseWhisper's contract just
     // above for the matching guard.
-    if (micTestLocked(current?.mode ?? null, batchController !== null)) {
+    //
+    // LOW 8: `sessionStarting` is checked here too, same reason mic:test-end (below)
+    // already checks it — session:start hasn't set `current` yet while it's still
+    // awaiting createMeetingDir/WavWriter.open, and micTestLocked's `current?.mode ??
+    // null` alone reads that window as "nothing recording" and would let a mic-test
+    // request spawn (or reuse) whisper-server into what is about to become an
+    // 'after'-mode recording, defeating the exact thing that mode exists for.
+    if (sessionStarting || micTestLocked(current?.mode ?? null, batchController !== null)) {
       throw new Error('mic test ใช้ไม่ได้ระหว่างถอดเสียงอยู่')
     }
     const samples = new Int16Array(pcm)
@@ -634,8 +652,14 @@ function registerIpc(): void {
     return Promise.all(
       items.map(async (p) => {
         const transcript = await readTranscript(assertMeetingDir(join(NOTES_ROOT, p.meetingId))).catch(() => null)
+        // MEDIUM 6: matched by the frozen span times (p.spans), not by `p.speaker`
+        // against this meeting's *current* transcript — if it has been re-diarized
+        // since this voice was tracked, the raw speaker key can now belong to someone
+        // else (same reason diarizeMeeting no longer trusts a stale key for a name —
+        // HIGH 3). A legacy pending entry with no spans (tracked before this field
+        // existed) falls back to the old, occasionally-wrong key match.
         const text = transcript?.segments
-          .filter((s) => s.speaker === p.speaker)
+          .filter((s) => (p.spans ? p.spans.some((sp) => sp.t0 === s.t0 && sp.t1 === s.t1) : s.speaker === p.speaker))
           .map((s) => s.text)
           .join(' ')
         return { id: p.id, meetingId: p.meetingId, meetingTitle: titleOf(p.meetingId), at: p.at, text: text ?? '' }
@@ -652,7 +676,9 @@ function registerIpc(): void {
     if (!pending) return null
     const dir = assertMeetingDir(join(NOTES_ROOT, pending.meetingId))
     const transcript = await readTranscript(dir).catch(() => null)
-    return transcript ? sampleWav(dir, transcript, pending.speaker) : null
+    // MEDIUM 6: `pending.spans`, when present, tells sampleWav exactly which audio to
+    // pull regardless of what `pending.speaker` means in the meeting's transcript today.
+    return transcript ? sampleWav(dir, transcript, pending.speaker, pending.spans) : null
   })
 
   // Every recorded meeting plus its transcription status, for the meetings panel (spec
@@ -717,8 +743,11 @@ function registerIpc(): void {
     void runBatch(
       ids,
       async (id, onProgress, signal) => {
-        const { dir, hasAudio } = await transcribeOne(e.sender, id, onProgress, signal)
-        if (hasAudio) diarizeItems.push({ id, dir })
+        // HIGH 2: transcribeOne throws (and writes nothing) for a meeting with no
+        // audio to find — that surfaces here as a normal per-item failure, same as
+        // any other transcribeOne error, so nothing gets added to diarizeItems for it.
+        const dir = await transcribeOne(e.sender, id, onProgress, signal)
+        diarizeItems.push({ id, dir })
       },
       controller.signal,
       (progress) => {
@@ -901,14 +930,24 @@ app.on('before-quit', async (e) => {
   releaseWhisper()
   void mcp?.close()
 
-  if (current && current.stopping) {
-    // HIGH 1: session:stop is already tearing this meeting down — most likely 'after'
-    // mode's multi-minute offline pass. The old code bailed here with no
-    // preventDefault, so Cmd-Q anywhere in that window quit before writeTranscript
+  if (stopInFlight) {
+    // HIGH 1 (prior round): session:stop is already tearing this meeting down — most
+    // likely 'after' mode's multi-minute offline pass. The old code bailed here with
+    // no preventDefault, so Cmd-Q anywhere in that window quit before writeTranscript
     // ever ran (finishSessionStop's very last step) and the finished ASR work was
     // simply discarded. Abort the pass (stopAbort — so quitting does not have to wait
     // out the whole recording) and then wait for the transcript finishSessionStop
     // still writes either way, partial or not, before actually quitting.
+    //
+    // LOW 9: gated on `stopInFlight`, not `current && current.stopping` — finishSessionStop
+    // sets `current = null` partway through (before its own writeTranscript runs), so
+    // the old `current`-based check stopped matching in that exact window and fell
+    // through to the `!current` branch below with no preventDefault, quitting out from
+    // under the still-running write. `stopInFlight` stays set for the whole call
+    // (cleared only in its own `.finally`, after finishSessionStop's promise settles),
+    // so it covers that window too — `current` and `current.stopping` were always
+    // true together with it anyway (session:stop sets all three synchronously), so
+    // this narrows nothing that used to be caught.
     e.preventDefault()
     stopAbort?.abort()
     await stopInFlight

@@ -129,10 +129,47 @@ export async function walkMeetings(root = NOTES_ROOT): Promise<{ id: string; tra
  * untranscribed forever and be re-run on every batch (spec item 2). `transcribedAt` is
  * the explicit signal; transcripts written before it existed have no way to say so, but
  * they DO have segments if they were ever transcribed, so that reads as done too.
+ *
+ * HIGH 1: that legacy fallback also used to swallow a *modern* write that withheld
+ * transcribedAt on purpose — a 'live'/'after' pass that lost chunks (finishSessionStop,
+ * index.ts) still pushes whatever segments it did get through before giving up, so
+ * `segments.length > 0` alone cannot tell "written before transcribedAt existed" apart
+ * from "written today, and failed". `transcribedAt` and `language` were added in the
+ * same change (git blame both to the same commit) and every write path since sets
+ * `language` unconditionally, transcribedAt or not (Transcript.language's own doc
+ * comment) — so a transcript that has `language` but not `transcribedAt` was written
+ * by code that knows about transcribedAt and chose not to set it, which is never the
+ * legacy case. Only a transcript with neither field at all predates both and gets the
+ * old "trust the segments" treatment.
  */
 export function meetingDone(transcript: Transcript | null): boolean {
   if (!transcript) return false
-  return transcript.transcribedAt !== undefined || transcript.segments.length > 0
+  if (transcript.transcribedAt !== undefined) return true
+  if (transcript.language !== undefined) return false
+  return transcript.segments.length > 0
+}
+
+/**
+ * Builds the Transcript to persist after a retroactive/batch replay pass (transcribeOne,
+ * index.ts) — pulled out of index.ts so the "don't destroy an existing transcript when
+ * the WAVs are gone" rule (HIGH 2) is testable without spawning whisper-server. `total`
+ * is transcribeRecorded's own return value: 0 means neither track had anything to
+ * replay — most likely the WAVs were deleted to reclaim disk after an earlier
+ * successful transcription. Writing `{ ...previous, segments: [] }` in that case used
+ * to still carry `previous.transcribedAt` through the spread, leaving the meeting
+ * "Done" with its real text silently gone. Throwing instead of returning a value means
+ * the caller must not write anything at all — transcript.json stays exactly as it was.
+ */
+export function finishReplayTranscript(
+  previous: Transcript,
+  collected: Transcript['segments'],
+  language: MeetingLanguage,
+  total: number,
+): Transcript {
+  if (total === 0) {
+    throw new Error("no audio found to transcribe — the recording's WAV files are missing or empty")
+  }
+  return { ...previous, segments: collected, language, transcribedAt: localIso(new Date()) }
 }
 
 /**

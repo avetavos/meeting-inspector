@@ -9,6 +9,7 @@ import {
 import { McpServer } from '@modelcontextprotocol/server'
 import { registerTools, safeId, titleOf, type MeetingMeta, type MeetingStore } from '../shared/meetings.ts'
 import { readTranscript, walkMeetings } from './store.ts'
+import { resolveSpeakerNames } from './voices.ts'
 
 /**
  * Streamable HTTP on loopback only — one server every client can reach through a
@@ -23,7 +24,13 @@ function diskStore(root: string): MeetingStore {
   const transcript = async (id: string) => {
     if (!safeId(id)) return null
     // Reuses store.ts's own reader rather than a second readFile+JSON.parse here.
-    return readTranscript(join(root, id)).catch(() => null)
+    const t = await readTranscript(join(root, id)).catch(() => null)
+    if (!t) return null
+    // Resolved the same way index.ts hands a transcript to the renderer (meeting:get,
+    // meeting:rename) — a rename after diarize time used to reach only the app's own
+    // UI; a connected assistant read `speakers` straight off disk and saw whatever
+    // name was current at diarize time, stale the moment the user renamed anyone.
+    return { ...t, speakers: await resolveSpeakerNames(t.speakers, t.speakerVoices) }
   }
 
   return {

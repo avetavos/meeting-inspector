@@ -151,8 +151,17 @@ export async function getSettings(): Promise<Settings> {
   }
 }
 
+// LOW 11: settings:set (index.ts) spreads a renderer-supplied patch straight in — an
+// unknown key (a stale field from a removed setting, or a typo) used to ride along in
+// `next` and get written to disk, where it would sit unread forever and the file would
+// grow without bound. getSettings() already re-validates every KNOWN field on the way
+// back out, so this alone was hygiene rather than a live bug (nothing downstream ever
+// trusted the stray key) — filtering it out here keeps the file itself honest too.
+const KNOWN_KEYS = new Set<string>(Object.keys(DEFAULTS))
+
 export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
-  const next = { ...(await getSettings()), ...patch }
+  const known = Object.fromEntries(Object.entries(patch).filter(([key]) => KNOWN_KEYS.has(key)))
+  const next = { ...(await getSettings()), ...known }
   const file = await settingsFile()
   // Write-then-rename, not a direct write (LOW-MEDIUM 6): `writeFile` truncates the
   // file before writing its new content, so a crash or power loss mid-write left a
