@@ -20,9 +20,11 @@
           <div id="capsule" class="capsule">
             <div class="capsule-top">
               <input id="title" autocomplete="off" />
+              <button id="pause" hidden></button>
               <button id="toggle">Start recording</button>
               <span id="elapsed"></span>
             </div>
+            <div id="paused-note" class="paused-note" hidden></div>
             <div class="meters">
               <div class="meter-channel"><span class="label" id="meter-others-label">Others</span><span class="meter"><i id="m-loopback"></i></span></div>
               <div class="meter-channel"><span class="label" id="meter-us-label">You</span><span class="meter"><i id="m-mic"></i></span></div>
@@ -393,6 +395,16 @@
           <div id="all-meetings-progress" class="hint"></div>
         </div>
       </main>
+      <!-- Recording controls that follow you off the main page. Outside <main> entirely
+           so no page switch can take them with it. -->
+      <div id="mini" class="mini" hidden>
+        <span class="mini-dot" aria-hidden="true"></span>
+        <span id="mini-time" class="mini-time"></span>
+        <span id="mini-title" class="mini-title"></span>
+        <button id="mini-pause"></button>
+        <button id="mini-stop" class="mini-stop"></button>
+        <button id="mini-open" class="mini-open" aria-hidden="true">↗</button>
+      </div>
     </div>
     <script type="module" src="./main.ts"></script>
   </body>

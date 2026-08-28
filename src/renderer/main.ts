@@ -26,6 +26,10 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const en = {
   start: 'Start recording',
   stop: 'End meeting',
+  pause: 'Pause',
+  resume: 'Resume',
+  pausedNote: 'Paused — nothing from now until you resume goes into the recording.',
+  miniOpen: 'Back to the recording',
   meterOthers: 'Others',
   meterUs: 'You',
   settingsSummary: 'Settings',
@@ -382,6 +386,10 @@ const en = {
 const th: typeof en = {
   start: 'เริ่มอัด',
   stop: 'จบประชุม',
+  pause: 'หยุดพัก',
+  resume: 'อัดต่อ',
+  pausedNote: 'พักอยู่ — ตั้งแต่ตอนนี้จนกดอัดต่อ จะไม่ถูกบันทึกลงไฟล์',
+  miniOpen: 'กลับไปหน้าที่กำลังอัด',
   meterOthers: 'คนอื่น',
   meterUs: 'เรา',
   settingsSummary: 'ตั้งค่า',
@@ -836,9 +844,79 @@ const settingsPage = $('settings-page')
  * next to the controls each page owns) are fine here — this function's body only runs
  * once a user interacts with something, long after every const below has initialized.
  */
+/** Which page is on screen. The floating controls exist because leaving this one hides
+ * every control the recording has. */
+let currentPage: HTMLElement = mainView
+
 function showPage(page: HTMLElement): void {
+  currentPage = page
   for (const p of [mainView, settingsPage, onboardingPage, detailPage, allMeetingsPage]) p.hidden = p !== page
+  renderRecordingControls()
 }
+
+const pauseBtn = $<HTMLButtonElement>('pause')
+const pausedNoteEl = $('paused-note')
+const miniEl = $('mini')
+const miniTimeEl = $('mini-time')
+const miniTitleEl = $('mini-title')
+const miniPauseBtn = $<HTMLButtonElement>('mini-pause')
+const miniStopBtn = $<HTMLButtonElement>('mini-stop')
+const miniOpenBtn = $<HTMLButtonElement>('mini-open')
+
+/**
+ * How much audio has actually been recorded, in milliseconds — not how long ago Start
+ * was pressed. Paused time is not in the file, so counting it would make the clock
+ * disagree with the recording it is timing, and with every timestamp in the transcript.
+ * `since` is when the current unpaused run began; null while paused.
+ */
+let recordedMs = 0
+let recordingSince: number | null = null
+const recordedSec = (): number => (recordedMs + (recordingSince === null ? 0 : Date.now() - recordingSince)) / 1000
+
+/**
+ * Everything that has to agree about the recording: the capsule's two buttons, the
+ * paused notice, and the floating bar that carries the same two buttons onto every
+ * other page. One function so they cannot drift apart, called from the page switch, the
+ * clock, and each control's own handler.
+ */
+function renderRecordingControls(): void {
+  const on = recorder !== null
+  const paused = recorder?.isPaused === true
+
+  toggle.textContent = on ? t().stop : t().start
+  pauseBtn.hidden = !on
+  pauseBtn.textContent = paused ? t().resume : t().pause
+  pausedNoteEl.hidden = !paused
+  pausedNoteEl.textContent = t().pausedNote
+
+  // Only where the capsule is not: on the main page every one of these controls is
+  // already on screen, and a second copy of them is just somewhere else to click.
+  miniEl.hidden = !on || currentPage === mainView
+  miniEl.className = `mini ${paused ? 'paused' : 'rec'}`
+  miniPauseBtn.textContent = paused ? t().resume : t().pause
+  miniStopBtn.textContent = t().stop
+  miniOpenBtn.title = t().miniOpen
+  miniTitleEl.textContent = title.value.trim() || title.placeholder
+  miniTimeEl.textContent = fmt(recordedSec())
+}
+
+function setPaused(paused: boolean): void {
+  if (!recorder) return
+  recorder.setPaused(paused)
+  if (paused) {
+    recordedMs += recordingSince === null ? 0 : Date.now() - recordingSince
+    recordingSince = null
+    for (const track of ['loopback', 'mic'] as const) setLevel(track, 0)
+  } else {
+    recordingSince = Date.now()
+  }
+  renderRecordingControls()
+}
+
+pauseBtn.onclick = () => setPaused(recorder?.isPaused !== true)
+miniPauseBtn.onclick = () => setPaused(recorder?.isPaused !== true)
+miniStopBtn.onclick = () => void stop()
+miniOpenBtn.onclick = () => showPage(mainView)
 
 const settingsOpenBtn = $<HTMLButtonElement>('settings-open')
 const settingsOpenLabel = $('settings-open-label')
@@ -2876,9 +2954,14 @@ async function start(): Promise<void> {
     toggle.disabled = false
   }
 
-  const t0 = Date.now()
-  ticker = window.setInterval(() => (elapsed.textContent = fmt((Date.now() - t0) / 1000)), 500)
-  toggle.textContent = t().stop
+  recordedMs = 0
+  recordingSince = Date.now()
+  ticker = window.setInterval(() => {
+    elapsed.textContent = fmt(recordedSec())
+    miniTimeEl.textContent = elapsed.textContent
+  }, 500)
+  elapsed.textContent = fmt(0)
+  renderRecordingControls()
   title.disabled = true
   setWarning(null)
   document.body.classList.add('recording')
@@ -2900,8 +2983,10 @@ async function stop(): Promise<void> {
   const result = await r?.stop()
   document.body.classList.remove('recording')
   toggle.disabled = false
-  toggle.textContent = t().start
   title.disabled = false
+  recordedMs = 0
+  recordingSince = null
+  renderRecordingControls()
   elapsed.textContent = ''
   for (const track of ['loopback', 'mic'] as const) setLevel(track, 0)
   if (!result) {
@@ -3616,7 +3701,8 @@ function applyLanguage(l: Language): void {
   langRadios.th.checked = l === 'th'
 
   syncTitlePlaceholder()
-  toggle.textContent = recorder ? t().stop : t().start
+  // Relabels the capsule's buttons, the paused notice and the floating bar in one go.
+  renderRecordingControls()
   meterLabels.loopback.textContent = t().meterOthers
   meterLabels.mic.textContent = t().meterUs
   settingsOpenLabel.textContent = t().settingsSummary

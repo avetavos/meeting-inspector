@@ -81,10 +81,29 @@ export async function openMicTap(onFrame: (frame: Float32Array) => void): Promis
 }
 
 export class Recorder {
+  /**
+   * While paused, frames are dropped rather than the capture being torn down.
+   *
+   * Nothing reaches the WAV writers, so the recording simply has no such moment in it:
+   * the file is what was actually recorded, joined end to end, and the transcript's
+   * times have no minutes-long gap where nobody spoke. Keeping the streams and the
+   * AudioContext alive is what makes resuming instant — re-acquiring getDisplayMedia
+   * would ask for the screen-share picker again, mid-meeting.
+   */
+  private paused = false
+
   private constructor(
     private readonly ctx: AudioContext,
     private readonly streams: MediaStream[],
   ) {}
+
+  get isPaused(): boolean {
+    return this.paused
+  }
+
+  setPaused(paused: boolean): void {
+    this.paused = paused
+  }
 
   static async start(title: string, events: RecorderEvents): Promise<{ recorder: Recorder; dir: string }> {
     // Echo cancellation stays ON: with speakers it keeps the other side out of mic.wav,
@@ -132,6 +151,10 @@ export class Recorder {
     })
     node.port.onmessage = (e: MessageEvent<Float32Array>) => {
       const frame = e.data
+      // Reported as silence rather than skipped: the meters have to go flat and stay
+      // there, and leaving them frozen at whatever the last frame happened to be reads
+      // as "still listening".
+      if (this.paused) return events.onLevel(track, 0)
       events.onLevel(track, rms(frame))
       const pcm = toInt16(frame)
       void window.api.pcm(track, pcm.buffer as ArrayBuffer)

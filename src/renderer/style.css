@@ -361,6 +361,40 @@ a { color: inherit; -webkit-app-region: no-drag; }
 }
 #toggle:hover:not(:disabled) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 18px -6px rgba(10, 132, 255, 0.7); }
 
+/* Paused: the recording is still open, but nothing is going into it. Said in words as
+   well as by the frozen clock, because a meter sitting at zero also looks like a room
+   that happens to be quiet. */
+.paused-note { margin-top: var(--space-md); font-size: var(--text-secondary); color: var(--accent-rec); }
+.paused-note[hidden] { display: none; }
+#pause { flex: 0 0 auto; padding: var(--space-md) var(--space-2xl); border-radius: var(--radius-pill); }
+#pause[hidden] { display: none; }
+
+/* ---------- the recording controls that follow you off the main page ------- */
+.mini {
+  position: fixed; right: var(--space-4xl); bottom: var(--space-4xl); z-index: 40;
+  display: flex; align-items: center; gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md) var(--space-sm) var(--space-lg);
+  -webkit-app-region: no-drag;
+  border-radius: var(--radius-pill);
+  background: var(--glass-fill-strong);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo), 0 12px 28px -12px var(--shadow-color);
+}
+/* `hidden` alone loses to the `display: flex` above — the browser's own rule for it is
+   only `display: none`, and a class beats it. Every hideable flex element in this file
+   needs the pair; the meters needed it too. */
+.mini[hidden] { display: none; }
+.mini-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-rec); flex: 0 0 auto; }
+.mini.rec .mini-dot { animation: mini-pulse 1.6s ease-in-out infinite; }
+.mini.paused .mini-dot { background: var(--text-dim); }
+@keyframes mini-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.mini-time { font-variant-numeric: tabular-nums; font-size: var(--text-secondary); min-width: 46px; }
+.mini-title { font-size: var(--text-caption); color: var(--text-dim); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini button { padding: var(--space-2xs) var(--space-lg); font-size: var(--text-caption); }
+.mini .mini-stop { color: var(--accent-rec); }
+@media (prefers-reduced-motion: reduce) { .mini.rec .mini-dot { animation: none; } }
+
 /* one instrument, two channels */
 .meters {
   margin-top: var(--space-lg);
