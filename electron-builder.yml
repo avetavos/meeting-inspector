@@ -19,6 +19,11 @@ asarUnpack:
 extraResources:
   - from: resources/whisper
     to: whisper
+  # The Chrome extension that syncs the meeting's mute button with this app's own
+  # microphone. Shipped inside the .app so someone who installed the .dmg has it to
+  # hand — Settings › Connections reveals this folder for "Load unpacked".
+  - from: extension
+    to: extension
 
 mac:
   category: public.app-category.productivity

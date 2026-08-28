@@ -174,6 +174,8 @@ const api = {
   /** The folder every recording and transcript is saved into, and a way to open it —
    * onboarding's files step shows both. */
   notesRoot: (): Promise<string> => ipcRenderer.invoke('notes:root'),
+  /** Opens the folder holding the Chrome extension, ready for "Load unpacked". */
+  openExtensionFolder: (): Promise<string> => ipcRenderer.invoke('extension:open'),
 
   /** This build's own version, as shown in Settings › General. */
   appVersion: (): Promise<string> => ipcRenderer.invoke('update:version'),
@@ -189,6 +191,10 @@ const api = {
   /** Throws the download away and disarms an install that was waiting for quit. */
   discardUpdate: (): Promise<void> => ipcRenderer.invoke('update:discard'),
   cancelUpdate: (): Promise<void> => ipcRenderer.invoke('update:cancel'),
+  /** The browser extension reporting that the meeting's own microphone was toggled.
+   * Only ever arrives while the MCP server is on and something posted to it. */
+  onExternalMic: (fn: (muted: boolean) => void) =>
+    ipcRenderer.on('mic:external', (_e, muted: boolean) => fn(muted)),
   onUpdateProgress: (fn: (progress: UpdateProgress) => void) =>
     ipcRenderer.on('update:progress', (_e, progress: UpdateProgress) => fn(progress)),
   openNotesFolder: (): Promise<string> => ipcRenderer.invoke('notes:open'),

@@ -35,7 +35,10 @@ test('ipc: every channel the preload listens on is sent by main', async () => {
   const main = await read('main/index.ts')
 
   const listened = matches(preload, /ipcRenderer\.on\(\s*'([^']+)'/g)
-  const sent = matches(main, /(?:wc|e\.sender|win\.webContents)\.send\(\s*'([^']+)'/g)
+  // `mainWindow` joins the list because one event — the browser extension's mic report
+  // — arrives over HTTP with no WebContents attached to it, so it is the only sender
+  // that has to reach for the window itself.
+  const sent = matches(main, /(?:wc|e\.sender|win\.webContents|mainWindow\?\.webContents)\.send\(\s*'([^']+)'/g)
 
   assert.ok(listened.size > 0, 'expected the preload to listen for something')
   const orphaned = [...listened].filter((channel) => !sent.has(channel))

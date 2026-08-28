@@ -44,6 +44,10 @@ const en = {
   catConnections: 'Connections',
   langRowLabel: 'Interface language',
   languageSaveFailed: (msg: string) => `Could not switch language: ${msg}`,
+  extLabel: 'Chrome extension — mic sync',
+  extOpen: 'Open the folder',
+  extHint:
+    'Mute yourself in a meeting held in Chrome and this app mutes its own microphone with you. Turn the server above on, open the folder, then in Chrome: Extensions › Developer mode › Load unpacked, and paste the token above into the extension\'s options. Works for Google Meet, Zoom and Teams in a browser tab — a desktop Zoom or Teams cannot be seen from Chrome, so use the microphone button in this app for those.',
   mcpRowLabel: 'MCP server',
   micTestRowLabel: 'Microphone test',
   voicesHeading: (n: number) => `Voices I recognise (${n})`,
@@ -407,6 +411,10 @@ const th: typeof en = {
   catConnections: 'การเชื่อมต่อ',
   langRowLabel: 'ภาษาที่ใช้ในแอป',
   languageSaveFailed: (msg: string) => `เปลี่ยนภาษาไม่สำเร็จ: ${msg}`,
+  extLabel: 'ส่วนขยาย Chrome — ซิงก์ไมค์',
+  extOpen: 'เปิดโฟลเดอร์',
+  extHint:
+    'ปิดไมค์ในที่ประชุมที่เปิดใน Chrome แล้วแอปนี้จะปิดไมค์ของตัวเองตาม เปิดเซิร์ฟเวอร์ด้านบนก่อน แล้วกดเปิดโฟลเดอร์ จากนั้นใน Chrome: Extensions › Developer mode › Load unpacked แล้ววาง token ด้านบนในหน้า options ของส่วนขยาย ใช้ได้กับ Google Meet, Zoom, Teams ที่เปิดในเบราว์เซอร์ — ถ้าใช้ Zoom หรือ Teams แบบแอปเดสก์ท็อป Chrome มองไม่เห็น ให้กดปุ่มไมค์ในแอปนี้เอา',
   mcpRowLabel: 'เซิร์ฟเวอร์ MCP',
   micTestRowLabel: 'ทดสอบไมโครโฟน',
   voicesHeading: (n: number) => `เสียงที่จำได้ (${n} คน)`,
@@ -786,6 +794,11 @@ const micVerdictEl = $('mictest-verdict')
 const micLine = $('mictest-line')
 const micHeard = $('mictest-heard')
 const mcpLabel = $('mcp-label')
+const extLabelEl = $('ext-label')
+const extOpenBtn = $<HTMLButtonElement>('ext-open')
+const extHintEl = $('ext-hint')
+extOpenBtn.onclick = () => void window.api.openExtensionFolder()
+
 const mcpRowLabel = $('mcp-row-label')
 const langRowLabel = $('lang-row-label')
 const meetingsHeadingEl = $('meetings-heading')
@@ -941,6 +954,15 @@ function setMicMuted(muted: boolean): void {
   if (muted) setLevel('mic', 0)
   renderRecordingControls()
 }
+
+/**
+ * The browser extension saw the meeting's own mute button pressed. Applied only while
+ * this app is recording — outside that there is no microphone of ours to mute, and a
+ * meeting in a tab is not this app's business.
+ */
+window.api.onExternalMic((muted) => {
+  if (recorder) setMicMuted(muted)
+})
 
 micMuteBtn.onclick = () => setMicMuted(recorder?.isMicMuted !== true)
 miniMicBtn.onclick = () => setMicMuted(recorder?.isMicMuted !== true)
@@ -3745,6 +3767,9 @@ function applyLanguage(l: Language): void {
   }
   langRowLabel.textContent = t().langRowLabel
   micTestRowLabel.textContent = t().micTestRowLabel
+  extLabelEl.textContent = t().extLabel
+  extOpenBtn.textContent = t().extOpen
+  extHintEl.textContent = t().extHint
   mcpRowLabel.textContent = t().mcpRowLabel
   transcribeModeLabelEl.textContent = t().transcribeModeLabel
   transcribeModeNames.after.textContent = t().transcribeModeAfter

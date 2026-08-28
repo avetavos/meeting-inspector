@@ -85,7 +85,77 @@ function authorized(req: IncomingMessage, token: string): boolean {
   return first !== undefined && sameSecret(first, token)
 }
 
-export async function startMcp(opts: { token: string; root: string; port?: number }): Promise<McpHandle> {
+/**
+ * `POST /mic` — the browser extension telling the app that the microphone was muted or
+ * unmuted in the meeting the user is actually in. Deliberately the only thing it can
+ * do: it carries one boolean, reads nothing back, and lives on the server that already
+ * exists rather than opening a second port for it.
+ *
+ * Its own CORS and auth, separate from the MCP route below, because the caller is
+ * unlike every other caller here. `localhostOriginValidation` rejects
+ * `chrome-extension://…` — correctly, for the archive — so this route allows extension
+ * origins and nothing else, and still requires the same bearer token. Any extension the
+ * user installs could reach this if it knew the token; the token is the guard, exactly
+ * as it is for the transcripts, and what is on the other side of this one is a
+ * microphone toggle rather than a meeting.
+ */
+async function handleMic(
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string,
+  onMic: ((muted: boolean) => void) | undefined,
+): Promise<void> {
+  const origin = req.headers.origin ?? ''
+  const allowed = origin.startsWith('chrome-extension://')
+  if (allowed) {
+    res.setHeader('access-control-allow-origin', origin)
+    res.setHeader('access-control-allow-headers', 'authorization, content-type')
+    res.setHeader('access-control-allow-methods', 'POST, OPTIONS')
+    res.setHeader('vary', 'origin')
+  }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(allowed ? 204 : 403).end()
+    return
+  }
+  // Header only, never the path form `authorized` also accepts: a token in a URL is a
+  // token in a history entry and a log line, and the caller here is a web extension.
+  const header = req.headers.authorization
+  if (!(header?.startsWith('Bearer ') && sameSecret(header.slice(7), token))) {
+    res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'unauthorized' }))
+    return
+  }
+
+  const body = await new Promise<string>((resolve) => {
+    let text = ''
+    // Capped: this endpoint takes one boolean, and an unbounded read on a local socket
+    // is an unbounded allocation.
+    req.on('data', (chunk: Buffer) => {
+      if (text.length < 1024) text += chunk.toString('utf8')
+    })
+    req.on('end', () => resolve(text))
+  })
+  const muted = (() => {
+    try {
+      return (JSON.parse(body) as { muted?: unknown }).muted === true
+    } catch {
+      return null
+    }
+  })()
+  if (muted === null) {
+    res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'expected {"muted": boolean}' }))
+    return
+  }
+  onMic?.(muted)
+  res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, muted }))
+}
+
+export async function startMcp(opts: {
+  token: string
+  root: string
+  port?: number
+  /** Called when the browser extension reports the meeting's own mic being toggled. */
+  onMic?: (muted: boolean) => void
+}): Promise<McpHandle> {
   // Loopback names only. Nothing off this machine is meant to reach the archive, and
   // this also blocks a web page from rebinding DNS onto the port.
   const validateHost = hostHeaderValidation(['localhost', '127.0.0.1', '[::1]'])
@@ -94,7 +164,10 @@ export async function startMcp(opts: { token: string; root: string; port?: numbe
   const validateOrigin = localhostOriginValidation()
 
   const handler: Handler = async (req, res) => {
-    if (!validateHost(req, res) || !validateOrigin(req, res)) return
+    if (!validateHost(req, res)) return
+    // Before the origin check, which this route replaces with one of its own.
+    if ((req.url ?? '/').split('?')[0] === '/mic') return handleMic(req, res, opts.token, opts.onMic)
+    if (!validateOrigin(req, res)) return
     if (!authorized(req, opts.token)) {
       res.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' })
       res.end(JSON.stringify({ error: 'unauthorized' }))

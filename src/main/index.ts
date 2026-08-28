@@ -363,6 +363,13 @@ let downloadedUpdate: string | null = null
 let installOnQuit = false
 
 /**
+ * The app's one window, once it exists. Kept because the extension's mic report arrives
+ * over HTTP with no `WebContents` attached to it — every other event main sends has a
+ * request or a session to send it back through, and this one has neither.
+ */
+let mainWindow: BrowserWindow | null = null
+
+/**
  * The app bundle to replace, or null when there is nothing legitimate to replace.
  * `isPackaged`, not just "is there an .app above the executable": under electron-vite
  * dev/preview there IS one — Electron's own, inside node_modules — and putting a
@@ -403,7 +410,15 @@ async function doRestart(): Promise<void> {
   await mcp?.close()
   mcp = null
   if (!(await getSettings()).mcp) return
-  const handle = await startMcp({ token: await mcpToken(), root: NOTES_ROOT, port: (await getSettings()).mcpPort })
+  const handle = await startMcp({
+    token: await mcpToken(),
+    root: NOTES_ROOT,
+    port: (await getSettings()).mcpPort,
+    // The browser extension's report of the meeting's own mute button. Sent to the
+    // window rather than acted on here: muting is the renderer's — it owns the capture,
+    // and it is also where the button the user might have just pressed lives.
+    onMic: (muted) => mainWindow?.webContents.send('mic:external', muted),
+  })
   // Settings can change while startMcp() was retrying — e.g. the user flipped MCP
   // off during those few hundred ms. Since restarts are serialized, nothing else
   // could have already reassigned `mcp` out from under us, so this check is only
@@ -1186,6 +1201,13 @@ function registerIpc(): void {
     await setSettings({ asrEngine: 'local' })
   })
 
+  /** Reveals the bundled Chrome extension so it can be loaded unpacked. Inside the
+   * .app when packaged (electron-builder's extraResources), in the repo when not. */
+  ipcMain.handle('extension:open', () => {
+    const dir = app.isPackaged ? join(process.resourcesPath, 'extension') : join(app.getAppPath(), 'extension')
+    return shell.openPath(dir)
+  })
+
   ipcMain.handle('notes:root', () => NOTES_ROOT)
   ipcMain.handle('notes:open', async () => {
     await mkdir(NOTES_ROOT, { recursive: true })
@@ -1248,6 +1270,10 @@ app.whenReady().then(() => {
   // Warm the model now so the first chunk is not stuck behind a 3GB load — only worth
   // it in 'live' mode. 'after' mode never touches whisper until a meeting ends, so
   // warming it here would just be the same 3.4GB-for-nothing bug this mode exists to fix.
+  mainWindow = win
+  win.on('closed', () => {
+    mainWindow = null
+  })
   win.webContents.once('did-finish-load', () => {
     void getSettings().then((s) => {
       if (s.transcribeMode === 'live') void transcription(win.webContents).catch(() => {})
