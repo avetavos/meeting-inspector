@@ -276,3 +276,26 @@ test('voices: the Speakers list is one row per person, and renaming onto an exis
   assert.equal(await voices.renameVoices('บิว', '   '), 0)
   assert.equal(await voices.renameVoices('บิว', 'บิว'), 0)
 })
+
+test('voices: an unnamed voice can be thrown away; a named one cannot be, through that door', { skip: skip() }, async () => {
+  // Room noise and hallucinated lines get clustered as people too, and until this there
+  // was no way to say "nobody" — the row could only be cleared by naming it.
+  const id = await voices.trackPending(dir, transcript, 'SPEAKER_01', 'meeting-noise')
+  assert.ok(id)
+  assert.ok((await voices.pendingVoices()).some((p) => p.id === id))
+
+  assert.equal(await voices.discardPending(id!), true)
+  assert.equal((await voices.pendingVoices()).some((p) => p.id === id), false)
+  // Idempotent: a second click on a row that is already gone is not an error.
+  assert.equal(await voices.discardPending(id!), false)
+  assert.equal(await voices.discardPending('never-existed'), false)
+
+  // A named voice is `forget`'s business — dropping every recording under a name is a
+  // much bigger thing than throwing away one unidentified cluster, and must not be
+  // reachable from the row that only knows about the latter.
+  await voices.forget('คุณดิสการ์ด')
+  const named = await voices.remember(dir, transcript, 'SPEAKER_00', 'คุณดิสการ์ด')
+  assert.ok(named)
+  assert.equal(await voices.discardPending(named!), false)
+  assert.ok((await voices.knownVoices()).some((v) => v.name === 'คุณดิสการ์ด'), 'still there')
+})

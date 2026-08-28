@@ -13,6 +13,7 @@ import { mcpToken } from './token.ts'
 import { getSettings, setSettings, validPort, type AsrModel, type Language, type Settings } from './settings.ts'
 import { hasSpeech } from './vad.ts'
 import {
+  discardPending,
   followMeetingRename,
   forget,
   identify,
@@ -680,6 +681,10 @@ function registerIpc(): void {
         return { id: p.id, meetingId: p.meetingId, meetingTitle: titleOf(p.meetingId), at: p.at, text: text ?? '' }
       }),
     )
+  })
+ ipcMain.handle('voices:discard', (_e, id: string) => {
+    if (typeof id !== 'string') throw new Error('voices:discard expects a voice id')
+    return discardPending(id)
   })
   ipcMain.handle('voices:name', (_e, id: string, name: string) => nameVoice(id, name))
   // A few seconds of the pending voice's own audio, so the user can hear who it is

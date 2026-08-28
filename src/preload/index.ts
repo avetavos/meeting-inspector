@@ -121,6 +121,10 @@ const api = {
   endMicTest: (): Promise<void> => ipcRenderer.invoke('mic:test-end'),
 
   knownVoices: (): Promise<KnownVoice[]> => ipcRenderer.invoke('voices:list'),
+  /** Throws away a voice that is still waiting for a name — room noise or a
+   * hallucinated line the diarizer clustered as a person. Only ever an unnamed one;
+   * `forgetVoice` is the named case. */
+  discardVoice: (id: string): Promise<boolean> => ipcRenderer.invoke('voices:discard', id),
   /** Renames every stored voice under `from`, and resolves to how many that was.
    * Renaming onto a name that already exists is how two people get merged into one. */
   renameVoice: (from: string, to: string): Promise<number> => ipcRenderer.invoke('voices:rename', from, to),

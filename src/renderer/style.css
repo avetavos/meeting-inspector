@@ -201,7 +201,7 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 .meetings-action-btn { padding: var(--space-sm) var(--space-xl); font-size: var(--text-secondary); }
 /* Delete is the one control here that cannot be undone, so it does not look like the
    three beside it that can. */
-.meetings-action-btn.danger:not(:disabled) { color: var(--accent-rec); }
+.meetings-action-btn.danger:not(:disabled), #pending-voices button.danger:not(:disabled) { color: var(--accent-rec); }
 /* The row's title, swapped in place for a rename — sized off the row, not its own
    content, so the row does not jump when the edit opens. */
 .meeting-title-edit { flex: 1; min-width: 0; padding: var(--space-3xs) var(--space-sm); font: inherit; }
@@ -396,8 +396,10 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
   margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px solid var(--line-lo);
 }
 #pending-voices .pending-voice:first-of-type { margin-top: var(--space-xs); padding-top: 0; border-top: none; }
-#pending-voices .who { display: flex; gap: var(--space-sm); align-items: center; margin-top: var(--space-xs); }
-#pending-voices .who input { flex: 1; min-width: 0; }
+/* Four controls now (play, name, save, discard) — wrapping instead of squeezing the
+   name box down to nothing at narrow widths. */
+#pending-voices .who { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: center; margin-top: var(--space-xs); }
+#pending-voices .who input { flex: 1; min-width: 8em; }
 #pending-voices button { padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); }
 
 /* recognised-voice badge on a speaker row (spec item 3) — the rename-scope tell */

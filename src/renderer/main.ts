@@ -52,6 +52,8 @@ const en = {
   pendingSaidLabel: 'Said: ',
   pendingNamePlaceholder: 'Name this voice',
   pendingSave: 'Save',
+  pendingDiscard: 'Not a person',
+  pendingDiscardHint: 'Throw this voice away — room noise, or a line invented out of silence, rather than someone to name.',
   pendingPlay: 'Play sample',
   pendingPlaying: 'Playing…',
   pendingNoSample: 'No audio sample available',
@@ -352,6 +354,8 @@ const th: typeof en = {
   pendingSaidLabel: 'พูดว่า: ',
   pendingNamePlaceholder: 'ตั้งชื่อเสียงนี้',
   pendingSave: 'บันทึก',
+  pendingDiscard: 'ไม่ใช่คนพูด',
+  pendingDiscardHint: 'ทิ้งลายเสียงนี้ทิ้ง — เป็นเสียงสภาพแวดล้อมหรือเสียงที่โมเดลคิดขึ้นมาเอง ไม่ใช่คนที่ต้องตั้งชื่อ',
   pendingPlay: 'ฟังตัวอย่างเสียง',
   pendingPlaying: 'กำลังเล่น…',
   pendingNoSample: 'ไม่มีตัวอย่างเสียง',
@@ -2203,7 +2207,21 @@ async function renderPendingVoices(): Promise<void> {
       await renderVoices()
     }
 
-    controls.append(play, input, save)
+    // Sits beside Save because it answers the same question the row is asking ("who is
+    // this?") with the other honest answer: nobody. Without it an unnamed cluster could
+    // only be cleared by naming it, so a burst of room noise stayed on this list for good.
+    const discard = document.createElement('button')
+    discard.textContent = t().pendingDiscard
+    discard.title = t().pendingDiscardHint
+    discard.className = 'danger'
+    discard.onclick = async () => {
+      discard.disabled = true
+      pendingVoiceDrafts.delete(item.id)
+      await window.api.discardVoice(item.id)
+      await renderPendingVoices()
+    }
+
+    controls.append(play, input, save, discard)
     row.append(controls)
     pendingVoicesEl.append(row)
   }

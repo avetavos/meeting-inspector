@@ -441,6 +441,26 @@ export async function renameVoices(from: string, to: string): Promise<number> {
   })
 }
 
+/**
+ * Drops a voice that is still waiting for a name. Diarization clusters whatever sounds
+ * like a person, and sometimes that is a burst of room noise or a line whisper
+ * hallucinated out of silence — there is nobody to name, and until now no way to say so:
+ * the row sat in Settings › Speakers forever, since only naming it made it go away.
+ *
+ * Refuses a voice that HAS a name, deliberately: `forget(name)` is that operation, and
+ * it drops every recording filed under that name at once, which is a different and much
+ * larger thing than throwing away one unidentified cluster.
+ */
+export async function discardPending(id: string): Promise<boolean> {
+  return locked(async () => {
+    const voices = await read()
+    const kept = voices.filter((v) => !(v.id === id && v.name === null))
+    if (kept.length === voices.length) return false
+    await write(kept)
+    return true
+  })
+}
+
 export async function forget(name: string): Promise<void> {
   await locked(async () => {
     await write((await read()).filter((v) => v.name !== name))
