@@ -162,28 +162,6 @@
                 </div>
                 <div id="speaker-split-hint" class="hint settings-hint"></div>
               </div>
-              <div class="settings-card" id="remote-card">
-                <div class="settings-row">
-                  <label class="settings-row-label" id="engine-label" for="asr-engine"></label>
-                  <select id="asr-engine">
-                    <option value="local"></option>
-                    <option value="openrouter"></option>
-                  </select>
-                </div>
-                <div id="engine-hint" class="hint settings-hint"></div>
-                <div id="remote-warning" class="warn remote-warning"></div>
-                <div class="row" id="remote-key-row">
-                  <input id="remote-key" type="password" autocomplete="off" spellcheck="false" />
-                  <button id="remote-connect"></button>
-                  <button id="remote-forget" class="danger" hidden></button>
-                </div>
-                <div id="remote-state" class="hint settings-hint"></div>
-                <div class="settings-row" id="remote-model-row" hidden>
-                  <label class="settings-row-label" id="remote-model-label" for="remote-model"></label>
-                  <select id="remote-model"></select>
-                </div>
-                <div id="remote-price" class="hint settings-hint"></div>
-              </div>
               <div class="settings-card">
                 <h3 class="settings-card-title" id="transcribe-mode-label"></h3>
                 <div class="option-rows" role="radiogroup" aria-labelledby="transcribe-mode-label">
@@ -217,6 +195,35 @@
                 <div id="asr-model-note" class="hint settings-hint"></div>
               </div>
               <div id="models"></div>
+              <!-- Last card in the panel on purpose: everything above it is a setting
+                   that keeps the audio on this machine, and this is the single exception.
+                   Nothing below the toggle exists until the toggle is on, and nothing
+                   below the key exists until the key has been checked. -->
+              <div class="settings-card" id="remote-card">
+                <div class="settings-row">
+                  <label class="settings-row-label" id="remote-label" for="remote-toggle"></label>
+                  <input type="checkbox" id="remote-toggle" class="switch" />
+                </div>
+                <div id="remote-lead" class="hint settings-hint"></div>
+                <div id="remote-open" hidden>
+                  <div id="remote-warning" class="warn remote-warning"></div>
+                  <div class="row" id="remote-key-row">
+                    <input id="remote-key" type="password" autocomplete="off" spellcheck="false" />
+                    <button id="remote-connect"></button>
+                  </div>
+                  <div id="remote-state" class="hint settings-hint"></div>
+                  <div id="remote-connected" hidden>
+                    <div class="settings-row">
+                      <label class="settings-row-label" id="remote-model-label" for="remote-model"></label>
+                      <select id="remote-model"></select>
+                    </div>
+                    <div id="remote-price" class="hint settings-hint"></div>
+                    <div class="row remote-forget-row">
+                      <button id="remote-forget" class="danger"></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </section>
 
             <section class="settings-panel" id="panel-speakers" data-cat="speakers" hidden>

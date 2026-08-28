@@ -222,6 +222,9 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 #remote-card button { flex: 0 0 auto; }
 #remote-card button.danger:not(:disabled) { color: var(--accent-rec); }
 #remote-model { max-width: 60%; }
+/* Right-aligned, away from the controls above it: this is the destructive end of the
+   card, not the next step in it. */
+.remote-forget-row { justify-content: flex-end; }
 
 /* Onboarding's files step: a real path, so it reads as one and can be selected. */
 .onb-files-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-secondary); user-select: text; overflow-wrap: anywhere; }

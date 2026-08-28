@@ -133,13 +133,10 @@ const en = {
   echoLabel: 'Remove the speakers from the mic',
   echoHint:
     'On speakers rather than headphones, the microphone hears the meeting as well, so the far end gets transcribed twice — once under their name and once, a moment later, under You. This drops that second copy. Turn it off on headphones: there is no echo to remove, and all it can do there is take away a line someone genuinely repeated.',
-  engineLabel: 'Transcribe with',
-  engineName: { local: 'This machine (Whisper)', openrouter: 'A model at OpenRouter' } as Record<AsrEngine, string>,
-  engineHint: {
-    local: 'Nothing leaves this machine. Needs 0.8–3.4GB of RAM free for the model, on top of about 1GB while it works out who was speaking.',
-    openrouter:
-      'For machines that cannot spare that much memory. Applies to recorded meetings only — transcribing live always runs here.',
-  } as Record<AsrEngine, string>,
+  remoteLabel: 'Transcribe with a model elsewhere (OpenRouter)',
+  remoteLead:
+    'For machines that cannot spare the 0.8–3.4GB Whisper needs, plus about a gigabyte while it works out who was speaking. Turning this on sends your meeting audio off this machine — read what that means before you do.',
+  remoteOnHint: 'Applies to recorded meetings only. Transcribing live always runs here.',
   // Said in full, in the panel, whenever this engine is selected — not once in a dialog
   // and then never again.
   remoteWarning:
@@ -147,7 +144,7 @@ const en = {
   remoteKeyPlaceholder: 'OpenRouter API key (sk-or-…)',
   remoteConnect: 'Connect',
   remoteConnecting: 'Checking the key…',
-  remoteForget: 'Remove key',
+  remoteForget: 'Remove key and go back to local',
   remoteNoKey: 'A key of your own is needed. Create one at openrouter.ai/keys.',
   remoteConnected: (models: number) => `Key works — ${models} models here accept audio.`,
   remoteCredit: (usd: number) => ` ${usd.toFixed(2)} USD left on it.`,
@@ -466,18 +463,16 @@ const th: typeof en = {
   echoLabel: 'ตัดเสียงลำโพงที่เข้าไมค์',
   echoHint:
     'ถ้าเปิดลำโพงแทนหูฟัง ไมค์จะได้ยินเสียงประชุมไปด้วย ทำให้ประโยคของอีกฝั่งถูกถอดสองครั้ง — ครั้งหนึ่งในชื่อเขา อีกครั้งช้ากว่านิดหน่อยในชื่อ "เรา" ตัวนี้จะตัดอันหลังทิ้ง ถ้าใช้หูฟังให้ปิดไว้ เพราะไม่มีเสียงสะท้อนให้ตัด มีแต่จะเผลอตัดประโยคที่คนพูดซ้ำจริงๆ',
-  engineLabel: 'ถอดเสียงด้วย',
-  engineName: { local: 'เครื่องนี้ (Whisper)', openrouter: 'โมเดลบน OpenRouter' } as Record<AsrEngine, string>,
-  engineHint: {
-    local: 'ไม่มีอะไรออกจากเครื่องนี้ ต้องมีแรมว่างให้โมเดล 0.8–3.4GB บวกอีกราว 1GB ตอนแยกว่าใครพูด',
-    openrouter: 'สำหรับเครื่องที่แรมไม่พอ ใช้กับการถอดไฟล์ที่อัดไว้แล้วเท่านั้น — การถอดสดยังรันในเครื่องเสมอ',
-  } as Record<AsrEngine, string>,
+  remoteLabel: 'ถอดเสียงด้วยโมเดลภายนอก (OpenRouter)',
+  remoteLead:
+    'สำหรับเครื่องที่แรมไม่พอจะรัน Whisper (0.8–3.4GB) บวกอีกราว 1GB ตอนแยกว่าใครพูด เปิดแล้วเสียงประชุมจะถูกส่งออกนอกเครื่อง — อ่านรายละเอียดก่อนเปิด',
+  remoteOnHint: 'ใช้กับไฟล์ที่อัดไว้แล้วเท่านั้น การถอดสดยังรันในเครื่องเสมอ',
   remoteWarning:
     'เสียงประชุมของคุณจะออกจากเครื่องนี้ ทั้งสองแทร็ก — ทั้งเสียงอีกฝั่งและเสียงจากไมค์ของคุณ — จะถูกส่งเป็นท่อนละ ~30 วินาทีไปที่ openrouter.ai แล้วส่งต่อไปยังโมเดลที่คุณเลือกและผู้ให้บริการของโมเดลนั้น เขาจะเก็บอะไรไว้นานแค่ไหนเป็นนโยบายของเขา ไม่ใช่ของแอปนี้ และค่าใช้จ่ายคิดจากคีย์ของคุณเอง นอกจากเสียงแล้วไม่มีอะไรถูกส่งไป ไม่มี transcript ไม่มีชื่อคน ไม่มีไฟล์ ส่วนการอัด การเก็บไฟล์ การจำเสียงคนพูด และ MCP ยังอยู่ในเครื่องนี้ทั้งหมดไม่ว่าจะเลือกแบบไหน',
   remoteKeyPlaceholder: 'OpenRouter API key (sk-or-…)',
   remoteConnect: 'เชื่อมต่อ',
   remoteConnecting: 'กำลังตรวจสอบคีย์…',
-  remoteForget: 'ลบคีย์',
+  remoteForget: 'ลบคีย์และกลับไปถอดในเครื่อง',
   remoteNoKey: 'ต้องใช้คีย์ของคุณเอง สร้างได้ที่ openrouter.ai/keys',
   remoteConnected: (models) => `คีย์ใช้ได้ — มี ${models} โมเดลที่รับเสียงเข้า`,
   remoteCredit: (usd) => ` เหลือเครดิต ${usd.toFixed(2)} USD`,
@@ -717,17 +712,16 @@ const meetingLangHintEl = $('meeting-lang-hint')
 const echoLabelEl = $('echo-label')
 const echoToggle = $<HTMLInputElement>('echo-filter')
 const echoHintEl = $('echo-hint')
-const engineLabelEl = $('engine-label')
-const engineSelect = $<HTMLSelectElement>('asr-engine')
-const engineHintEl = $('engine-hint')
-const remoteCardEl = $('remote-card')
+const remoteLabelEl = $('remote-label')
+const remoteToggle = $<HTMLInputElement>('remote-toggle')
+const remoteLeadEl = $('remote-lead')
+const remoteOpenEl = $('remote-open')
+const remoteConnectedEl = $('remote-connected')
 const remoteWarningEl = $('remote-warning')
-const remoteKeyRow = $('remote-key-row')
 const remoteKeyInput = $<HTMLInputElement>('remote-key')
 const remoteConnectBtn = $<HTMLButtonElement>('remote-connect')
 const remoteForgetBtn = $<HTMLButtonElement>('remote-forget')
 const remoteStateEl = $('remote-state')
-const remoteModelRow = $('remote-model-row')
 const remoteModelLabelEl = $('remote-model-label')
 const remoteModelSelect = $<HTMLSelectElement>('remote-model')
 const remotePriceEl = $('remote-price')
@@ -3470,29 +3464,24 @@ let remoteModels: RemoteModel[] = []
 let remoteStatus: { kind: 'unknown' } | { kind: 'none' } | { kind: 'checking' } | { kind: 'ok'; models: number; usd: number | null; free: boolean } | { kind: 'failed'; message: string } = { kind: 'unknown' }
 
 function renderRemote(): void {
-  const engine = engineSelect.value as AsrEngine
-  engineLabelEl.textContent = t().engineLabel
-  for (const option of engineSelect.options) {
-    option.textContent = t().engineName[option.value as AsrEngine] ?? option.value
-  }
-  engineHintEl.textContent = t().engineHint[engine] ?? ''
+  const on = remoteToggle.checked
+  remoteLabelEl.textContent = t().remoteLabel
+  // The lead sells the feature while it is off and explains the scope while it is on —
+  // one line either way, because the long version below is the one that matters and it
+  // must not be competing with a second paragraph for attention.
+  remoteLeadEl.textContent = on ? t().remoteOnHint : t().remoteLead
+  remoteOpenEl.hidden = !on
+  if (!on) return
 
-  // Everything below the picker only exists for the remote engine — including, and
-  // especially, the warning.
-  const remote = engine === 'openrouter'
-  remoteWarningEl.hidden = !remote
-  remoteWarningEl.textContent = remote ? t().remoteWarning : ''
-  remoteKeyRow.hidden = !remote
-  remoteStateEl.hidden = !remote
-  remotePriceEl.hidden = !remote
-  remoteModelRow.hidden = !remote || remoteModels.length === 0
-  if (!remote) return
-
+  remoteWarningEl.textContent = t().remoteWarning
   remoteKeyInput.placeholder = t().remoteKeyPlaceholder
   remoteConnectBtn.textContent = t().remoteConnect
+  remoteConnectBtn.disabled = remoteStatus.kind === 'checking'
   remoteForgetBtn.textContent = t().remoteForget
-  remoteForgetBtn.hidden = remoteStatus.kind !== 'ok'
   remoteModelLabelEl.textContent = t().remoteModelLabel
+  // The model list and the key's own delete button only exist once the key has proved
+  // it works — before that there is nothing to list and nothing worth deleting.
+  remoteConnectedEl.hidden = remoteStatus.kind !== 'ok'
 
   if (remoteStatus.kind === 'checking') remoteStateEl.textContent = t().remoteConnecting
   else if (remoteStatus.kind === 'failed') remoteStateEl.textContent = t().remoteFailed(remoteStatus.message)
@@ -3550,27 +3539,29 @@ async function loadRemoteModels(connect?: string): Promise<void> {
   if (remoteModelSelect.value) await window.api.setRemoteModel(remoteModelSelect.value)
 }
 
-engineSelect.onchange = async () => {
-  const engine = engineSelect.value as AsrEngine
-  // Asked once, on the way in, on top of the warning that stays on screen — this is the
-  // only setting in the app that changes where the user's audio goes.
+remoteToggle.onchange = async () => {
+  const engine: AsrEngine = remoteToggle.checked ? 'openrouter' : 'local'
+  // Asked once, on the way in, on top of the warning that then stays on screen — this is
+  // the only setting in the app that changes where the user's audio goes.
   if (engine === 'openrouter') {
     const answer = await window.api.ask(t().remoteConfirmTitle, t().remoteConfirmDetail, [
       t().remoteConfirmYes,
       t().deleteCancel,
     ])
     if (answer !== 0) {
-      engineSelect.value = 'local'
+      remoteToggle.checked = false
       return renderRemote()
     }
   }
-  engineSelect.disabled = true
+  remoteToggle.disabled = true
   try {
     await window.api.setAsrEngine(engine)
   } finally {
-    engineSelect.disabled = false
+    remoteToggle.disabled = false
   }
   renderRemote()
+  // Switching off deliberately leaves the key on disk — coming back is a toggle, not a
+  // trip to openrouter.ai for a new one. Only "Remove key" deletes it.
   if (engine === 'openrouter' && (await window.api.hasOpenrouterKey())) await loadRemoteModels()
 }
 
@@ -3592,7 +3583,7 @@ remoteForgetBtn.onclick = async () => {
   await window.api.forgetOpenrouter()
   remoteModels = []
   remoteStatus = { kind: 'none' }
-  engineSelect.value = 'local'
+  remoteToggle.checked = false
   renderRemote()
 }
 
@@ -3649,7 +3640,7 @@ void window.api.getSettings().then((settings) => {
   meetingLangSelect.value = settings.meetingLanguage
   speakerSplitSelect.value = settings.speakerSplit
   echoToggle.checked = settings.echoFilter
-  engineSelect.value = settings.asrEngine
+  remoteToggle.checked = settings.asrEngine === 'openrouter'
   if (settings.asrEngine === 'openrouter') {
     void window.api.hasOpenrouterKey().then((has) => {
       remoteStatus = has ? remoteStatus : { kind: 'none' }
