@@ -42,6 +42,7 @@
                   <button id="meetings-select-all" class="meetings-action-btn"></button>
                   <button id="meetings-select-none" class="meetings-action-btn"></button>
                   <button id="meetings-transcribe" class="meetings-action-btn"></button>
+                  <button id="meetings-delete" class="meetings-action-btn danger"></button>
                   <button id="meetings-stop" class="meetings-action-btn" hidden></button>
                 </div>
               </div>
@@ -209,12 +210,12 @@
             <div id="onboarding-steps" class="onboarding-steps" role="tablist" aria-label="Setup progress"></div>
 
             <div class="onboarding-body">
-              <section class="onboarding-step" id="onb-welcome" data-step="welcome">
+              <section class="onboarding-step" id="onb-welcome" data-step="welcome" hidden>
                 <h1 id="onb-welcome-title"></h1>
                 <p id="onb-welcome-body"></p>
               </section>
 
-              <section class="onboarding-step" id="onb-language" data-step="language" hidden>
+              <section class="onboarding-step" id="onb-language" data-step="language">
                 <h1 id="onb-language-title"></h1>
                 <div class="segmented" role="radiogroup" aria-labelledby="onb-language-title">
                   <label class="segmented-opt">
@@ -277,6 +278,14 @@
                 <div id="onb-transcribe-mode-hint" class="hint"></div>
               </section>
 
+              <section class="onboarding-step" id="onb-files" data-step="files" hidden>
+                <h1 id="onb-files-title"></h1>
+                <p id="onb-files-body"></p>
+                <p id="onb-files-path" class="onb-files-path"></p>
+                <button id="onb-files-open"></button>
+                <p id="onb-files-manage" class="hint"></p>
+              </section>
+
               <section class="onboarding-step" id="onb-finish" data-step="finish" hidden>
                 <h1 id="onb-finish-title"></h1>
                 <p id="onb-finish-body"></p>
@@ -317,6 +326,7 @@
             <button id="all-meetings-select-all" class="meetings-action-btn"></button>
             <button id="all-meetings-select-none" class="meetings-action-btn"></button>
             <button id="all-meetings-transcribe" class="meetings-action-btn"></button>
+            <button id="all-meetings-delete" class="meetings-action-btn danger"></button>
             <button id="all-meetings-stop" class="meetings-action-btn" hidden></button>
           </div>
           <div id="all-meetings-retranscribe-hint" class="hint"></div>

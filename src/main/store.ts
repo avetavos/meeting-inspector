@@ -1,6 +1,6 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import type { MeetingLanguage, Transcript } from '../shared/meetings.ts'
-import { startedAtFromId, titleOf } from '../shared/meetings.ts'
+import { safeId, stampOf, startedAtFromId, titleOf } from '../shared/meetings.ts'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 // Type-only: verbatimModuleSyntax strips this at compile time, so it does not drag
@@ -183,6 +183,71 @@ export function finishReplayTranscript(
  */
 export function resolveLanguage(stored: MeetingLanguage | null | undefined, fallback: MeetingLanguage): MeetingLanguage {
   return stored ?? fallback
+}
+
+/**
+ * Removes a saved meeting's audio, and — unless `keepTranscript` — the meeting itself.
+ *
+ * The two WAVs are almost the whole size of a meeting on disk and nothing reads them
+ * again once it has been transcribed, so "keep the words, drop the audio" is the case
+ * worth having. It is only offered for a meeting that HAS been transcribed: dropping
+ * the audio of one that has not leaves a folder with nothing in it, still listed as a
+ * recording that can never be transcribed, which is why the renderer warns twice and
+ * then deletes the whole thing instead (see index.ts's meeting:delete).
+ *
+ * `force: true` throughout — a WAV already gone (a half-deleted folder, a second click)
+ * is the desired end state, not an error.
+ */
+export async function deleteMeeting(id: string, keepTranscript: boolean, root = NOTES_ROOT): Promise<void> {
+  if (!safeId(id)) throw new Error(`not a meeting: ${id}`)
+  const dir = join(root, id)
+  if (!keepTranscript) {
+    await rm(dir, { recursive: true, force: true })
+    return
+  }
+  for (const track of ['loopback', 'mic']) await rm(join(dir, `${track}.wav`), { force: true })
+}
+
+/**
+ * Renames a saved meeting by moving its folder, and returns the id it now has.
+ *
+ * The title lives in the id (`titleOf`), so a rename has to move the folder for the
+ * name on screen, the name in Finder and the name an MCP client reads to stay the one
+ * name they have always been — rather than adding a second, shadowing title field that
+ * only some of those three would know about, and that a meeting with no transcript.json
+ * yet would have nowhere to live in.
+ *
+ * `rename` is left to arbitrate collisions itself, the way createMeetingDir leans on
+ * `mkdir`: moving a directory onto a real meeting's folder fails with ENOTEMPTY/EEXIST
+ * rather than swallowing it, so a clashing name walks to `-2`, `-3`, … instead. The
+ * timestamp prefix is carried over verbatim (`stampOf`), so the list's order and any
+ * suffix the original id already carried both survive.
+ */
+export async function renameMeeting(id: string, title: string, root = NOTES_ROOT): Promise<string> {
+  if (!safeId(id)) throw new Error(`not a meeting: ${id}`)
+  const stamp = stampOf(id)
+  if (!stamp) throw new Error(`not a renamable meeting: ${id}`)
+  const named = slug(title)
+  const base = named ? `${stamp}-${named}` : stamp
+
+  for (let n = 1; ; n++) {
+    const next = n === 1 ? base : `${base}-${n}`
+    if (next === id) return id
+    const dir = join(root, next)
+    try {
+      await rename(join(root, id), dir)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOTEMPTY' || code === 'EEXIST') continue
+      throw err
+    }
+    // transcript.json and transcript.md both carry the id; writeTranscript regenerates
+    // the markdown from it. Best-effort: a meeting recorded but never transcribed has
+    // no transcript to fix up, and that is not a reason to fail the rename.
+    const transcript = await readTranscript(dir).catch(() => null)
+    if (transcript) await writeTranscript(dir, { ...transcript, id: next })
+    return next
+  }
 }
 
 /**

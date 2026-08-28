@@ -195,6 +195,12 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 .meeting-status.transcribing { color: var(--accent); }
 .wrap-row { flex-wrap: wrap; }
 .meetings-action-btn { padding: var(--space-sm) var(--space-xl); font-size: var(--text-secondary); }
+/* Delete is the one control here that cannot be undone, so it does not look like the
+   three beside it that can. */
+.meetings-action-btn.danger:not(:disabled) { color: var(--accent-rec); }
+/* The row's title, swapped in place for a rename — sized off the row, not its own
+   content, so the row does not jump when the edit opens. */
+.meeting-title-edit { flex: 1; min-width: 0; padding: var(--space-3xs) var(--space-sm); font: inherit; }
 /* The batch controls act on the list below them, so they sit level with its heading
    rather than trailing off the bottom of the card. `.label`'s 60px is for the meter
    channels' aligned column — here the heading just takes the width it needs. */
@@ -202,6 +208,9 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 .meetings-header .label { width: auto; }
 .meetings-header .row { margin-top: 0; justify-content: flex-end; }
 #meetings-view-all { margin-top: var(--space-md); display: block; }
+
+/* Onboarding's files step: a real path, so it reads as one and can be selected. */
+.onb-files-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-secondary); user-select: text; overflow-wrap: anywhere; }
 
 /* Narrow window: the row's five items (checkbox, title, when, duration, two badges)
    don't fit one line — wrap instead of overflowing #content sideways with no

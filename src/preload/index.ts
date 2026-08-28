@@ -128,6 +128,23 @@ const api = {
    * (assertMeetingDir), the same way transcribeOne already does. */
   getTranscript: (id: string): Promise<{ dir: string; transcript: Transcript }> =>
     ipcRenderer.invoke('meeting:get', id),
+  /** The folder every recording and transcript is saved into, and a way to open it —
+   * onboarding's files step shows both. */
+  notesRoot: (): Promise<string> => ipcRenderer.invoke('notes:root'),
+  openNotesFolder: (): Promise<string> => ipcRenderer.invoke('notes:open'),
+  /** Deletes saved meetings. `keepTranscript` drops only the two WAVs and leaves
+   * transcript.json/.md in place — offered only for meetings that HAVE been
+   * transcribed, since for the rest it would leave a folder with nothing in it. */
+  deleteMeetings: (ids: string[], keepTranscript: boolean): Promise<void> =>
+    ipcRenderer.invoke('meeting:delete', ids, keepTranscript),
+  /** Renames a saved meeting, and resolves to the id it now has — the title lives in
+   * the folder name, so a rename moves the folder and the id changes with it. */
+  setMeetingTitle: (id: string, title: string): Promise<string> =>
+    ipcRenderer.invoke('meeting:set-title', id, title),
+  /** A native modal worded from the renderer's own message catalogue. Resolves to the
+   * index of the button pressed; the last button is the cancel/escape one. */
+  ask: (message: string, detail: string, buttons: string[]): Promise<number> =>
+    ipcRenderer.invoke('dialog:ask', { message, detail, buttons }),
   /** Transcribes the given meetings one at a time, in order (spec item 4). Resolves
    * once the queue has started, not once it has finished — onBatchItem/onBatchDone
    * report the rest. */

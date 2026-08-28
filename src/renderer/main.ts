@@ -196,6 +196,24 @@ const en = {
   meetingsSelectNone: 'Clear selection',
   meetingsTranscribe: (n: number) => (n === 0 ? 'Transcribe' : `Transcribe ${n} meeting${n === 1 ? '' : 's'}`),
   meetingsStop: 'Stop',
+  meetingsDelete: (n: number) => (n === 0 ? 'Delete' : `Delete ${n}`),
+  // Two different questions, because two different things are at stake. A meeting that
+  // was never transcribed has nothing but its audio, so deleting it deletes everything
+  // there ever was of it — asked twice, deliberately. A transcribed one keeps its words
+  // either way, so the only real question is whether those go too.
+  deleteUndoneTitle: (n: number) => `Delete ${n} recording${n === 1 ? '' : 's'} that ${n === 1 ? 'was' : 'were'} never transcribed?`,
+  deleteUndoneDetail: 'The audio is all there is of these — nothing has been transcribed from them yet, so this cannot be undone and there will be nothing left to transcribe later.',
+  deleteUndoneConfirmTitle: 'Really delete? The audio has not been transcribed.',
+  deleteUndoneConfirmDetail: 'Last chance: these recordings will be gone for good, and there is no transcript anywhere else.',
+  deleteDoneTitle: (n: number) => `${n} of these ${n === 1 ? 'has' : 'have'} already been transcribed — the transcript will stay.`,
+  deleteDoneDetail: 'Deleting the audio frees most of the disk space and leaves the transcript readable. Delete the transcript as well?',
+  deleteAudioOnly: 'Delete audio only',
+  deleteEverything: 'Delete everything',
+  deleteConfirm: 'Delete',
+  deleteCancel: 'Cancel',
+  deleteFailed: (msg: string) => `Could not delete: ${msg}`,
+  renameFailed: (msg: string) => `Could not rename: ${msg}`,
+  meetingRenameHint: 'Double-click a meeting title to rename it.',
   meetingsProgress: (title: string, index: number, total: number, pct: number) =>
     `Transcribing ${title} (${index}/${total}) — ${pct}%`,
   // The main page only ever shows the 5 most recent (spec item a) — this is the way
@@ -245,6 +263,12 @@ const en = {
   onbPermissionsSkipHint: "You can grant these later — until you do, recording system audio or your microphone will fail, and this app's own warnings on the main screen will tell you which one and send you back to System Settings.",
   onbPermissionsGranted: 'Both permissions are already granted.',
   onbTranscribeModeTitle: 'When should meetings be transcribed?',
+  onbFilesTitle: 'Where your meetings are kept',
+  onbFilesBody:
+    'Every recording and its transcript is written to a folder on this machine — one folder per meeting, holding the audio and the transcript as both JSON and Markdown. Nothing is stored anywhere else.',
+  onbFilesOpen: 'Open folder',
+  onbFilesManage:
+    'Audio is by far the largest part of a meeting. Once one has been transcribed you can delete its audio from the meetings list and keep the transcript, or delete it outright — select the meetings, then Delete.',
   onbFinishTitle: "You're set up",
   onbFinishBody: 'Start a recording any time from the main screen. Everything here can be changed later from Settings.',
   onbBack: 'Back',
@@ -425,6 +449,20 @@ const th: typeof en = {
   meetingsSelectNone: 'ล้างที่เลือก',
   meetingsTranscribe: (n) => (n === 0 ? 'ถอดเสียง' : `ถอดเสียง ${n} การประชุม`),
   meetingsStop: 'หยุด',
+  meetingsDelete: (n) => (n === 0 ? 'ลบ' : `ลบ ${n} รายการ`),
+  deleteUndoneTitle: (n) => `ลบเสียงของ ${n} การประชุมที่ยังไม่ได้ถอด?`,
+  deleteUndoneDetail: 'การประชุมพวกนี้มีแค่ไฟล์เสียง ยังไม่ได้ถอดเป็นข้อความเลย ลบแล้วกู้คืนไม่ได้ และจะไม่เหลืออะไรให้ถอดทีหลัง',
+  deleteUndoneConfirmTitle: 'ลบจริงๆ ใช่ไหม? เสียงนี้ยังไม่ได้ถอด',
+  deleteUndoneConfirmDetail: 'ยืนยันครั้งสุดท้าย — ไฟล์เสียงจะหายถาวร และไม่มี transcript เก็บไว้ที่ไหนอีก',
+  deleteDoneTitle: (n) => `${n} การประชุมถอดเสียงไปแล้ว — ไฟล์ถอดเสียงยังอยู่นะ`,
+  deleteDoneDetail: 'ลบเฉพาะเสียงจะคืนพื้นที่ได้เกือบทั้งหมด และยังอ่าน transcript ได้อยู่ จะลบ transcript ด้วยไหม?',
+  deleteAudioOnly: 'ลบเฉพาะเสียง',
+  deleteEverything: 'ลบทั้งหมด',
+  deleteConfirm: 'ลบ',
+  deleteCancel: 'ยกเลิก',
+  deleteFailed: (msg) => `ลบไม่สำเร็จ: ${msg}`,
+  renameFailed: (msg) => `เปลี่ยนชื่อไม่สำเร็จ: ${msg}`,
+  meetingRenameHint: 'ดับเบิลคลิกที่ชื่อการประชุมเพื่อเปลี่ยนชื่อ',
   meetingsProgress: (title, index, total, pct) => `กำลังถอดเสียง ${title} (${index}/${total}) — ${pct}%`,
   viewAllMeetings: (n) => `ดูทั้งหมด ${n} การประชุม`,
   allMeetingsTitle: 'การประชุมทั้งหมด',
@@ -454,6 +492,12 @@ const th: typeof en = {
   onbPermissionsSkipHint: 'ขอสิทธิ์ทีหลังได้ — แต่ถ้ายังไม่ได้ให้ การอัดเสียงระบบหรือไมโครโฟนจะไม่สำเร็จ และแอปจะแจ้งเตือนที่หน้าแรกพร้อมพาไปที่ System Settings ให้เอง',
   onbPermissionsGranted: 'ได้สิทธิ์ทั้งสองอย่างแล้ว',
   onbTranscribeModeTitle: 'ให้ถอดเสียงตอนไหน',
+  onbFilesTitle: 'ไฟล์การประชุมเก็บอยู่ที่ไหน',
+  onbFilesBody:
+    'ทุกการอัดเสียงและ transcript ถูกเขียนลงโฟลเดอร์บนเครื่องนี้ — หนึ่งโฟลเดอร์ต่อหนึ่งการประชุม ข้างในมีไฟล์เสียงและ transcript ทั้งแบบ JSON และ Markdown ไม่มีอะไรถูกเก็บไว้ที่อื่น',
+  onbFilesOpen: 'เปิดโฟลเดอร์',
+  onbFilesManage:
+    'ไฟล์เสียงกินพื้นที่มากที่สุดในหนึ่งการประชุม พอถอดเสียงเสร็จแล้ว ลบเฉพาะเสียงและเก็บ transcript ไว้ก็ได้ หรือจะลบทั้งหมดก็ได้ — เลือกการประชุมในลิสต์แล้วกดลบ',
   onbFinishTitle: 'ตั้งค่าเสร็จแล้ว',
   onbFinishBody: 'เริ่มอัดเสียงได้ทุกเมื่อจากหน้าแรก ทุกอย่างที่ตั้งไว้ตรงนี้เปลี่ยนทีหลังได้จากหน้าตั้งค่า',
   onbBack: 'กลับ',
@@ -546,6 +590,7 @@ const meetingsListEl = $('meetings-list')
 const meetingsSelectAllBtn = $<HTMLButtonElement>('meetings-select-all')
 const meetingsSelectNoneBtn = $<HTMLButtonElement>('meetings-select-none')
 const meetingsTranscribeBtn = $<HTMLButtonElement>('meetings-transcribe')
+const meetingsDeleteBtn = $<HTMLButtonElement>('meetings-delete')
 const meetingsStopBtn = $<HTMLButtonElement>('meetings-stop')
 const meetingsProgressEl = $('meetings-progress')
 const meetingsRetranscribeHintEl = $('meetings-retranscribe-hint')
@@ -561,6 +606,7 @@ const allMeetingsListEl = $('all-meetings-list')
 const allMeetingsSelectAllBtn = $<HTMLButtonElement>('all-meetings-select-all')
 const allMeetingsSelectNoneBtn = $<HTMLButtonElement>('all-meetings-select-none')
 const allMeetingsTranscribeBtn = $<HTMLButtonElement>('all-meetings-transcribe')
+const allMeetingsDeleteBtn = $<HTMLButtonElement>('all-meetings-delete')
 const allMeetingsStopBtn = $<HTMLButtonElement>('all-meetings-stop')
 const allMeetingsProgressEl = $('all-meetings-progress')
 const allMeetingsRetranscribeHintEl = $('all-meetings-retranscribe-hint')
@@ -703,20 +749,25 @@ document.addEventListener('keydown', (e) => {
  * panel, the permission boxes) rather than building second copies of either.
  */
 type OnboardingStep =
-  | 'welcome'
   | 'language'
+  | 'welcome'
   | 'meetingLanguage'
   | 'model'
   | 'permissions'
   | 'transcribeMode'
+  | 'files'
   | 'finish'
+// Language comes first, before the welcome it is about to be read in: every other step
+// asks a question, and asking any of them in a language the user did not choose is the
+// one thing this wizard cannot recover from on its own.
 const ONBOARDING_STEPS: OnboardingStep[] = [
-  'welcome',
   'language',
+  'welcome',
   'meetingLanguage',
   'model',
   'permissions',
   'transcribeMode',
+  'files',
   'finish',
 ]
 // Only these two can genuinely fail to complete right now (a download the user wants
@@ -736,6 +787,7 @@ const onbSkipBtn = $<HTMLButtonElement>('onb-skip')
 const onbSkipHintEl = $('onb-skip-hint')
 
 const onbStepSections: Record<OnboardingStep, HTMLElement> = {
+  files: $('onb-files'),
   welcome: $('onb-welcome'),
   language: $('onb-language'),
   meetingLanguage: $('onb-meeting-lang'),
@@ -747,6 +799,16 @@ const onbStepSections: Record<OnboardingStep, HTMLElement> = {
 
 const onbWelcomeTitleEl = $('onb-welcome-title')
 const onbWelcomeBodyEl = $('onb-welcome-body')
+
+const onbFilesTitleEl = $('onb-files-title')
+const onbFilesBodyEl = $('onb-files-body')
+const onbFilesPathEl = $('onb-files-path')
+const onbFilesOpenBtn = $<HTMLButtonElement>('onb-files-open')
+const onbFilesManageEl = $('onb-files-manage')
+// Asked for once, not on every render of the step — it is a constant for the life of
+// the app (main's NOTES_ROOT), and the step is re-rendered on every language switch.
+let notesRoot: string | null = null
+onbFilesOpenBtn.onclick = () => void window.api.openNotesFolder()
 
 const onbLanguageTitleEl = $('onb-language-title')
 const onbLangRadios: Record<Language, HTMLInputElement> = {
@@ -857,6 +919,18 @@ function renderOnboardingStep(): void {
   onbTranscribeModeNames.live.textContent = t().transcribeModeLive
   onbTranscribeModeNames.manual.textContent = t().transcribeModeManual
   onbTranscribeModeHintEl.textContent = t().transcribeModeHint[getOnbTranscribeMode()] ?? ''
+
+  onbFilesTitleEl.textContent = t().onbFilesTitle
+  onbFilesBodyEl.textContent = t().onbFilesBody
+  onbFilesOpenBtn.textContent = t().onbFilesOpen
+  onbFilesManageEl.textContent = t().onbFilesManage
+  onbFilesPathEl.textContent = notesRoot ?? ''
+  if (notesRoot === null) {
+    void window.api.notesRoot().then((root) => {
+      notesRoot = root
+      onbFilesPathEl.textContent = root
+    })
+  }
 
   onbFinishTitleEl.textContent = t().onbFinishTitle
   onbFinishBodyEl.textContent = t().onbFinishBody
@@ -2197,6 +2271,7 @@ type MeetingsPanel = {
   selectAllBtn: HTMLButtonElement
   selectNoneBtn: HTMLButtonElement
   transcribeBtn: HTMLButtonElement
+  deleteBtn: HTMLButtonElement
   stopBtn: HTMLButtonElement
   progressEl: HTMLElement
   retranscribeHintEl: HTMLElement
@@ -2212,6 +2287,7 @@ const mainMeetingsPanel: MeetingsPanel = {
   selectAllBtn: meetingsSelectAllBtn,
   selectNoneBtn: meetingsSelectNoneBtn,
   transcribeBtn: meetingsTranscribeBtn,
+  deleteBtn: meetingsDeleteBtn,
   stopBtn: meetingsStopBtn,
   progressEl: meetingsProgressEl,
   retranscribeHintEl: meetingsRetranscribeHintEl,
@@ -2223,6 +2299,7 @@ const allMeetingsPanelState: MeetingsPanel = {
   selectAllBtn: allMeetingsSelectAllBtn,
   selectNoneBtn: allMeetingsSelectNoneBtn,
   transcribeBtn: allMeetingsTranscribeBtn,
+  deleteBtn: allMeetingsDeleteBtn,
   stopBtn: allMeetingsStopBtn,
   progressEl: allMeetingsProgressEl,
   retranscribeHintEl: allMeetingsRetranscribeHintEl,
@@ -2254,6 +2331,41 @@ function fmtMeetingWhen(iso: string): string {
   return d.toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+/**
+ * Swaps a row's title for a text box, in place. Deliberately not a prompt() or a modal:
+ * a rename is a correction to something already on screen, and the row it belongs to is
+ * the clearest place to make it.
+ *
+ * `saved` guards the two ways out that can both fire for one edit — Enter also blurs
+ * the input — so a rename is never sent twice. Escape restores the row without asking
+ * main anything; anything else (Enter, clicking away) commits, and an unchanged or
+ * blank-but-unchanged title is a no-op main will hand straight back (renameMeeting).
+ */
+function startTitleEdit(row: HTMLElement, title: HTMLElement, m: MeetingItem): void {
+  const input = document.createElement('input')
+  input.className = 'meeting-title meeting-title-edit'
+  input.value = m.title
+  let saved = false
+  const commit = (next: string | null): void => {
+    if (saved) return
+    saved = true
+    if (next === null || next.trim() === m.title) void renderMeetings()
+    else void renameMeetingRow(m.id, next)
+  }
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') commit(input.value)
+    else if (e.key === 'Escape') commit(null)
+  }
+  input.onblur = () => commit(input.value)
+  row.replaceChild(input, title)
+  input.focus()
+  input.select()
+}
+
+/** macOS's own default double-click interval. Long enough that a deliberate double
+ * click always beats it, short enough that opening a transcript still feels immediate. */
+const DOUBLE_CLICK_MS = 250
+
 function renderMeetingRowsInto(panel: MeetingsPanel): void {
   panel.statusEls.clear()
   const items = panel.limit === null ? meetingItems : meetingItems.slice(0, panel.limit)
@@ -2279,9 +2391,27 @@ function renderMeetingRowsInto(panel: MeetingsPanel): void {
       const title = document.createElement(openable ? 'button' : 'span')
       title.className = openable ? 'meeting-title meeting-title-open' : 'meeting-title'
       title.textContent = m.title
+      title.title = t().meetingRenameHint
+      // One target, two gestures — single click opens the transcript, double click
+      // renames in place. Opening is held for DOUBLE_CLICK_MS so the second click still
+      // has a row to land on: without the wait the first click swaps the whole page out
+      // from under it, the second lands on the detail page instead, and `dblclick` never
+      // fires at all (confirmed in the built app, not reasoned about). The same trade
+      // Finder makes for click-to-select vs. double-click-to-open. A row that cannot be
+      // opened has no such conflict and renames on the spot.
+      let openTimer: number | undefined
       if (openable) {
         ;(title as HTMLButtonElement).type = 'button'
-        title.onclick = () => void openMeetingDetail(m.id)
+        title.onclick = () => {
+          window.clearTimeout(openTimer)
+          openTimer = window.setTimeout(() => void openMeetingDetail(m.id), DOUBLE_CLICK_MS)
+        }
+      }
+      title.ondblclick = (e) => {
+        e.preventDefault()
+        window.clearTimeout(openTimer)
+        if (batchRunning) return
+        startTitleEdit(row, title, m)
       }
 
       const when = document.createElement('span')
@@ -2403,6 +2533,8 @@ function updateMeetingsActionsFor(panel: MeetingsPanel): void {
   panel.selectNoneBtn.disabled = batchRunning || selectedMeetings.size === 0
   panel.transcribeBtn.disabled = batchRunning || selectedMeetings.size === 0
   panel.transcribeBtn.textContent = t().meetingsTranscribe(selectedMeetings.size)
+  panel.deleteBtn.disabled = batchRunning || selectedMeetings.size === 0
+  panel.deleteBtn.textContent = t().meetingsDelete(selectedMeetings.size)
   panel.stopBtn.hidden = !batchRunning
   // Spec item c: say the cost before the click, not after — how many of what's
   // currently selected are a done meeting being deliberately re-run.
@@ -2462,6 +2594,7 @@ for (const panel of meetingsPanels) {
       updateTranscriptionLocks()
     }
   }
+  panel.deleteBtn.onclick = () => void deleteSelectedMeetings()
   panel.stopBtn.onclick = () => {
     // MEDIUM 5: immediate, honest feedback — diarizing a meeting cannot be interrupted
     // mid-pass (diarize.ts), so without this the button gave no sign it had registered
@@ -2470,6 +2603,75 @@ for (const panel of meetingsPanels) {
     renderMeetingsProgress(t().meetingsStopping)
     void window.api.cancelTranscribeMeetings()
   }
+}
+
+/**
+ * Deleting a recording is the one thing in this app that cannot be undone, so what
+ * gets asked depends on what is actually at stake — and everything is asked BEFORE
+ * anything is deleted, so backing out of the second question does not leave the first
+ * question's meetings already gone.
+ *
+ * A meeting that was never transcribed has nothing but its audio: deleting it deletes
+ * everything there ever was of it, and there is no "keep the transcript" version of
+ * that choice (store.ts's deleteMeeting doc comment) — hence two confirmations and the
+ * whole folder.
+ *
+ * A transcribed one keeps its words either way, so its question is the useful one:
+ * the audio is most of the disk space and nothing reads it again, so is the transcript
+ * going too?
+ */
+async function deleteSelectedMeetings(): Promise<void> {
+  const chosen = meetingItems.filter((m) => selectedMeetings.has(m.id))
+  if (chosen.length === 0) return
+  const undone = chosen.filter((m) => m.status !== 'done')
+  const done = chosen.filter((m) => m.status === 'done')
+
+  if (undone.length > 0) {
+    const first = await window.api.ask(t().deleteUndoneTitle(undone.length), t().deleteUndoneDetail, [t().deleteConfirm, t().deleteCancel])
+    if (first !== 0) return
+    const second = await window.api.ask(t().deleteUndoneConfirmTitle, t().deleteUndoneConfirmDetail, [t().deleteConfirm, t().deleteCancel])
+    if (second !== 0) return
+  }
+
+  let keepTranscripts = false
+  if (done.length > 0) {
+    const answer = await window.api.ask(t().deleteDoneTitle(done.length), t().deleteDoneDetail, [
+      t().deleteAudioOnly,
+      t().deleteEverything,
+      t().deleteCancel,
+    ])
+    if (answer === 2) return
+    keepTranscripts = answer === 0
+  }
+
+  try {
+    // Two calls, because the two groups answered different questions — the untranscribed
+    // ones never had a "keep the transcript" option to choose.
+    if (undone.length > 0) await window.api.deleteMeetings(undone.map((m) => m.id), false)
+    if (done.length > 0) await window.api.deleteMeetings(done.map((m) => m.id), keepTranscripts)
+    selectedMeetings.clear()
+    renderMeetingsProgress('')
+  } catch (err) {
+    renderMeetingsProgress(t().deleteFailed(reason(err)))
+  }
+  await renderMeetings()
+}
+
+/**
+ * Renames a saved meeting in place, from the row itself (double-click its title). The
+ * title lives in the folder name, so main moves the folder and the meeting's id changes
+ * with it — which is why the selection is retargeted at the id that comes back rather
+ * than left pointing at one that no longer exists.
+ */
+async function renameMeetingRow(id: string, title: string): Promise<void> {
+  try {
+    const next = await window.api.setMeetingTitle(id, title)
+    if (next !== id && selectedMeetings.delete(id)) selectedMeetings.add(next)
+    renderMeetingsProgress('')
+  } catch (err) {
+    renderMeetingsProgress(t().renameFailed(reason(err)))
+  }
+  await renderMeetings()
 }
 
 /** Same "text + optional action" shape as the ad-hoc warning box above, for the one

@@ -375,6 +375,23 @@ export async function resolveSpeakerNames(
   return resolved
 }
 
+/**
+ * Follows a meeting that has been renamed. `Voice.firstHeard.meetingId` is a folder
+ * name (store.ts's renameMeeting moves the folder, so the id itself changes), and
+ * index.ts dereferences it back to a directory to pull that voice's audio preview and
+ * its lines — Settings › Speakers would otherwise show a pending voice nobody can hear
+ * or read any more, for no reason the user could see.
+ */
+export async function followMeetingRename(from: string, to: string): Promise<void> {
+  await locked(async () => {
+    const voices = await read()
+    const touched = voices.filter((v) => v.firstHeard?.meetingId === from)
+    if (touched.length === 0) return
+    for (const v of touched) v.firstHeard!.meetingId = to
+    await write(voices)
+  })
+}
+
 export const knownVoices = async (): Promise<string[]> =>
   (await read())
     .filter((v): v is Voice & { name: string } => v.name !== null)

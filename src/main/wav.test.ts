@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, readFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -10,6 +10,8 @@ import {
   meetingId,
   readTranscript,
   slug,
+  deleteMeeting,
+  renameMeeting,
   writeTranscript,
 } from './store.ts'
 import { safeId, titleOf, untitledTitle } from '../shared/meetings.ts'
@@ -138,4 +140,79 @@ test('meetings: an empty id is not a meeting', () => {
   assert.equal(safeId('2026-08-27-1400-sprint-planning'), true)
   assert.equal(safeId('../etc'), false)
   assert.equal(safeId('.hidden'), false)
+})
+
+/** A meeting folder on disk: both WAVs plus, optionally, a transcript. */
+async function fixture(root: string, id: string, transcribed: boolean): Promise<string> {
+  const dir = join(root, id)
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'loopback.wav'), 'audio')
+  await writeFile(join(dir, 'mic.wav'), 'audio')
+  if (transcribed) {
+    await writeTranscript(dir, {
+      id,
+      startedAt: localIso(new Date(2026, 7, 27, 14, 0, 0)),
+      durationSec: 60,
+      speakers: { me: 'You' },
+      segments: [{ t0: 0, t1: 1, speaker: 'me', text: 'hello' }],
+    })
+  }
+  return dir
+}
+
+const exists = (path: string): Promise<boolean> => access(path).then(() => true, () => false)
+
+test('store: renaming a meeting moves the folder, keeps the timestamp, and re-stamps the transcript', async () => {
+  const root = join(tmpdir(), `rename-test-${process.pid}-a`)
+  await fixture(root, '2026-08-27-1400', true)
+
+  const next = await renameMeeting('2026-08-27-1400', 'สรุป sprint', root)
+  assert.equal(next, '2026-08-27-1400-สรุป-sprint', 'the stamp is carried over verbatim; only the title part changes')
+  assert.equal(await exists(join(root, '2026-08-27-1400')), false, 'the old folder must not be left behind')
+  // The id is inside transcript.json (and transcript.md renders from it), so a rename
+  // that only moved the folder would leave the transcript claiming the old name.
+  assert.equal((await readTranscript(join(root, next))).id, next)
+  assert.match(await readFile(join(root, next, 'transcript.md'), 'utf8'), /2026-08-27-1400-สรุป-sprint/)
+
+  // Renaming back to nothing returns to the bare stamp, not a folder called "-".
+  assert.equal(await renameMeeting(next, '   ', root), '2026-08-27-1400')
+})
+
+test('store: a rename onto a name another meeting already holds walks past it instead of swallowing it', async () => {
+  const root = join(tmpdir(), `rename-test-${process.pid}-b`)
+  await fixture(root, '2026-08-27-1400-standup', true)
+  await fixture(root, '2026-08-27-1500', true)
+
+  const next = await renameMeeting('2026-08-27-1500', 'standup', root)
+  assert.equal(next, '2026-08-27-1500-standup', 'a different stamp is not a collision at all')
+
+  // Same stamp, same title — this one genuinely collides, and the meeting already
+  // sitting there must survive untouched.
+  await fixture(root, '2026-08-27-1400-retro', true)
+  const bumped = await renameMeeting('2026-08-27-1400-retro', 'standup', root)
+  assert.equal(bumped, '2026-08-27-1400-standup-2')
+  assert.equal(await exists(join(root, '2026-08-27-1400-standup', 'loopback.wav')), true, 'the meeting that was already there must not have been clobbered')
+
+  // Renaming a meeting to the name it already has is a no-op, not a walk to "-2".
+  assert.equal(await renameMeeting('2026-08-27-1400-standup', 'standup', root), '2026-08-27-1400-standup')
+})
+
+test('store: deleting audio keeps the transcript; deleting the meeting takes the folder', async () => {
+  const root = join(tmpdir(), `delete-test-${process.pid}`)
+  const kept = await fixture(root, '2026-08-27-1400-kept', true)
+  const gone = await fixture(root, '2026-08-27-1500-gone', true)
+
+  await deleteMeeting('2026-08-27-1400-kept', true, root)
+  assert.equal(await exists(join(kept, 'loopback.wav')), false)
+  assert.equal(await exists(join(kept, 'mic.wav')), false)
+  assert.equal(await exists(join(kept, 'transcript.json')), true, 'the whole point of audio-only: the words survive')
+  // Idempotent — a second click, or a half-deleted folder, is the desired end state.
+  await deleteMeeting('2026-08-27-1400-kept', true, root)
+
+  await deleteMeeting('2026-08-27-1500-gone', false, root)
+  assert.equal(await exists(gone), false)
+
+  // An id that could climb out of the notes folder is refused before anything is touched.
+  await assert.rejects(() => deleteMeeting('../../etc', false, root))
+  await assert.rejects(() => renameMeeting('../../etc', 'x', root))
 })

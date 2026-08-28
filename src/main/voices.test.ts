@@ -217,3 +217,22 @@ test('voices: pcmFor honours an explicit `spans` override over the transcript\'s
   // process OOM-killed instead of reporting a failure.
   assert.ok(Buffer.from(bySpans).equals(Buffer.from(bySpeaker)), 'an explicit span must win over the speaker-key-derived one')
 })
+
+test('voices: a renamed meeting takes its pending voices with it (followMeetingRename)', { skip: skip() }, async () => {
+  // A pending voice points at a meeting id, and index.ts turns that back into a folder
+  // to pull the voice's audio — an id left behind by a rename is a voice nobody can
+  // hear any more.
+  const id = await voices.trackPending(dir, transcript, 'SPEAKER_01', '2026-08-27-1400')
+  assert.ok(id)
+  // Not the id just passed in: this fixture's SPEAKER_01 has already been tracked by an
+  // earlier test, and trackPending deliberately keeps the FIRST sighting's meeting.
+  const from = (await voices.pendingVoices()).find((p) => p.id === id)?.meetingId
+  assert.ok(from)
+
+  await voices.followMeetingRename(from!, `${from}-retro`)
+  assert.equal((await voices.pendingVoices()).find((p) => p.id === id)?.meetingId, `${from}-retro`)
+
+  // A rename of some other meeting must leave this one alone.
+  await voices.followMeetingRename('a-meeting-nothing-points-at', 'something-else')
+  assert.equal((await voices.pendingVoices()).find((p) => p.id === id)?.meetingId, `${from}-retro`)
+})

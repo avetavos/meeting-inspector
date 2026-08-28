@@ -1,5 +1,5 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
-import { stat } from 'node:fs/promises'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
+import { mkdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
@@ -13,6 +13,7 @@ import { mcpToken } from './token.ts'
 import { getSettings, setSettings, validPort, type AsrModel, type Language, type Settings } from './settings.ts'
 import { hasSpeech } from './vad.ts'
 import {
+  followMeetingRename,
   forget,
   identify,
   knownVoices,
@@ -27,11 +28,13 @@ import {
   NOTES_ROOT,
   assertMeetingDir,
   createMeetingDir,
+  deleteMeeting,
   finishReplayTranscript,
   listMeetings,
   localIso,
   micTestLocked,
   readTranscript,
+  renameMeeting,
   resolveLanguage,
   transcribeStatus,
   transcriptionBusy,
@@ -713,6 +716,58 @@ function registerIpc(): void {
     }))
   })
 
+  /**
+   * A native modal, worded entirely by the renderer. Deleting a recording is not
+   * undoable, so it asks in a window the user cannot click past or lose behind the app
+   * — but the strings belong with the rest of the UI copy (main has no message
+   * catalogue, and both languages live in the renderer), so this passes them down
+   * rather than growing a second one here. Returns the index of the button pressed;
+   * closing the sheet returns `cancelId`.
+   */
+  ipcMain.handle('dialog:ask', async (e, opts: { message: string; detail?: string; buttons: string[] }) => {
+    const buttons = Array.isArray(opts?.buttons) ? opts.buttons.filter((b) => typeof b === 'string').slice(0, 4) : []
+    if (buttons.length < 2) throw new Error('dialog:ask needs at least two buttons')
+    const window = BrowserWindow.fromWebContents(e.sender)
+    const cancelId = buttons.length - 1
+    const answer = await (window
+      ? dialog.showMessageBox(window, { type: 'warning', message: opts.message, detail: opts.detail, buttons, defaultId: cancelId, cancelId })
+      : dialog.showMessageBox({ type: 'warning', message: opts.message, detail: opts.detail, buttons, defaultId: cancelId, cancelId }))
+    return answer.response
+  })
+
+  /**
+   * Deletes saved meetings — `keepTranscript` leaves transcript.json/.md behind and
+   * drops only the audio (deleteMeeting, store.ts). The renderer is what decides which
+   * of those the user is being offered and warns accordingly; the rules main enforces
+   * here are the ones the renderer cannot be trusted with: nothing gets deleted out
+   * from under a pass that is still reading it.
+   */
+  ipcMain.handle('meeting:delete', async (_e, ids: string[], keepTranscript: boolean) => {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
+      throw new Error('meeting:delete expects a list of meeting ids')
+    }
+    if (transcriptionBusy(current !== null || sessionStarting, batchController !== null)) {
+      throw new Error('ยังถอดเสียงอยู่ — รอให้เสร็จก่อนแล้วค่อยลบ')
+    }
+    for (const id of ids) await deleteMeeting(id, keepTranscript === true)
+  })
+
+  /**
+   * Renames a saved meeting. The title lives in the folder name, so this moves the
+   * folder and the id changes with it (renameMeeting, store.ts) — voices.json holds
+   * meeting ids of its own and is walked over to match (followMeetingRename). Returns
+   * the new id so the renderer can keep any selection pointing at the same meeting.
+   */
+  ipcMain.handle('meeting:set-title', async (_e, id: string, title: string) => {
+    if (typeof id !== 'string' || typeof title !== 'string') throw new Error('meeting:set-title expects an id and a title')
+    if (transcriptionBusy(current !== null || sessionStarting, batchController !== null)) {
+      throw new Error('ยังถอดเสียงอยู่ — รอให้เสร็จก่อนแล้วค่อยเปลี่ยนชื่อ')
+    }
+    const next = await renameMeeting(id, title)
+    if (next !== id) await followMeetingRename(id, next)
+    return next
+  })
+
   // Transcribes the given meetings one at a time, in order (spec item 4). Returns as
   // soon as the queue starts — batch:progress/batch:item/batch:done report the rest —
   // so a long queue never leaves this invoke() hanging.
@@ -888,6 +943,16 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(assertMeetingDir(dir)))
+
+  /** Where every recording and transcript lives — shown (and opened) by onboarding's
+   * files step, so "where did my meeting go?" has an answer before the first one is
+   * recorded. Opened without assertMeetingDir: this IS the root that guard is about,
+   * and it comes from main, not the renderer. */
+  ipcMain.handle('notes:root', () => NOTES_ROOT)
+  ipcMain.handle('notes:open', async () => {
+    await mkdir(NOTES_ROOT, { recursive: true })
+    return shell.openPath(NOTES_ROOT)
+  })
 }
 
 app.whenReady().then(() => {

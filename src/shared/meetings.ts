@@ -95,6 +95,16 @@ export const titleOf = (id: string): string => {
   return title ?? `${day}-${month}-${year} ${hour}:${minute}`
 }
 
+/** The `<date>-<time>` an id opens with, without whatever title follows it — null for
+ * anything that is not a stamped meeting id. Renaming a meeting keeps this verbatim
+ * rather than rebuilding it from a clock (store.ts's renameMeeting): it is what the
+ * meetings list sorts on, and it may carry a collision suffix createMeetingDir had to
+ * add, neither of which a rename has any business changing. */
+export const stampOf = (id: string): string | null => {
+  const s = STAMPED.exec(id)
+  return s ? `${s[1]}-${s[2]}-${s[3]}-${s[4]}${s[5]}` : null
+}
+
 /**
  * What an untitled meeting started now would end up called — the composer offers it as
  * the title field's placeholder, so "leave this blank" has a visible answer. Routed
