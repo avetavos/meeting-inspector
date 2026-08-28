@@ -1,6 +1,6 @@
 {
   "name": "meeting-inspector",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": true,
   "description": "Offline meeting transcription for macOS",
   "author": "Aveta Vos",

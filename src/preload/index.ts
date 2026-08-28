@@ -156,9 +156,15 @@ const api = {
   appVersion: (): Promise<string> => ipcRenderer.invoke('update:version'),
   /** The latest release if it is newer than this build, else null. */
   checkForUpdate: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:check'),
-  /** Downloads that release and replaces this app with it, then relaunches — so this
-   * call resolving is not the normal outcome; the app quitting is. */
-  installUpdate: (info: UpdateInfo): Promise<void> => ipcRenderer.invoke('update:install', info),
+  /** Downloads that release and stops there. Installing means closing the app, so it
+   * is a separate, deliberate step (applyUpdate). */
+  downloadUpdate: (info: UpdateInfo): Promise<void> => ipcRenderer.invoke('update:download', info),
+  /** Puts the downloaded release in place. 'now' replaces the app and restarts it —
+   * so this resolving is not the normal outcome, the app quitting is. 'quit' leaves it
+   * to happen the next time the app is closed. */
+  applyUpdate: (when: 'now' | 'quit'): Promise<void> => ipcRenderer.invoke('update:apply', when),
+  /** Throws the download away and disarms an install that was waiting for quit. */
+  discardUpdate: (): Promise<void> => ipcRenderer.invoke('update:discard'),
   cancelUpdate: (): Promise<void> => ipcRenderer.invoke('update:cancel'),
   onUpdateProgress: (fn: (progress: UpdateProgress) => void) =>
     ipcRenderer.on('update:progress', (_e, progress: UpdateProgress) => fn(progress)),

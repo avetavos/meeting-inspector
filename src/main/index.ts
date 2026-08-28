@@ -1,6 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
-import { mkdir, stat } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { mkdir, rm, stat } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
 import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
@@ -44,7 +44,7 @@ import {
   writeTranscript,
   type Transcript,
 } from './store.ts'
-import { bundlePathOf, downloadUpdate, installUpdate, latestUpdate, type UpdateInfo } from './update.ts'
+import { bundlePathOf, clearUpdateLeftovers, downloadUpdate, installUpdate, latestUpdate, type UpdateInfo } from './update.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
 
@@ -316,6 +316,25 @@ let downloads: AbortController | null = null
 /** One update at a time, and cancellable while the download is still running — the
  * install itself is a few seconds of file moves with nothing worth interrupting. */
 let updating: AbortController | null = null
+/** Path of a .dmg already downloaded and waiting to be put in place — either right
+ * away, or at quit (installOnQuit). Kept in main rather than handed back to the
+ * renderer: it is a path on disk that only main is allowed to act on. */
+let downloadedUpdate: string | null = null
+let installOnQuit = false
+
+/**
+ * The app bundle to replace, or null when there is nothing legitimate to replace.
+ * `isPackaged`, not just "is there an .app above the executable": under electron-vite
+ * dev/preview there IS one — Electron's own, inside node_modules — and putting a
+ * Meeting Inspector build there would wreck the dev install.
+ */
+const updateBundle = (): string | null => (app.isPackaged ? bundlePathOf(app.getPath('exe')) : null)
+
+async function wipeDownloadedUpdate(): Promise<void> {
+  const dmg = downloadedUpdate
+  downloadedUpdate = null
+  if (dmg) await rm(dirname(dmg), { recursive: true, force: true }).catch(() => {})
+}
 
 // The meetings-list batch queue (spec item 4). `batchFailed` is runtime-only — a
 // restart forgets it, which is fine: the meeting really is still untranscribed, so it
@@ -973,34 +992,62 @@ function registerIpc(): void {
   ipcMain.handle('update:version', () => app.getVersion())
   ipcMain.handle('update:check', () => latestUpdate(app.getVersion()))
   /**
-   * Downloads and installs in one call, reporting progress as it goes, then relaunches.
-   * One call rather than two because there is nothing useful the user can do with a
-   * downloaded .dmg they did not ask for — and leaving one on disk between the two
-   * halves would be a stale version waiting to be installed by mistake.
-   *
-   * `app.relaunch()` re-execs the same path the running app is at, which is exactly the
-   * path just replaced, so it comes back as the new version. `quit` is what actually
-   * ends this process; without it relaunch only arms the restart.
+   * Downloads the release, reporting progress, and stops there. Installing is a second,
+   * separate call — replacing the app means closing it, and that is the user's decision
+   * to make once the waiting is over, not something to spring on them when a progress
+   * bar reaches the end.
    */
-  ipcMain.handle('update:install', async (e, info: UpdateInfo) => {
-    if (updating) throw new Error('an update is already running')
-    // `isPackaged`, not just "is there an .app above the executable": under
-    // electron-vite dev/preview there IS one — Electron's own, inside node_modules —
-    // and replacing that with a Meeting Inspector build would wreck the dev install.
-    const bundle = app.isPackaged ? bundlePathOf(app.getPath('exe')) : null
-    if (!bundle) throw new Error('อัปเดตในแอปได้เฉพาะตัวที่ติดตั้งแล้ว — ตัวที่รันจากซอร์สให้ git pull เอา')
+  ipcMain.handle('update:download', async (e, info: UpdateInfo) => {
+    if (updating) throw new Error('an update is already downloading')
+    if (!updateBundle()) throw new Error('อัปเดตในแอปได้เฉพาะตัวที่ติดตั้งแล้ว — ตัวที่รันจากซอร์สให้ git pull เอา')
     if (transcriptionBusy(current !== null || sessionStarting, batchController !== null)) {
       throw new Error('ยังถอดเสียงอยู่ — รอให้เสร็จก่อนแล้วค่อยอัปเดต')
     }
     updating = new AbortController()
     try {
-      const dmg = await downloadUpdate(info, (progress) => e.sender.send('update:progress', progress), updating.signal)
-      await installUpdate(dmg, bundle)
+      await wipeDownloadedUpdate()
+      downloadedUpdate = await downloadUpdate(info, (progress) => e.sender.send('update:progress', progress), updating.signal)
     } finally {
       updating = null
     }
+  })
+
+  /**
+   * Puts the downloaded release in place — now, or on the way out.
+   *
+   * 'now' replaces the bundle and restarts immediately. 'quit' waits: the swap happens
+   * in before-quit instead, because a running app whose bundle has already been replaced
+   * still reads from that bundle for anything it loads later (a new window's HTML, the
+   * whisper binary in Resources), and mixing this version's code with the next version's
+   * files is a worse outcome than either.
+   */
+  ipcMain.handle('update:apply', async (_e, when: 'now' | 'quit') => {
+    if (!downloadedUpdate) throw new Error('ยังไม่ได้ดาวน์โหลดอะไรไว้')
+    const bundle = updateBundle()
+    if (!bundle) throw new Error('อัปเดตในแอปได้เฉพาะตัวที่ติดตั้งแล้ว — ตัวที่รันจากซอร์สให้ git pull เอา')
+    if (when === 'quit') {
+      installOnQuit = true
+      return
+    }
+    const dmg = downloadedUpdate
+    downloadedUpdate = null
+    installOnQuit = false
+    await installUpdate(dmg, bundle)
+    // This directory is ours (downloadUpdate made it for this one file), so this is the
+    // one place allowed to remove it — installUpdate deliberately leaves the .dmg alone.
+    await rm(dirname(dmg), { recursive: true, force: true }).catch(() => {})
+    // Re-execs the same path the running app is at, which is exactly the path just
+    // replaced, so it comes back as the new version. `quit` is what actually ends this
+    // process; without it relaunch only arms the restart.
     app.relaunch()
     app.quit()
+  })
+
+  /** Throws away whatever was downloaded and disarms an install that was waiting for
+   * quit — "not now" has to mean the app is not quietly replaced next time it closes. */
+  ipcMain.handle('update:discard', async () => {
+    installOnQuit = false
+    await wipeDownloadedUpdate()
   })
   ipcMain.handle('update:cancel', () => updating?.abort())
 
@@ -1018,6 +1065,12 @@ function registerIpc(): void {
 app.whenReady().then(() => {
   installDisplayMediaHandler()
   registerIpc()
+  // An attempt that died mid-swap leaves staging directories next to the app, and the
+  // next attempt then fails trying to clear them (seen in the wild as ENOTEMPTY on
+  // `…app.incoming/Contents/Resources`). Clearing them at launch means one bad run
+  // cannot make every future update fail.
+  const bundle = updateBundle()
+  if (bundle) void clearUpdateLeftovers(bundle)
 
   const win = new BrowserWindow({
     width: 760,
@@ -1051,6 +1104,25 @@ app.whenReady().then(() => {
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 })
 
+/**
+ * Puts a downloaded update in place on the way out, if the user chose "when I quit"
+ * rather than "now" — the app is already going away, so nothing is left running against
+ * a bundle that has just been swapped underneath it. Returns whether it did anything,
+ * so the quit path only has to wait when there was something to wait for.
+ */
+async function installUpdateOnQuit(): Promise<boolean> {
+  const bundle = installOnQuit && downloadedUpdate ? updateBundle() : null
+  if (!bundle || !downloadedUpdate) return false
+  const dmg = downloadedUpdate
+  downloadedUpdate = null
+  installOnQuit = false
+  // A failed swap must not trap the user in an app that will not close; installUpdate
+  // puts the old bundle back itself, and the next launch can simply offer again.
+  await installUpdate(dmg, bundle).catch((err: unknown) => console.error('update on quit failed —', err))
+  await rm(dirname(dmg), { recursive: true, force: true }).catch(() => {})
+  return true
+}
+
 app.on('before-quit', async (e) => {
   releaseWhisper()
   void mcp?.close()
@@ -1076,6 +1148,7 @@ app.on('before-quit', async (e) => {
     e.preventDefault()
     stopAbort?.abort()
     await stopInFlight
+    await installUpdateOnQuit()
     app.quit()
     return
   }
@@ -1083,7 +1156,14 @@ app.on('before-quit', async (e) => {
   // A half-written meeting is worth more than none: close the WAVs before quitting.
   // No drain here — the user asked to quit, so we save what already came back rather
   // than making them wait for the tail.
-  if (!current) return
+  if (!current) {
+    if (installOnQuit && downloadedUpdate) {
+      e.preventDefault()
+      await installUpdateOnQuit()
+      app.quit()
+    }
+    return
+  }
   e.preventDefault()
   const s = current
   s.stopping = true
@@ -1106,6 +1186,7 @@ app.on('before-quit', async (e) => {
     // whole thing. 'after'/'manual' already write empty here regardless.
     segments: [],
   }).catch(() => {})
+  await installUpdateOnQuit()
   app.quit()
 })
 

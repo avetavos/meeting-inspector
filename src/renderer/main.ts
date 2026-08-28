@@ -309,6 +309,12 @@ const en = {
   updateInstall: 'Download and install',
   updateDownloading: (pct: number) => `Downloading… ${pct}%`,
   updateInstalling: 'Installing — the app will restart on its own.',
+  updateReadyTitle: (version: string) => `Version ${version} is downloaded.`,
+  updateReadyDetail:
+    'Installing it means replacing this app, so it has to close. Do it now and it reopens on the new version; leave it for later and it happens the next time you quit.',
+  updateNow: 'Close and update now',
+  updateOnQuit: 'Update when I quit',
+  updateArmed: 'Ready — it will be installed the next time you quit the app.',
   updateCancel: 'Cancel',
   updateFailed: (msg: string) => `Could not update: ${msg}`,
   updateBusyHint: 'Recording or transcribing has to finish first — the update replaces the running app.',
@@ -572,6 +578,12 @@ const th: typeof en = {
   updateInstall: 'ดาวน์โหลดและติดตั้ง',
   updateDownloading: (pct) => `กำลังดาวน์โหลด… ${pct}%`,
   updateInstalling: 'กำลังติดตั้ง — แอปจะรีสตาร์ทเอง',
+  updateReadyTitle: (version) => `ดาวน์โหลดเวอร์ชัน ${version} เสร็จแล้ว`,
+  updateReadyDetail:
+    'การติดตั้งคือการแทนที่ตัวแอปนี้ จึงต้องปิดแอปก่อน ถ้าทำตอนนี้แอปจะเปิดกลับมาเป็นเวอร์ชันใหม่ให้เอง หรือจะพักไว้ก็ได้ แล้วค่อยติดตั้งตอนปิดแอปครั้งถัดไป',
+  updateNow: 'ปิดและอัปเดตตอนนี้',
+  updateOnQuit: 'อัปเดตตอนปิดแอป',
+  updateArmed: 'พร้อมแล้ว — จะติดตั้งให้ตอนปิดแอปครั้งถัดไป',
   updateCancel: 'ยกเลิก',
   updateFailed: (msg) => `อัปเดตไม่สำเร็จ: ${msg}`,
   updateBusyHint: 'ต้องให้การอัดหรือถอดเสียงเสร็จก่อน เพราะการอัปเดตจะแทนที่ตัวแอปที่กำลังรันอยู่',
@@ -944,6 +956,7 @@ type UpdateState =
   | { kind: 'available'; info: UpdateInfo }
   | { kind: 'downloading'; info: UpdateInfo; received: number; total: number }
   | { kind: 'installing' }
+  | { kind: 'armed' }
   | { kind: 'failed'; message: string }
 let updateState: UpdateState = { kind: 'idle' }
 let appVersion = ''
@@ -964,6 +977,7 @@ function renderUpdate(): void {
   else if (updateState.kind === 'available') {
     updateStateEl.textContent = t().updateAvailable(updateState.info.version, megabytes(updateState.info.bytes))
   } else if (updateState.kind === 'installing') updateStateEl.textContent = t().updateInstalling
+  else if (updateState.kind === 'armed') updateStateEl.textContent = t().updateArmed
   else if (updateState.kind === 'failed') updateStateEl.textContent = t().updateFailed(updateState.message)
   else updateStateEl.textContent = ''
 
@@ -975,7 +989,8 @@ function renderUpdate(): void {
       : updateState.kind === 'downloading'
         ? t().updateCancel
         : t().updateCheck
-  updateCheckBtn.disabled = updateState.kind === 'checking' || updateState.kind === 'installing'
+  updateCheckBtn.disabled =
+    updateState.kind === 'checking' || updateState.kind === 'installing' || updateState.kind === 'armed'
   // Main refuses an update mid-pass (it is replacing the app that is doing the work),
   // so say that before the click rather than after it.
   if (!busy && transcriptionBusy()) updateStateEl.textContent = t().updateBusyHint
@@ -992,10 +1007,32 @@ updateCheckBtn.onclick = async () => {
     updateState = { kind: 'downloading', info, received: 0, total: info.bytes }
     renderUpdate()
     try {
-      // Resolving is not the expected outcome — main relaunches the app on success —
-      // so anything that comes back here means it stopped short of restarting.
-      await window.api.installUpdate(info)
-      updateState = { kind: 'installing' }
+      await window.api.downloadUpdate(info)
+    } catch (err) {
+      updateState = { kind: 'failed', message: reason(err) }
+      return renderUpdate()
+    }
+    // Asked only once the waiting is over, and asked at all because installing means
+    // this app closing — which used to just happen, with no warning, the moment the
+    // progress bar filled.
+    const answer = await window.api.ask(t().updateReadyTitle(info.version), t().updateReadyDetail, [
+      t().updateNow,
+      t().updateOnQuit,
+      t().deleteCancel,
+    ])
+    try {
+      if (answer === 2) {
+        await window.api.discardUpdate()
+        updateState = { kind: 'idle' }
+      } else if (answer === 1) {
+        await window.api.applyUpdate('quit')
+        updateState = { kind: 'armed' }
+      } else {
+        // Resolving is not the expected outcome — main relaunches the app on success —
+        // so anything that comes back here means it stopped short of restarting.
+        await window.api.applyUpdate('now')
+        updateState = { kind: 'installing' }
+      }
     } catch (err) {
       updateState = { kind: 'failed', message: reason(err) }
     }

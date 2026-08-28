@@ -150,16 +150,46 @@ const run = (command: string, args: string[]): Promise<void> =>
   })
 
 /**
+ * `rm -rf`, not `fs.rm({ recursive: true })`.
+ *
+ * Node's recursive remove walks the tree itself and reported ENOTEMPTY on
+ * `…app.incoming/Contents/Resources` on a real machine: /Applications is indexed by
+ * Spotlight, so entries can appear inside an app bundle while it is being removed, and
+ * a directory that was empty a moment ago is not any more by the time rmdir runs. BSD
+ * `rm` does the same walk without turning that race into a failed update.
+ */
+const wipe = (path: string): Promise<void> => run('rm', ['-rf', path]).catch(() => {})
+
+/** Anything a previous attempt left behind in /Applications — cleared on launch, so a
+ * run that died mid-swap does not make every future update fail on its leftovers. */
+export async function clearUpdateLeftovers(bundle: string): Promise<void> {
+  await wipe(`${bundle}.incoming`)
+  await wipe(`${bundle}.previous`)
+}
+
+/**
  * Mounts the downloaded image and puts the app inside it where the running one is.
  *
- * The swap is move-then-copy, not copy-over: the old bundle is moved aside first, so a
- * copy that fails halfway can put it back rather than leaving a half-written app at the
- * path the Dock points at. macOS lets a running executable's bundle be moved and
- * replaced (the process holds its own inode), which is what makes replacing yourself
- * from inside possible at all — and why the caller must relaunch immediately after.
+ * The long part (copying ~400MB out of the image) happens to a staging path first, so
+ * the window where /Applications has no app in it is two renames wide rather than the
+ * length of a copy. The swap itself is move-then-move: the old bundle goes aside before
+ * the new one takes its place, so a failure can put it back rather than leaving a
+ * half-written app at the path the Dock points at.
+ *
+ * macOS lets a running executable's bundle be moved and replaced — the process holds
+ * its own inode — which is what makes replacing yourself from inside possible at all.
+ * The running process keeps working afterwards, but anything it loads from the bundle
+ * later (a new window's HTML, the whisper binary in Resources) would come from the new
+ * version, so the caller must either relaunch immediately or do this at quit.
  *
  * Nothing here strips quarantine: the .dmg was fetched by this process rather than by a
  * browser, so it never picks the attribute up in the first place.
+ *
+ * The .dmg is left where it was found. This used to delete the directory holding it,
+ * which is only safe because downloadUpdate happens to put it alone in a directory of
+ * its own — pass a path that lives anywhere else and it takes the neighbours with it
+ * (which is exactly what a direct test of this function did). The caller creates that
+ * directory and is the one that removes it.
  */
 export async function installUpdate(dmgPath: string, bundle: string): Promise<void> {
   const mount = await mkdtemp(join(tmpdir(), 'meeting-inspector-mount-'))
@@ -172,14 +202,14 @@ export async function installUpdate(dmgPath: string, bundle: string): Promise<vo
     if (!app) throw new Error('no .app inside the downloaded image')
     // Copied out of the image before unmounting, so the swap below never depends on a
     // mount staying alive, and `ditto` (not cp) so the bundle's signature survives.
-    await rm(staged, { recursive: true, force: true })
+    await wipe(staged)
     await run('ditto', [join(mount, app), staged])
   } finally {
     await run('hdiutil', ['detach', '-quiet', mount]).catch(() => {})
-    await rm(mount, { recursive: true, force: true }).catch(() => {})
+    await wipe(mount)
   }
 
-  await rm(previous, { recursive: true, force: true })
+  await wipe(previous)
   await rename(bundle, previous)
   try {
     await rename(staged, bundle)
@@ -187,6 +217,5 @@ export async function installUpdate(dmgPath: string, bundle: string): Promise<vo
     await rename(previous, bundle).catch(() => {})
     throw err
   }
-  await rm(previous, { recursive: true, force: true }).catch(() => {})
-  await rm(dirname(dmgPath), { recursive: true, force: true }).catch(() => {})
+  await wipe(previous)
 }
