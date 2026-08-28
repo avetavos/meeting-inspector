@@ -1,5 +1,9 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, protocol, session, shell, systemPreferences, type WebContents } from 'electron'
-import { mkdir, open, rm, stat } from 'node:fs/promises'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, type WebContents } from 'electron'
+import { createReadStream } from 'node:fs'
+import { mkdir, rm, stat } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { pipeline } from 'node:stream'
+import { randomBytes } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
@@ -49,18 +53,6 @@ import {
 import { bundlePathOf, clearUpdateLeftovers, downloadUpdate, installUpdate, latestUpdate, type UpdateInfo } from './update.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
-
-/**
- * Lets the detail page's player stream a meeting's WAVs instead of loading them.
- * `stream` is what makes Range requests work, which is what makes seeking in a
- * three-hour recording possible at all — a Blob URL would mean holding the whole
- * ~350MB file in the renderer just to hear thirty seconds of it.
- *
- * Registered before `whenReady`, which is the only time Electron accepts this.
- */
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'meeting', privileges: { stream: true, supportFetchAPI: true, secure: true, bypassCSP: false } },
-])
 
 /** Decision 4.1: two tracks, never mixed — the mic track is "me" without any diarization. */
 type Session = {
@@ -1202,6 +1194,14 @@ function registerIpc(): void {
     await setSettings({ asrEngine: 'local' })
   })
 
+  /** Where the player streams a meeting's audio from — a per-launch tokened URL on the
+   * loopback audio server, started on first ask. */
+  ipcMain.handle('audio:url', async (_e, id: string, track: string) => {
+    if (typeof id !== 'string' || typeof track !== 'string') throw new Error('audio:url expects an id and a track')
+    const { port, token } = await startAudioServer()
+    return `http://127.0.0.1:${port}/${token}/${encodeURIComponent(id)}/${encodeURIComponent(track)}`
+  })
+
   /** Reveals the bundled Chrome extension so it can be loaded unpacked. Inside the
    * .app when packaged (electron-builder's extraResources), in the repo when not. */
   ipcMain.handle('extension:open', () => {
@@ -1217,74 +1217,71 @@ function registerIpc(): void {
 }
 
 /**
- * `meeting://audio/<id>/<track>.wav` — one meeting's recorded audio, for the detail
- * page's player. Everything about the path is rebuilt here from an id and a track name
- * that are both checked first, so the renderer cannot name a file. Range requests are
- * answered by hand below — see the comment inside for why.
+ * One tiny HTTP server on loopback, serving meeting WAVs to the detail page's player.
  *
- * The id rides in the PATH, behind a fixed host, rather than being the host itself. A
- * URL host is not a string: parsers lowercase it and may punycode it, and a meeting is
- * named after its title — "Sprint-Review", "ทดสอบ". A path segment is just bytes.
+ * Real HTTP, deliberately, after a custom `meeting://` protocol failed three different
+ * ways (each watched, not guessed): `net.fetch(file://)` has no Content-Length, so
+ * every pause/seek re-read the file from zero; `Readable.toWeb` bodies wedge when
+ * Chromium cancels its speculative request; and hand-built 206s — Buffer or stream —
+ * are cancelled by Chromium's media loader itself the moment it requests a mid-file
+ * range, because on a custom protocol it sizes the resource from the first response
+ * and rejects ranged follow-ups (its own request arrived, our 206 went back with the
+ * right offsets, and it aborted and raised PIPELINE_ERROR_READ anyway). Over real
+ * HTTP the same media stack does exactly what the RFC says.
+ *
+ * Loopback-bound, one random token for the app's lifetime, id and track validated
+ * before any path is built. Started on first use — a session that never opens a
+ * meeting never opens a port.
  */
-function serveMeetingAudio(): void {
-  protocol.handle('meeting', async (request) => {
-    const parts = new URL(request.url).pathname.replace(/^\//, '').split('/')
-    const id = decodeURIComponent(parts[0] ?? '')
-    const track = parts[1] ?? ''
-    if (parts.length !== 2 || !safeId(id) || !TRACKS.some((t) => `${t}.wav` === track)) {
-      return new Response('not found', { status: 404 })
-    }
-    const path = assertMeetingDir(join(NOTES_ROOT, id, track))
+let audioServer: Promise<{ port: number; token: string }> | null = null
 
-    // Served by hand, not `net.fetch(file://…)`, which this replaced: that response
-    // carries no Content-Length and ignores Range, so Chromium treated the WAV as an
-    // unbounded live stream — pausing dropped the connection, and every resume or seek
-    // re-read the file from byte 0. That was the multi-second freeze the play button
-    // was blamed for.
-    //
-    // And served as bounded 206 slices, not a streamed body. The streamed version was
-    // tried and stalled in a worse way: Chromium cancels its first speculative request
-    // once it has read ahead, the cancel never reaches the node stream behind
-    // `Readable.toWeb`, and with that pipe left pumping into a dead sink, the NEXT
-    // range request's data never arrived at all (seen as `buffered` frozen while the
-    // handler logged a correct 206). A short 206 is ordinary HTTP — the element just
-    // asks again where the slice ended — and a plain Buffer has nothing to cancel.
-    const size = await stat(path).then((st) => st.size).catch(() => null)
-    if (size === null) return new Response('not found', { status: 404 })
-
-    const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('range') ?? '')
-    const from = range?.[1] ? Number(range[1]) : 0
-    // An open-ended `bytes=N-` is capped rather than honoured to the end of the file:
-    // the cap is what bounds memory (a 3-hour WAV is ~350MB), and it is also what keeps
-    // every response small enough that abandoning it costs nothing.
-    const SLICE = 4 << 20
-    const to = Math.min(range?.[2] ? Number(range[2]) : from + SLICE - 1, size - 1)
-    if (from > to || from >= size) {
-      return new Response(null, { status: 416, headers: { 'content-range': `bytes */${size}` } })
-    }
-
-    const buf = Buffer.alloc(to - from + 1)
-    const fh = await open(path, 'r')
-    try {
-      await fh.read(buf, 0, buf.length, from)
-    } finally {
-      await fh.close()
-    }
-    return new Response(buf, {
-      status: 206,
-      headers: {
+function startAudioServer(): Promise<{ port: number; token: string }> {
+  audioServer ??= new Promise((resolve, reject) => {
+    const token = randomBytes(16).toString('base64url')
+    const server = createServer(async (req, res) => {
+      const parts = (req.url ?? '/').split('?')[0]!.split('/').filter(Boolean).map(decodeURIComponent)
+      const [reqToken, id, track] = parts
+      if (parts.length !== 3 || reqToken !== token || !safeId(id!) || !TRACKS.some((t) => `${t}.wav` === track)) {
+        res.writeHead(404).end()
+        return
+      }
+      const path = assertMeetingDir(join(NOTES_ROOT, id!, track!))
+      const size = await stat(path).then((st) => st.size).catch(() => null)
+      if (size === null) {
+        res.writeHead(404).end()
+        return
+      }
+      const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '')
+      // A suffix range (`bytes=-N`, the last N bytes) is how some demuxers read a
+      // trailer; RFC 9110's three shapes are all three real here.
+      const from = range ? (range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]))) : 0
+      const to = range?.[2] && range[1] ? Math.min(Number(range[2]), size - 1) : size - 1
+      if (from > to || from >= size) {
+        res.writeHead(416, { 'content-range': `bytes */${size}` }).end()
+        return
+      }
+      res.writeHead(range ? 206 : 200, {
         'content-type': 'audio/wav',
         'accept-ranges': 'bytes',
-        'content-length': String(buf.length),
-        'content-range': `bytes ${from}-${to}/${size}`,
-      },
+        'content-length': to - from + 1,
+        ...(range ? { 'content-range': `bytes ${from}-${to}/${size}` } : {}),
+      })
+      // pipeline, not .pipe: it destroys the read stream when the client goes away,
+      // which the client does constantly — every seek abandons the previous request.
+      pipeline(createReadStream(path, { start: from, end: to }), res, () => {})
+    })
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (typeof address !== 'object' || !address) return reject(new Error('audio server bound but has no address'))
+      resolve({ port: address.port, token })
     })
   })
+  return audioServer
 }
 
 app.whenReady().then(() => {
   installDisplayMediaHandler()
-  serveMeetingAudio()
   registerIpc()
   // An attempt that died mid-swap leaves staging directories next to the app, and the
   // next attempt then fails trying to clear them (seen in the wild as ENOTEMPTY on

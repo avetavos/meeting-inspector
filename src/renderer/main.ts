@@ -1912,8 +1912,9 @@ const playerTimeEl = $('player-time')
  * the mix. Every seek sets both, which also means any drift is corrected the moment the
  * user touches anything.
  *
- * They stream over `meeting://` (index.ts) rather than a Blob URL, so seeking into the
- * middle of a three-hour recording costs a Range request instead of the whole file.
+ * They stream over the loopback audio server (index.ts's startAudioServer) rather
+ * than a Blob URL, so seeking into the middle of a three-hour recording costs one
+ * Range request instead of the whole file.
  */
 const players: HTMLAudioElement[] = []
 let playerDuration = 0
@@ -1939,7 +1940,7 @@ function stopPlayer(): void {
 /** Builds the player for one meeting. `tracks` is which WAVs are actually still on
  * disk — the meetings list can delete the audio and keep the transcript, and that
  * meeting simply has no player rather than a broken one. */
-function openPlayer(id: string, tracks: Record<string, boolean>, segs: Transcript['segments'], durationSec: number): void {
+async function openPlayer(id: string, tracks: Record<string, boolean>, segs: Transcript['segments'], durationSec: number): Promise<void> {
   stopPlayer()
   const present = Object.keys(tracks).filter((track) => tracks[track])
   if (present.length === 0) return
@@ -1947,7 +1948,7 @@ function openPlayer(id: string, tracks: Record<string, boolean>, segs: Transcrip
   playerSegments = segs
   playerDuration = durationSec
   for (const track of present) {
-    const audio = new Audio(`meeting://audio/${encodeURIComponent(id)}/${track}.wav`)
+    const audio = new Audio(await window.api.audioUrl(id, `${track}.wav`))
     audio.preload = 'metadata'
     // The transcript's own times are the source of truth for the scrubber, but a
     // meeting whose transcript never recorded a duration still has one on disk.
@@ -3640,7 +3641,7 @@ async function openMeetingDetail(id: string): Promise<void> {
   renderDetailMeta()
   // Before the transcript, not after: whether each line is clickable depends on whether
   // there is a player for it to seek.
-  openPlayer(id, audio, tr.segments, tr.durationSec)
+  await openPlayer(id, audio, tr.segments, tr.durationSec)
   renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl)
   renderDetailSpeakers()
   showPage(detailPage)

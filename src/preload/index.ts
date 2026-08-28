@@ -166,6 +166,10 @@ const api = {
   /** A single meeting's full transcript, for the meetings-list detail view (spec item
    * 1) — takes an id, not a directory: main resolves and guards the path itself
    * (assertMeetingDir), the same way transcribeOne already does. */
+  /** A URL the player can stream one track from — loopback HTTP with a per-launch
+   * token, because Chromium's media stack only honours ranged requests over real HTTP
+   * (a custom protocol was tried and its mid-file ranges are rejected outright). */
+  audioUrl: (id: string, track: string): Promise<string> => ipcRenderer.invoke('audio:url', id, track),
   /** `audio` says which of the two tracks are still on disk — the meetings list can
    * delete a meeting's audio and keep its words, and the detail page's player has to
    * know that rather than find out by failing to load. */
