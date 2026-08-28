@@ -19,7 +19,7 @@
           </div>
           <div id="capsule" class="capsule">
             <div class="capsule-top">
-              <input id="title" placeholder="Meeting title" autocomplete="off" />
+              <input id="title" autocomplete="off" />
               <button id="toggle">Start recording</button>
               <span id="elapsed"></span>
             </div>
@@ -36,15 +36,17 @@
             <div id="speakers"></div>
             <div id="transcript"></div>
             <div id="meetings">
-              <span id="meetings-heading" class="label"></span>
+              <div class="meetings-header">
+                <span id="meetings-heading" class="label"></span>
+                <div class="row wrap-row">
+                  <button id="meetings-select-all" class="meetings-action-btn"></button>
+                  <button id="meetings-select-none" class="meetings-action-btn"></button>
+                  <button id="meetings-transcribe" class="meetings-action-btn"></button>
+                  <button id="meetings-stop" class="meetings-action-btn" hidden></button>
+                </div>
+              </div>
               <div id="meetings-list"></div>
               <button id="meetings-view-all" class="settings-back" hidden></button>
-              <div class="row wrap-row">
-                <button id="meetings-select-all" class="meetings-action-btn"></button>
-                <button id="meetings-select-none" class="meetings-action-btn"></button>
-                <button id="meetings-transcribe" class="meetings-action-btn"></button>
-                <button id="meetings-stop" class="meetings-action-btn" hidden></button>
-              </div>
               <div id="meetings-retranscribe-hint" class="hint"></div>
               <div id="meetings-progress" class="hint"></div>
             </div>

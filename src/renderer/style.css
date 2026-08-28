@@ -195,6 +195,12 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 .meeting-status.transcribing { color: var(--accent); }
 .wrap-row { flex-wrap: wrap; }
 .meetings-action-btn { padding: var(--space-sm) var(--space-xl); font-size: var(--text-secondary); }
+/* The batch controls act on the list below them, so they sit level with its heading
+   rather than trailing off the bottom of the card. `.label`'s 60px is for the meter
+   channels' aligned column — here the heading just takes the width it needs. */
+.meetings-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); }
+.meetings-header .label { width: auto; }
+.meetings-header .row { margin-top: 0; justify-content: flex-end; }
 #meetings-view-all { margin-top: var(--space-md); display: block; }
 
 /* Narrow window: the row's five items (checkbox, title, when, duration, two badges)
@@ -290,6 +296,9 @@ a { color: inherit; -webkit-app-region: no-drag; }
 .capsule-top input { flex: 1; border-radius: var(--radius-md); }
 
 #elapsed { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 44px; text-align: right; }
+/* Idle, the timer is empty but its min-width still held a 44px gutter open, so the
+   title field and the button stopped short of the capsule's own edge. */
+#elapsed:empty { display: none; }
 
 #toggle {
   flex: 0 0 auto;
@@ -304,7 +313,9 @@ a { color: inherit; -webkit-app-region: no-drag; }
 /* one instrument, two channels */
 .meters {
   margin-top: var(--space-lg);
-  display: flex;
+  /* Only shown while there is something to meter (body.recording, below): idle, the
+     two flat tracks read as a broken level display rather than a resting one. */
+  display: none;
   flex-direction: column;
   gap: 0;
   background: var(--track-bg);
@@ -324,6 +335,7 @@ a { color: inherit; -webkit-app-region: no-drag; }
   0%, 100% { box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo), 0 16px 32px -14px var(--shadow-color), 0 0 0 3px rgba(255, 69, 58, 0.22); }
   50% { box-shadow: inset 0 1px 0 var(--line-hi), inset 0 -1px 0 var(--line-lo), 0 16px 32px -14px var(--shadow-color), 0 0 0 6px rgba(255, 69, 58, 0.1); }
 }
+body.recording .meters { display: flex; }
 body.recording .capsule { animation: rec-pulse 2.2s ease-in-out infinite; }
 body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px -4px rgba(255, 69, 58, 0.6); }
 

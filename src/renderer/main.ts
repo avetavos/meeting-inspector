@@ -13,14 +13,13 @@ import type {
   TranscribeMode,
   TranscribeStatus,
 } from '../preload/index.ts'
-import { titleOf } from '../shared/meetings.ts'
+import { titleOf, untitledTitle } from '../shared/meetings.ts'
 import { Recorder, openMicTap, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 /** Every user-visible string in the renderer. English is the default voice; Thai is kept as-is. */
 const en = {
-  titlePlaceholder: 'Meeting title',
   start: 'Start recording',
   stop: 'End meeting',
   meterOthers: 'Others',
@@ -268,7 +267,6 @@ const en = {
 }
 
 const th: typeof en = {
-  titlePlaceholder: 'ชื่อการประชุม',
   start: 'เริ่มอัด',
   stop: 'จบประชุม',
   meterOthers: 'คนอื่น',
@@ -2722,13 +2720,22 @@ mcpToggle.onchange = async () => {
 }
 
 /** Applies the given language to every static label and re-renders every dynamic panel. */
+/** The title field's placeholder is the name the meeting would actually get if left
+ * blank, not the words "Meeting title" — the same string the meetings list will show
+ * for it afterwards. It carries a clock minute, so it is re-derived on a timer as well
+ * as on every language switch rather than being set once at startup and going stale. */
+function syncTitlePlaceholder(): void {
+  title.placeholder = untitledTitle(new Date())
+}
+setInterval(syncTitlePlaceholder, 20_000)
+
 function applyLanguage(l: Language): void {
   lang = l
   document.documentElement.lang = l
   langRadios.en.checked = l === 'en'
   langRadios.th.checked = l === 'th'
 
-  title.placeholder = t().titlePlaceholder
+  syncTitlePlaceholder()
   toggle.textContent = recorder ? t().stop : t().start
   meterLabels.loopback.textContent = t().meterOthers
   meterLabels.mic.textContent = t().meterUs

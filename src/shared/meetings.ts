@@ -96,6 +96,17 @@ export const titleOf = (id: string): string => {
 }
 
 /**
+ * What an untitled meeting started now would end up called — the composer offers it as
+ * the title field's placeholder, so "leave this blank" has a visible answer. Routed
+ * through `titleOf` on a stamp built the way store.ts's `meetingId` builds it, rather
+ * than formatting a second time here, so the two cannot drift apart.
+ */
+export const untitledTitle = (at: Date): string => {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return titleOf(`${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}`)
+}
+
+/**
  * Best-effort `startedAt` for a meeting whose transcript.json is missing or corrupt —
  * parsed straight from the id's own timestamp, so store.ts's meetings list still sorts
  * and shows something sensible instead of dropping the folder (spec item 3).

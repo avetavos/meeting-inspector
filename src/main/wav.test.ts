@@ -12,7 +12,7 @@ import {
   slug,
   writeTranscript,
 } from './store.ts'
-import { safeId, titleOf } from '../shared/meetings.ts'
+import { safeId, titleOf, untitledTitle } from '../shared/meetings.ts'
 import { WavWriter } from './wav.ts'
 
 test('wav: header matches what was actually written, across many appends', async () => {
@@ -63,6 +63,14 @@ test('meetings: an untitled meeting reads as the time it happened', () => {
   assert.equal(titleOf('2026-08-27-1400-sprint-planning'), 'sprint-planning')
   assert.equal(titleOf('2026-08-27-1400-ประชุม-ทีม'), 'ประชุม-ทีม')
   assert.equal(titleOf('not-a-meeting-id'), 'not-a-meeting-id')
+})
+
+test('meetings: the composer placeholder is exactly what an untitled meeting gets called', () => {
+  // The whole point of showing it before the recording exists — if these two ever
+  // disagree, the placeholder is promising a name the meeting will not have.
+  const at = new Date(2026, 7, 27, 14, 0)
+  assert.equal(untitledTitle(at), titleOf(meetingId('', at)))
+  assert.equal(untitledTitle(at), '27-08-2026 14:00')
 })
 
 test('store: slug cannot escape the notes folder', () => {
