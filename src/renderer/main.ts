@@ -9,6 +9,8 @@ import type {
   MeetingLanguage,
   ModelStatus,
   PendingVoiceItem,
+  AsrEngine,
+  RemoteModel,
   SpeakerSplit,
   Transcript,
   UpdateInfo,
@@ -131,6 +133,35 @@ const en = {
   echoLabel: 'Remove the speakers from the mic',
   echoHint:
     'On speakers rather than headphones, the microphone hears the meeting as well, so the far end gets transcribed twice — once under their name and once, a moment later, under You. This drops that second copy. Turn it off on headphones: there is no echo to remove, and all it can do there is take away a line someone genuinely repeated.',
+  engineLabel: 'Transcribe with',
+  engineName: { local: 'This machine (Whisper)', openrouter: 'A model at OpenRouter' } as Record<AsrEngine, string>,
+  engineHint: {
+    local: 'Nothing leaves this machine. Needs 0.8–3.4GB of RAM free for the model, on top of about 1GB while it works out who was speaking.',
+    openrouter:
+      'For machines that cannot spare that much memory. Applies to recorded meetings only — transcribing live always runs here.',
+  } as Record<AsrEngine, string>,
+  // Said in full, in the panel, whenever this engine is selected — not once in a dialog
+  // and then never again.
+  remoteWarning:
+    'Your meeting audio leaves this machine. Both tracks — what the other side said and what your microphone heard — are sent in ~30-second pieces to openrouter.ai, which passes them to whichever model you pick and to that model\'s provider. What they keep, and for how long, is their policy and not this app\'s. You are billed on your own key. Nothing else about the meeting is sent: no transcript, no names, no file. Recording, storage, speaker recognition and MCP all stay on this machine either way.',
+  remoteKeyPlaceholder: 'OpenRouter API key (sk-or-…)',
+  remoteConnect: 'Connect',
+  remoteConnecting: 'Checking the key…',
+  remoteForget: 'Remove key',
+  remoteNoKey: 'A key of your own is needed. Create one at openrouter.ai/keys.',
+  remoteConnected: (models: number) => `Key works — ${models} models here accept audio.`,
+  remoteCredit: (usd: number) => ` ${usd.toFixed(2)} USD left on it.`,
+  remoteFreeTier: ' This is a free-tier key, so expect rate limits on a long meeting.',
+  remoteFailed: (msg: string) => `Could not use that key: ${msg}`,
+  remoteModelLabel: 'Model',
+  remoteModelPrice: (usdPerHour: number, usdPerMillion: number) =>
+    `About $${usdPerHour.toFixed(2)} per hour of meeting ($${usdPerMillion.toFixed(2)} per million audio tokens, estimated at 32 tokens a second). Silence is never sent, so a quiet meeting costs less than its length.`,
+  remoteModelFree: 'Free at the moment. Free models are rate-limited and can be withdrawn without notice.',
+  remoteModelUnpriced: 'This model does not price audio separately, so the cost per hour cannot be estimated here — check it on openrouter.ai before transcribing anything long.',
+  remoteConfirmTitle: 'Send meeting audio to OpenRouter?',
+  remoteConfirmDetail:
+    'From now on, recorded meetings are transcribed by sending their audio off this machine to openrouter.ai and on to the model you pick. Live transcription, storage, speaker recognition and MCP all stay here. You can switch back at any time.',
+  remoteConfirmYes: 'Send it',
   speakerSplitLabel: 'Splitting speakers apart',
   speakerSplitName: {
     fine: 'Fine — every difference is a new person',
@@ -435,6 +466,32 @@ const th: typeof en = {
   echoLabel: 'ตัดเสียงลำโพงที่เข้าไมค์',
   echoHint:
     'ถ้าเปิดลำโพงแทนหูฟัง ไมค์จะได้ยินเสียงประชุมไปด้วย ทำให้ประโยคของอีกฝั่งถูกถอดสองครั้ง — ครั้งหนึ่งในชื่อเขา อีกครั้งช้ากว่านิดหน่อยในชื่อ "เรา" ตัวนี้จะตัดอันหลังทิ้ง ถ้าใช้หูฟังให้ปิดไว้ เพราะไม่มีเสียงสะท้อนให้ตัด มีแต่จะเผลอตัดประโยคที่คนพูดซ้ำจริงๆ',
+  engineLabel: 'ถอดเสียงด้วย',
+  engineName: { local: 'เครื่องนี้ (Whisper)', openrouter: 'โมเดลบน OpenRouter' } as Record<AsrEngine, string>,
+  engineHint: {
+    local: 'ไม่มีอะไรออกจากเครื่องนี้ ต้องมีแรมว่างให้โมเดล 0.8–3.4GB บวกอีกราว 1GB ตอนแยกว่าใครพูด',
+    openrouter: 'สำหรับเครื่องที่แรมไม่พอ ใช้กับการถอดไฟล์ที่อัดไว้แล้วเท่านั้น — การถอดสดยังรันในเครื่องเสมอ',
+  } as Record<AsrEngine, string>,
+  remoteWarning:
+    'เสียงประชุมของคุณจะออกจากเครื่องนี้ ทั้งสองแทร็ก — ทั้งเสียงอีกฝั่งและเสียงจากไมค์ของคุณ — จะถูกส่งเป็นท่อนละ ~30 วินาทีไปที่ openrouter.ai แล้วส่งต่อไปยังโมเดลที่คุณเลือกและผู้ให้บริการของโมเดลนั้น เขาจะเก็บอะไรไว้นานแค่ไหนเป็นนโยบายของเขา ไม่ใช่ของแอปนี้ และค่าใช้จ่ายคิดจากคีย์ของคุณเอง นอกจากเสียงแล้วไม่มีอะไรถูกส่งไป ไม่มี transcript ไม่มีชื่อคน ไม่มีไฟล์ ส่วนการอัด การเก็บไฟล์ การจำเสียงคนพูด และ MCP ยังอยู่ในเครื่องนี้ทั้งหมดไม่ว่าจะเลือกแบบไหน',
+  remoteKeyPlaceholder: 'OpenRouter API key (sk-or-…)',
+  remoteConnect: 'เชื่อมต่อ',
+  remoteConnecting: 'กำลังตรวจสอบคีย์…',
+  remoteForget: 'ลบคีย์',
+  remoteNoKey: 'ต้องใช้คีย์ของคุณเอง สร้างได้ที่ openrouter.ai/keys',
+  remoteConnected: (models) => `คีย์ใช้ได้ — มี ${models} โมเดลที่รับเสียงเข้า`,
+  remoteCredit: (usd) => ` เหลือเครดิต ${usd.toFixed(2)} USD`,
+  remoteFreeTier: ' เป็นคีย์แบบฟรี ประชุมยาวๆ อาจติดลิมิตระหว่างทาง',
+  remoteFailed: (msg) => `ใช้คีย์นี้ไม่ได้: ${msg}`,
+  remoteModelLabel: 'โมเดล',
+  remoteModelPrice: (usdPerHour, usdPerMillion) =>
+    `ประมาณ $${usdPerHour.toFixed(2)} ต่อการประชุม 1 ชั่วโมง ($${usdPerMillion.toFixed(2)} ต่อ 1 ล้าน audio token คิดที่ 32 token/วินาที) ช่วงเงียบไม่ถูกส่งไป ประชุมที่เงียบมากจะถูกกว่าความยาวจริง`,
+  remoteModelFree: 'ตอนนี้ฟรี — โมเดลฟรีมีลิมิตการเรียกและถูกถอดออกเมื่อไหร่ก็ได้',
+  remoteModelUnpriced: 'โมเดลนี้ไม่ได้คิดราคาเสียงแยก เลยประมาณราคาต่อชั่วโมงให้ไม่ได้ — เช็คที่ openrouter.ai ก่อนถ้าจะถอดไฟล์ยาวๆ',
+  remoteConfirmTitle: 'ส่งเสียงประชุมไปที่ OpenRouter?',
+  remoteConfirmDetail:
+    'ต่อจากนี้ การถอดไฟล์ที่อัดไว้จะส่งเสียงออกจากเครื่องนี้ไปที่ openrouter.ai แล้วต่อไปยังโมเดลที่คุณเลือก ส่วนการถอดสด การเก็บไฟล์ การจำเสียงคนพูด และ MCP ยังอยู่ในเครื่องนี้ สลับกลับเมื่อไหร่ก็ได้',
+  remoteConfirmYes: 'ส่งเลย',
   speakerSplitLabel: 'การแยกคนพูด',
   speakerSplitName: {
     fine: 'ละเอียด — ต่างกันนิดเดียวก็นับเป็นคนใหม่',
@@ -660,6 +717,21 @@ const meetingLangHintEl = $('meeting-lang-hint')
 const echoLabelEl = $('echo-label')
 const echoToggle = $<HTMLInputElement>('echo-filter')
 const echoHintEl = $('echo-hint')
+const engineLabelEl = $('engine-label')
+const engineSelect = $<HTMLSelectElement>('asr-engine')
+const engineHintEl = $('engine-hint')
+const remoteCardEl = $('remote-card')
+const remoteWarningEl = $('remote-warning')
+const remoteKeyRow = $('remote-key-row')
+const remoteKeyInput = $<HTMLInputElement>('remote-key')
+const remoteConnectBtn = $<HTMLButtonElement>('remote-connect')
+const remoteForgetBtn = $<HTMLButtonElement>('remote-forget')
+const remoteStateEl = $('remote-state')
+const remoteModelRow = $('remote-model-row')
+const remoteModelLabelEl = $('remote-model-label')
+const remoteModelSelect = $<HTMLSelectElement>('remote-model')
+const remotePriceEl = $('remote-price')
+
 const speakerSplitLabelEl = $('speaker-split-label')
 const speakerSplitSelect = $<HTMLSelectElement>('speaker-split')
 const speakerSplitHintEl = $('speaker-split-hint')
@@ -3293,6 +3365,7 @@ function applyLanguage(l: Language): void {
   meetingLangOptions[0]!.textContent = t().meetingLangName.th
   meetingLangOptions[1]!.textContent = t().meetingLangName.en
   meetingLangHintEl.textContent = t().meetingLangHint
+  renderRemote()
   echoLabelEl.textContent = t().echoLabel
   echoHintEl.textContent = t().echoHint
   speakerSplitLabelEl.textContent = t().speakerSplitLabel
@@ -3387,6 +3460,147 @@ function renderSpeakerSplitHint(): void {
   speakerSplitHintEl.textContent = `${t().speakerSplitHint[step] ?? ''} ${t().speakerSplitApplies}`
 }
 
+/**
+ * The state of the one feature that sends anything off this machine. Held here so the
+ * whole card re-renders from a single place — including on every language switch, since
+ * the warning is the most important text in it and must never be left in the language
+ * the user just switched away from.
+ */
+let remoteModels: RemoteModel[] = []
+let remoteStatus: { kind: 'unknown' } | { kind: 'none' } | { kind: 'checking' } | { kind: 'ok'; models: number; usd: number | null; free: boolean } | { kind: 'failed'; message: string } = { kind: 'unknown' }
+
+function renderRemote(): void {
+  const engine = engineSelect.value as AsrEngine
+  engineLabelEl.textContent = t().engineLabel
+  for (const option of engineSelect.options) {
+    option.textContent = t().engineName[option.value as AsrEngine] ?? option.value
+  }
+  engineHintEl.textContent = t().engineHint[engine] ?? ''
+
+  // Everything below the picker only exists for the remote engine — including, and
+  // especially, the warning.
+  const remote = engine === 'openrouter'
+  remoteWarningEl.hidden = !remote
+  remoteWarningEl.textContent = remote ? t().remoteWarning : ''
+  remoteKeyRow.hidden = !remote
+  remoteStateEl.hidden = !remote
+  remotePriceEl.hidden = !remote
+  remoteModelRow.hidden = !remote || remoteModels.length === 0
+  if (!remote) return
+
+  remoteKeyInput.placeholder = t().remoteKeyPlaceholder
+  remoteConnectBtn.textContent = t().remoteConnect
+  remoteForgetBtn.textContent = t().remoteForget
+  remoteForgetBtn.hidden = remoteStatus.kind !== 'ok'
+  remoteModelLabelEl.textContent = t().remoteModelLabel
+
+  if (remoteStatus.kind === 'checking') remoteStateEl.textContent = t().remoteConnecting
+  else if (remoteStatus.kind === 'failed') remoteStateEl.textContent = t().remoteFailed(remoteStatus.message)
+  else if (remoteStatus.kind === 'ok') {
+    remoteStateEl.textContent =
+      t().remoteConnected(remoteStatus.models) +
+      (remoteStatus.usd !== null ? t().remoteCredit(remoteStatus.usd) : '') +
+      (remoteStatus.free ? t().remoteFreeTier : '')
+  } else remoteStateEl.textContent = t().remoteNoKey
+
+  // Rebuilt rather than patched: the list comes from OpenRouter and its contents and
+  // order (cheapest first) change between one connect and the next.
+  const chosen = remoteModelSelect.value
+  remoteModelSelect.replaceChildren(
+    ...remoteModels.map((m) => {
+      const option = document.createElement('option')
+      option.value = m.id
+      option.textContent = m.usdPerHour !== null ? `${m.name} — $${m.usdPerHour.toFixed(2)}/hr` : m.name
+      return option
+    }),
+  )
+  if (remoteModels.some((m) => m.id === chosen)) remoteModelSelect.value = chosen
+  renderRemotePrice()
+}
+
+/** Spelled out under the picker, not just as a suffix in it: an estimate needs its
+ * assumption said out loud, and "free" needs its catch said out loud too. */
+function renderRemotePrice(): void {
+  const model = remoteModels.find((m) => m.id === remoteModelSelect.value)
+  if (!model) return void (remotePriceEl.textContent = '')
+  if (model.free) remotePriceEl.textContent = t().remoteModelFree
+  else if (model.usdPerHour === null || model.usdPerMillionAudio === null) {
+    remotePriceEl.textContent = t().remoteModelUnpriced
+  } else remotePriceEl.textContent = t().remoteModelPrice(model.usdPerHour, model.usdPerMillionAudio)
+}
+
+async function loadRemoteModels(connect?: string): Promise<void> {
+  remoteStatus = { kind: 'checking' }
+  renderRemote()
+  try {
+    const info = connect === undefined ? await window.api.openrouterModels() : await window.api.connectOpenrouter(connect)
+    remoteModels = info.models
+    remoteStatus = { kind: 'ok', models: info.models.length, usd: info.usdRemaining, free: info.freeTier }
+    // The key is good, so the stored model id is worth checking against what actually
+    // exists today — a model that has been withdrawn would otherwise fail per chunk.
+    const settings = await window.api.getSettings()
+    remoteModelSelect.value = info.models.some((m) => m.id === settings.remoteModel)
+      ? settings.remoteModel
+      : (info.models[0]?.id ?? '')
+  } catch (err) {
+    remoteModels = []
+    remoteStatus = { kind: 'failed', message: reason(err) }
+  }
+  renderRemote()
+  if (remoteModelSelect.value) await window.api.setRemoteModel(remoteModelSelect.value)
+}
+
+engineSelect.onchange = async () => {
+  const engine = engineSelect.value as AsrEngine
+  // Asked once, on the way in, on top of the warning that stays on screen — this is the
+  // only setting in the app that changes where the user's audio goes.
+  if (engine === 'openrouter') {
+    const answer = await window.api.ask(t().remoteConfirmTitle, t().remoteConfirmDetail, [
+      t().remoteConfirmYes,
+      t().deleteCancel,
+    ])
+    if (answer !== 0) {
+      engineSelect.value = 'local'
+      return renderRemote()
+    }
+  }
+  engineSelect.disabled = true
+  try {
+    await window.api.setAsrEngine(engine)
+  } finally {
+    engineSelect.disabled = false
+  }
+  renderRemote()
+  if (engine === 'openrouter' && (await window.api.hasOpenrouterKey())) await loadRemoteModels()
+}
+
+remoteConnectBtn.onclick = async () => {
+  const key = remoteKeyInput.value.trim()
+  if (!key) return
+  remoteConnectBtn.disabled = true
+  try {
+    await loadRemoteModels(key)
+  } finally {
+    remoteConnectBtn.disabled = false
+    // Not left sitting in the box: it is already stored, and the box is the one place
+    // it could be read back off the screen.
+    remoteKeyInput.value = ''
+  }
+}
+
+remoteForgetBtn.onclick = async () => {
+  await window.api.forgetOpenrouter()
+  remoteModels = []
+  remoteStatus = { kind: 'none' }
+  engineSelect.value = 'local'
+  renderRemote()
+}
+
+remoteModelSelect.onchange = async () => {
+  renderRemotePrice()
+  await window.api.setRemoteModel(remoteModelSelect.value)
+}
+
 echoToggle.onchange = async () => {
   echoToggle.disabled = true
   try {
@@ -3435,6 +3649,14 @@ void window.api.getSettings().then((settings) => {
   meetingLangSelect.value = settings.meetingLanguage
   speakerSplitSelect.value = settings.speakerSplit
   echoToggle.checked = settings.echoFilter
+  engineSelect.value = settings.asrEngine
+  if (settings.asrEngine === 'openrouter') {
+    void window.api.hasOpenrouterKey().then((has) => {
+      remoteStatus = has ? remoteStatus : { kind: 'none' }
+      if (has) void loadRemoteModels()
+      else renderRemote()
+    })
+  }
   applyLanguage(settings.language)
   // A genuine first run (no settings.json at all — settings.ts's getSettings tells that
   // apart from an existing user simply upgrading into this build) lands here instead of

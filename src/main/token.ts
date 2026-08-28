@@ -58,3 +58,29 @@ export async function mcpToken(): Promise<string> {
   if (stored.trim()) return stored.trim()
   return (await migrate()) ?? (await write(randomBytes(24).toString('base64url')))
 }
+
+/**
+ * The user's own OpenRouter key, when they have chosen to transcribe off-machine.
+ *
+ * A 0600 file next to the MCP token, for the same reasons spelled out above: the
+ * Keychain costs a password prompt on every rebuild of an ad-hoc-signed app, and buys
+ * little here — anything that can read this file can read the transcripts it would be
+ * used to produce. Never sent anywhere except openrouter.ai, and never handed back to
+ * the renderer: the settings panel only ever learns whether one is set.
+ */
+const OPENROUTER_FILE = () => join(app.getPath('userData'), 'openrouter-key')
+
+export async function openrouterKey(): Promise<string> {
+  return (await readFile(OPENROUTER_FILE(), 'utf8').catch(() => '')).trim()
+}
+
+/** A blank key removes the file outright rather than leaving an empty one behind. */
+export async function setOpenrouterKey(key: string): Promise<void> {
+  const trimmed = key.trim()
+  if (!trimmed) {
+    await rm(OPENROUTER_FILE(), { force: true })
+    return
+  }
+  await writeFile(OPENROUTER_FILE(), trimmed, { mode: 0o600 })
+  await chmod(OPENROUTER_FILE(), 0o600)
+}

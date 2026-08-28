@@ -1,15 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelStatus, Progress } from '../main/download.ts'
-import type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
+import type { AsrEngine, AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
 import type { UpdateInfo, UpdateProgress } from '../main/update.ts'
+import type { Connection } from '../main/openrouter.ts'
 import type { TranscribeStatus } from '../main/store.ts'
 import type { Transcript } from '../shared/meetings.ts'
 
 export type { Transcript } from '../shared/meetings.ts'
 export type { ModelStatus, Progress } from '../main/download.ts'
-export type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
+export type { AsrEngine, AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
 export type { TranscribeStatus } from '../main/store.ts'
 export type { UpdateInfo, UpdateProgress } from '../main/update.ts'
+export type { Connection, RemoteModel } from '../main/openrouter.ts'
 
 export type Track = 'loopback' | 'mic'
 export type Segment = { t0: number; t1: number; text: string }
@@ -111,6 +113,20 @@ const api = {
   /** Whether to drop mic lines that are the room's own speakers echoing back. Applies
    * to the next transcript written, not to the ones already on disk. */
   setEchoFilter: (echoFilter: boolean): Promise<Settings> => ipcRenderer.invoke('settings:set', { echoFilter }),
+  /** Which engine a RECORDED pass runs through — 'openrouter' sends the audio off this
+   * machine. Live transcription is always local. */
+  setAsrEngine: (asrEngine: AsrEngine): Promise<Settings> => ipcRenderer.invoke('settings:set', { asrEngine }),
+  setRemoteModel: (remoteModel: string): Promise<Settings> => ipcRenderer.invoke('settings:set', { remoteModel }),
+
+  /** Whether an OpenRouter key is stored. The key itself never comes back here. */
+  hasOpenrouterKey: (): Promise<boolean> => ipcRenderer.invoke('openrouter:has-key'),
+  /** Saves the key and reports what it works for: credit left, and every model that
+   * takes audio, priced, cheapest first. */
+  connectOpenrouter: (key: string): Promise<Connection> => ipcRenderer.invoke('openrouter:connect', key),
+  /** The same list again, with the key already stored. */
+  openrouterModels: (): Promise<Connection> => ipcRenderer.invoke('openrouter:models'),
+  /** Deletes the stored key and puts transcription back on this machine. */
+  forgetOpenrouter: (): Promise<void> => ipcRenderer.invoke('openrouter:forget'),
   setTranscribeMode: (transcribeMode: TranscribeMode): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', { transcribeMode }),
   setAsrModel: (asrModel: AsrModel): Promise<Settings> => ipcRenderer.invoke('settings:set', { asrModel }),

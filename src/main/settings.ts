@@ -78,6 +78,19 @@ export type Settings = {
    * thing the pass can do is take away a line someone genuinely repeated.
    */
   echoFilter: boolean
+  /**
+   * Where recorded audio gets decoded. 'local' is whisper on this machine and is the
+   * default and the point of the app; 'openrouter' sends the audio to a model the user
+   * picked, through their own OpenRouter key, for machines that cannot spare the RAM.
+   * Only ever applies to a recorded pass ('after' mode and the meetings-list queue) —
+   * live transcription stays local, since it is the one path where the audio is going
+   * through the machine anyway and latency is the whole point.
+   */
+  asrEngine: AsrEngine
+  /** OpenRouter model id used when `asrEngine` is 'openrouter'. Free-form on purpose:
+   * the list of models that accept audio changes weekly, and the settings panel fills
+   * this from OpenRouter's own live list rather than from anything hard-coded here. */
+  remoteModel: string
   transcribeMode: TranscribeMode
   /** Default 'turbo': lightest on RAM, and the default recording mode ('after') means
    * this is what most 16GB machines will run unattended. */
@@ -97,6 +110,9 @@ export type Settings = {
 
 /** Named steps rather than a raw number: the underlying value is a cosine distance
  * threshold nobody outside diarize.ts should have to reason about. */
+/** 'local' is whisper on this machine; 'openrouter' is a model somewhere else. */
+export type AsrEngine = 'local' | 'openrouter'
+
 export const SPEAKER_SPLITS = ['fine', 'balanced', 'coarse'] as const
 export type SpeakerSplit = (typeof SPEAKER_SPLITS)[number]
 
@@ -116,6 +132,8 @@ const DEFAULTS: Settings = {
   noiseFilter: 'medium',
   speakerSplit: 'balanced',
   echoFilter: true,
+  asrEngine: 'local',
+  remoteModel: 'google/gemini-2.5-flash-lite',
   transcribeMode: 'after',
   asrModel: 'turbo',
   mcpPort: PREFERRED_PORT,
@@ -165,6 +183,10 @@ export async function getSettings(): Promise<Settings> {
         ? (stored.speakerSplit as SpeakerSplit)
         : DEFAULTS.speakerSplit,
       echoFilter: typeof stored.echoFilter === 'boolean' ? stored.echoFilter : DEFAULTS.echoFilter,
+      asrEngine: stored.asrEngine === 'openrouter' ? 'openrouter' : DEFAULTS.asrEngine,
+      remoteModel: typeof stored.remoteModel === 'string' && stored.remoteModel.trim()
+        ? stored.remoteModel.trim()
+        : DEFAULTS.remoteModel,
       transcribeMode:
         stored.transcribeMode === 'live' || stored.transcribeMode === 'after' || stored.transcribeMode === 'manual'
           ? stored.transcribeMode

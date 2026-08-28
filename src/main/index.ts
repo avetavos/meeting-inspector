@@ -8,8 +8,9 @@ import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type Mo
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
 import { startedAtFromId, titleOf, type MeetingLanguage } from '../shared/meetings.ts'
-import { TRACKS, transcribeRecorded, type Track } from './replay.ts'
-import { mcpToken } from './token.ts'
+import { TRACKS, transcribeRecorded, type ReplayServer, type Track } from './replay.ts'
+import { mcpToken, openrouterKey, setOpenrouterKey } from './token.ts'
+import { Remote, connect as connectOpenrouter } from './openrouter.ts'
 import { getSettings, setSettings, validPort, type AsrModel, type Language, type Settings } from './settings.ts'
 import { hasSpeech } from './vad.ts'
 import {
@@ -148,6 +149,31 @@ function transcription(wc: WebContents): Promise<Whisper> {
  * recording is in progress — chunks are still arriving, and reloading the model
  * mid-meeting would be far worse than holding it.
  */
+/**
+ * The engine a recorded pass should run through: whisper on this machine, or the user's
+ * chosen model at OpenRouter (spec: settings.ts's asrEngine).
+ *
+ * Falls back to whisper rather than failing when 'openrouter' is selected with no key —
+ * a setting pointing at a key that has since been removed must not turn every recorded
+ * meeting into an error, and the local engine is the one that always works. Only the
+ * recorded paths call this; live transcription is whisper's alone (`transcription`).
+ */
+async function replayEngine(wc: WebContents): Promise<ReplayServer> {
+  const settings = await getSettings()
+  const key = settings.asrEngine === 'openrouter' ? await openrouterKey() : ''
+  if (!key) return transcription(wc)
+  return new Remote({
+    apiKey: key,
+    model: settings.remoteModel,
+    noiseFilter: async () => (await getSettings()).noiseFilter,
+    onSegments: (track, segments) => {
+      const withSpeaker = segments.map((s) => ({ ...s, speaker: SPEAKER[track as Track] }))
+      if (current) current.segments.push(...withSpeaker)
+      else batchSink?.push(...withSpeaker)
+    },
+  })
+}
+
 function releaseWhisper(): void {
   const pending = whisper
   whisper = null
@@ -295,7 +321,7 @@ async function transcribeOne(
   batchSink = collected
   let total: number
   try {
-    const server = await transcription(wc)
+    const server = await replayEngine(wc)
     total = await transcribeRecorded(server, dir, language, onProgress, signal)
   } finally {
     batchSink = null
@@ -461,7 +487,7 @@ async function finishSessionStop(
     // now, one track at a time. A failure here (e.g. whisper-server won't start, or
     // before-quit aborting `signal` to save what already came back — HIGH 1) must not
     // lose the recording that is already safely on disk.
-    transcribeOk = await transcription(wc)
+    transcribeOk = await replayEngine(wc)
       .then((server) => transcribeRecorded(server, s.dir, s.language, (fraction) => wc.send('meeting:transcribing', fraction), signal))
       .then(() => true)
       .catch((err: unknown) => {
@@ -1055,6 +1081,33 @@ function registerIpc(): void {
    * files step, so "where did my meeting go?" has an answer before the first one is
    * recorded. Opened without assertMeetingDir: this IS the root that guard is about,
    * and it comes from main, not the renderer. */
+  // ---- OpenRouter (openrouter.ts) ---------------------------------------
+  /** Whether a key is stored — never the key itself. The renderer has no business
+   * holding it, and showing it back would only give it a second place to leak from. */
+  ipcMain.handle('openrouter:has-key', async () => (await openrouterKey()).length > 0)
+  /**
+   * Saves the key and immediately reports what it can be used for: whether it works,
+   * what credit is left on it, and every model on OpenRouter that accepts audio, priced.
+   * Saved before the check, not after, so a key that works but whose account has some
+   * unrelated problem is still the key the user typed and can fix.
+   */
+  ipcMain.handle('openrouter:connect', async (_e, key: string) => {
+    if (typeof key !== 'string') throw new Error('openrouter:connect expects a key')
+    await setOpenrouterKey(key)
+    return connectOpenrouter(key)
+  })
+  /** Re-reads the model list with the stored key — the set of models that take audio,
+   * and their prices, both change without anyone here doing anything. */
+  ipcMain.handle('openrouter:models', async () => {
+    const key = await openrouterKey()
+    if (!key) throw new Error('ยังไม่ได้ใส่ API key')
+    return connectOpenrouter(key)
+  })
+  ipcMain.handle('openrouter:forget', async () => {
+    await setOpenrouterKey('')
+    await setSettings({ asrEngine: 'local' })
+  })
+
   ipcMain.handle('notes:root', () => NOTES_ROOT)
   ipcMain.handle('notes:open', async () => {
     await mkdir(NOTES_ROOT, { recursive: true })
