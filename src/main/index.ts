@@ -672,9 +672,12 @@ function registerIpc(): void {
   ipcMain.handle('meeting:rename', async (_e, dir: string, speakers: Record<string, string>) => {
     const guarded = assertMeetingDir(dir)
     const previous = await readTranscript(guarded)
-    // LOW 10: today's renderer already falls back to the raw label before sending
-    // (`input.value.trim() || label`), so a blank string never arrives from the app's
-    // own UI — but the IPC handler is the trust boundary, not the renderer, and a
+    // LOW 10: a blank name means "this speaker has no name", which is a real state —
+    // the renderer sends one for an unnamed speaker, and for one whose wrong voice match
+    // was just reported. Blanks are filtered out rather than merged, so the stored value
+    // stays whatever it was (usually blank) instead of being overwritten with an empty
+    // string that later readers would have to special-case. The IPC handler is the trust
+    // boundary, not the renderer, and a
     // caller sending one directly used to merge it straight into `speakers` (only the
     // `remember()` loop below skipped it, leaving a blank display name — resolved to
     // `''` by resolveSpeakerNames/`?? speaker`, since `''` is not nullish). Filtered
@@ -693,7 +696,17 @@ function registerIpc(): void {
     for (const [speaker, name] of Object.entries(named)) {
       if (speaker === 'me' || speaker === name) continue
       const id = await remember(guarded, { ...previous, speakers: merged }, speaker, name.trim()).catch(() => null)
-      if (id) speakerVoices[speaker] = { voiceId: id, name: name.trim() }
+      if (id) {
+        speakerVoices[speaker] = { voiceId: id, name: name.trim() }
+      } else if (speakerVoices[speaker]) {
+        // remember() declined — this speaker has under two seconds of their own audio
+        // in this meeting, which is not enough to learn a voice from (voices.ts).
+        // The rename still has to take: `speakerVoices[speaker].name` is what
+        // resolveSpeakerNames falls back to when the voice behind it is gone, so
+        // leaving the old name here means the user retypes the name, saves, and watches
+        // it change back — found by renaming a speaker whose lines were all short.
+        speakerVoices[speaker] = { ...speakerVoices[speaker], name: name.trim() }
+      }
     }
 
     const updated: Transcript = { ...previous, speakers: merged, speakerVoices }

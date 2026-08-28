@@ -235,6 +235,7 @@ const en = {
   speakerMergeHint: 'If someone got split into two speakers, give them the same name to merge them.',
   speakerScopeHint: 'A 🔊 speaker is a voice this app already recognises — renaming them updates every meeting. Anyone else is renamed only in this meeting.',
   voiceRecognisedTag: 'recognised',
+  speakerParts: (n: number) => `${n} parts`,
   speakerWrongVoice: 'Not them',
   speakerWrongVoiceHint: 'This speaker was matched to a stored voice — say so if it is the wrong person.',
   speakerWrongTitle: (name: string) => `This is not ${name}?`,
@@ -568,6 +569,7 @@ const th: typeof en = {
   speakerMergeHint: 'ถ้าแยกคนพูดผิด ตั้งชื่อเดียวกันให้สองคน = รวมเป็นคนเดียว',
   speakerScopeHint: 'ผู้พูดที่มี 🔊 คือเสียงที่แอปนี้จำได้แล้ว — เปลี่ยนชื่อจะอัปเดตทุกการประชุม ส่วนคนอื่นจะเปลี่ยนแค่ในการประชุมนี้',
   voiceRecognisedTag: 'จำได้แล้ว',
+  speakerParts: (n) => `${n} ช่วง`,
   speakerWrongVoice: 'ไม่ใช่คนนี้',
   speakerWrongVoiceHint: 'คนพูดคนนี้ถูกจับคู่กับเสียงที่แอปจำไว้ — ถ้าจับคู่ผิดคน กดตรงนี้',
   speakerWrongTitle: (name) => `นี่ไม่ใช่${name}ใช่ไหม?`,
@@ -1868,7 +1870,8 @@ playerSeek.oninput = () => seekPlayer((Number(playerSeek.value) / 1000) * player
 /** Scrolls the detail page's speaker editor to one speaker and marks it, so a name
  * noticed in the transcript can be corrected without hunting for its row. */
 function jumpToSpeakerRow(speaker: string): void {
-  const input = detailSpeakersEl.querySelector<HTMLInputElement>(`input[data-speaker="${CSS.escape(speaker)}"]`)
+  // `data-keys` holds every cluster the row covers — one row can be several of them.
+  const input = detailSpeakersEl.querySelector<HTMLInputElement>(`input[data-keys~="${CSS.escape(speaker)}"]`)
   if (!input) return
   const row = input.closest('.who')
   row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1944,67 +1947,95 @@ function renderSpeakerPanel(
   if (!dir) return
   void ensureVoiceNames()
 
-  const inputs = new Map<string, HTMLInputElement>()
+  // One row per PERSON, not per diarization cluster. Clustering routinely splits one
+  // voice across a dozen keys — a real meeting came back with SPEAKER_00 through
+  // SPEAKER_45 for four people — and once several of them carry the same name they ARE
+  // one person everywhere downstream: the transcript prints one name, voices.ts merges
+  // them by name. Listing them separately was showing the user the app's internal
+  // clustering and asking them to maintain it.
+  //
+  // Grouped by the STORED name, never by what is displayed: an unnamed key displays as
+  // "Speaker 3" (speakerDisplayName numbers them as they first appear), and those are
+  // genuinely unknown and genuinely separate until someone says otherwise, so each keeps
+  // its own row.
+  const groups = new Map<string, string[]>()
   for (const label of Object.keys(spk)) {
+    const name = (spk[label] ?? '').trim()
+    const key = name === '' ? `\u0000${label}` : name
+    groups.set(key, [...(groups.get(key) ?? []), label])
+  }
+
+  const inputs = new Map<string, HTMLInputElement>()
+  for (const [, labels] of groups) {
+    const first = labels[0]!
     const row = document.createElement('div')
     row.className = 'who'
     const tag = document.createElement('code')
-    tag.textContent = label
-    // Visible up front, not just after saving (spec item 3): a voice this diarize
-    // pass already tied to an id renames everywhere that id is used; anything else
-    // renames only this meeting — see speakerScopeHint below for the full rule.
-    // Only a speaker the app matched to a stored voice can BE mis-matched — everyone
-    // else is just a name someone typed here, and the ordinary rename already fixes that.
-    const linked = spkVoices?.[label]
-    if (linked) {
+    // The keys behind the row, said once. A person split across a dozen clusters is
+    // worth knowing about — it is the visible symptom of the speaker-split setting
+    // being too fine for this recording.
+    tag.textContent = labels.length === 1 ? first : t().speakerParts(labels.length)
+    tag.title = labels.join(' ')
+
+    // Visible up front, not just after saving (spec item 3): a voice this diarize pass
+    // already tied to an id renames everywhere that id is used; anything else renames
+    // only this meeting — see speakerScopeHint below for the full rule. Only a speaker
+    // the app matched to a stored voice can BE mis-matched; everyone else is just a name
+    // someone typed here, and the ordinary rename already fixes that.
+    const linked = labels.filter((label) => spkVoices?.[label])
+    if (linked.length > 0) {
       const badge = document.createElement('span')
       badge.className = 'voice-badge'
       badge.textContent = '🔊'
       badge.title = t().voiceRecognisedTag
       tag.append(badge)
     }
+
     const input = document.createElement('input')
-    input.value = spk[label] ?? label
+    input.value = spk[first] ?? ''
     // Suggests the people the app already knows. This is where a person's name is
     // actually typed, meeting after meeting, so it is where "พี่เพิร์ด" gets typed for
     // "พี่เพิร์ช" and becomes a second person — and picking the existing name here is
     // the same merge the hint below already promises for two speakers in one meeting.
     input.setAttribute('list', VOICE_NAMES_LIST)
-    input.dataset['speaker'] = label
+    input.dataset['speaker'] = first
+    // Every key in the group, so a line in the transcript can find the row its own
+    // speaker ended up inside (jumpToSpeakerRow).
+    input.dataset['keys'] = labels.join(' ')
     input.oninput = () => {
-      spk[label] = input.value
+      for (const label of labels) spk[label] = input.value
       onPreview()
     }
-    inputs.set(label, input)
+    inputs.set(first, input)
     row.append(tag, input)
 
-    if (linked) {
+    if (linked.length > 0) {
       const wrong = document.createElement('button')
       wrong.className = 'wrong-voice'
       wrong.textContent = t().speakerWrongVoice
       wrong.title = t().speakerWrongVoiceHint
       wrong.onclick = async () => {
         if (!dir) return
-        const answer = await window.api.ask(t().speakerWrongTitle(spk[label] ?? label), t().speakerWrongDetail, [
+        const answer = await window.api.ask(t().speakerWrongTitle(spk[first] ?? first), t().speakerWrongDetail, [
           t().speakerWrongYes,
           t().deleteCancel,
         ])
         if (answer !== 0) return
         wrong.disabled = true
-        // Unlinking is the report; naming is the correction, and that is left to the
-        // user, because the app has just been told its own guess was wrong.
-        await window.api.unlinkSpeaker(dir, label)
+        // Every key under this name, because the report is about the name: the group is
+        // the set of clusters currently claimed to be this person, and the claim is what
+        // was just called wrong.
+        for (const label of linked) await window.api.unlinkSpeaker(dir, label)
         // Emptied rather than deleted: an absent key would take the row out of this
         // editor, and the row is where the correction gets typed. Empty is also what
         // every reader of `speakers` already treats as unnamed — the transcript falls
         // straight back to "Speaker N" (speakerDisplayName) without being told.
-        spk[label] = ''
-        if (spkVoices) delete spkVoices[label]
+        for (const label of labels) spk[label] = ''
+        for (const label of labels) if (spkVoices) delete spkVoices[label]
         onSave(spk)
         onPreview()
         renderSpeakerPanel(dir, spk, container, onPreview, onSave, spkVoices)
-        const fresh = container.querySelector<HTMLInputElement>(`input[data-speaker="${CSS.escape(label)}"]`)
-        fresh?.focus()
+        container.querySelector<HTMLInputElement>(`input[data-speaker="${CSS.escape(first)}"]`)?.focus()
       }
       row.append(wrong)
     }
@@ -2016,9 +2047,17 @@ function renderSpeakerPanel(
   save.textContent = t().speakerSave
   save.onclick = async () => {
     save.disabled = true
-    const named = Object.fromEntries(
-      [...inputs].map(([label, input]) => [label, input.value.trim() || label]),
-    )
+    // Expanded back out to one entry per key: the rows are people, but the transcript
+    // and everything under it are still keyed by cluster.
+    const named: Record<string, string> = {}
+    for (const [first, input] of inputs) {
+      for (const label of (input.dataset['keys'] ?? first).split(' ')) {
+        // Blank stays blank. Falling back to the raw key here used to save a speaker
+        // literally called "SPEAKER_18", which then displayed as "SPEAKER_18" instead of
+        // the "Speaker N" placeholder an unnamed speaker is supposed to read as.
+        named[label] = input.value.trim()
+      }
+    }
     const result = (await window.api.renameSpeakers(dir, named)).speakers
     onSave(result)
     // Saving here is one of the ways a voice gets a name in the first place, so the
