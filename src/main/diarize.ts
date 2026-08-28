@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { model, requireFiles } from './models.ts'
 import type { Transcript } from './store.ts'
+import type { SpeakerSplit } from './settings.ts'
 
 export type Turn = { start: number; end: number; speaker: number }
 
@@ -15,6 +16,26 @@ const SEGMENTATION = model('pyannote-segmentation-3-0.onnx')
 const EMBEDDING = model('campplus-sv-zh_en.onnx')
 
 /**
+ * sherpa's FastClustering `threshold` is a cosine DISTANCE, so a smaller number splits
+ * MORE: it is the furthest apart two pieces of speech can sound and still be filed as
+ * the same person.
+ *
+ * The app used to hard-code 0.5 — sherpa's own example value — and on real meeting
+ * audio that split one person into dozens. A recording of four people came back with
+ * SPEAKER_00 through SPEAKER_45, most of them the same voice arriving at different
+ * levels through a conference app. There is no single value that is right for every
+ * room (a close mic really does want a fine split, or two similar voices merge into
+ * one person and the transcript quietly attributes half of what one said to the
+ * other), so this is a setting, defaulted to the middle step rather than to the value
+ * that produced that transcript.
+ */
+export const SPEAKER_SPLIT_THRESHOLD: Record<SpeakerSplit, number> = {
+  fine: 0.5,
+  balanced: 0.7,
+  coarse: 0.85,
+}
+
+/**
  * `signal`, if given, is only checked right before the one call below that actually
  * costs anything (MEDIUM 5) — `engine.process()` is a synchronous native call that
  * blocks the whole event loop for the length of the pass, so it cannot be interrupted
@@ -22,7 +43,11 @@ const EMBEDDING = model('campplus-sv-zh_en.onnx')
  * up first (e.g. it was queued behind another meeting in the batch's diarize pass and
  * cancel landed before its turn came).
  */
-export async function diarize(wavPath: string, signal?: AbortSignal): Promise<Turn[]> {
+export async function diarize(
+  wavPath: string,
+  signal?: AbortSignal,
+  threshold: number = SPEAKER_SPLIT_THRESHOLD.balanced,
+): Promise<Turn[]> {
   await requireFiles([SEGMENTATION, EMBEDDING], 'use the download button in the app')
   // Required late: this pulls in a ~30MB native addon nobody needs until a meeting ends.
   // It is CommonJS, so depending on who does the loading the class arrives either as a
@@ -32,8 +57,9 @@ export async function diarize(wavPath: string, signal?: AbortSignal): Promise<Tu
   const engine = new OfflineSpeakerDiarization({
     segmentation: { pyannote: { model: SEGMENTATION } },
     embedding: { model: EMBEDDING },
-    // Let clustering decide how many people were in the room (spec §8).
-    clustering: { numClusters: -1, threshold: 0.5 },
+    // Let clustering decide how many people were in the room (spec §8), at the
+    // distance the user's own recordings turned out to need (see the constant above).
+    clustering: { numClusters: -1, threshold },
   })
 
   const wav = await readFile(wavPath)

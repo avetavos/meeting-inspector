@@ -9,6 +9,7 @@ import type {
   MeetingLanguage,
   ModelStatus,
   PendingVoiceItem,
+  SpeakerSplit,
   Transcript,
   TranscribeMode,
   TranscribeStatus,
@@ -38,6 +39,12 @@ const en = {
   voicesHeading: (n: number) => `Voices I recognise (${n})`,
   voicesEmpty: 'No voices yet — name a speaker after a meeting and I will know them next time',
   voicesForget: 'Forget',
+  voicesSamples: (n: number) => `${n} recordings`,
+  voicesRenameHint: 'Rename, or type a name already in the list to merge the two into one person.',
+  voicesMergeTitle: (from: string, to: string) => `Merge "${from}" into "${to}"?`,
+  voicesMergeDetail:
+    'They become one person: one row here, one name everywhere it has already been used, and both recordings of the voice kept as ways to recognise them. Splitting them again means renaming one back.',
+  voicesMergeConfirm: 'Merge',
   pendingHeading: (n: number) => `New voices waiting to be named (${n})`,
   pendingEmpty: 'No new voices waiting to be named',
   pendingHeard: (title: string, when: string) => `First heard in ${title} · ${when}`,
@@ -118,6 +125,18 @@ const en = {
   asrModelTimingNote: 'Times are approximate, measured on an Apple Silicon Mac — yours may differ.',
   meetingLangLabel: 'Meeting language',
   meetingLangName: { th: 'Thai', en: 'English' } as Record<MeetingLanguage, string>,
+  speakerSplitLabel: 'Splitting speakers apart',
+  speakerSplitName: {
+    fine: 'Fine — every difference is a new person',
+    balanced: 'Balanced',
+    coarse: 'Coarse — same person more often',
+  } as Record<SpeakerSplit, string>,
+  speakerSplitHint: {
+    fine: 'Two people with similar voices stay two people, but one person recorded at changing volume — through a conference app, or moving away from the mic — can come back as several.',
+    balanced: 'The default. Handles most meetings recorded through a call.',
+    coarse: 'Use when a transcript comes back with far more speakers than were in the room. Two genuinely similar voices may be filed as the same person.',
+  } as Record<SpeakerSplit, string>,
+  speakerSplitApplies: 'Applies the next time a meeting is diarized — re-transcribe an existing one to redo it with this setting.',
   meetingLangHint:
     'The language people speak in the meeting — not the interface language above. Picking wrong is costly: in our tests, an English meeting decoded as Thai came out with 9.0% of characters wrong and missed a technical term (17/18); decoded as English, 0.6% wrong and every term right (18/18). A Thai meeting decoded as English came out 34.0% wrong (21/27 terms); decoded as Thai, 15.7% wrong (22/27 terms).',
   noiseLabel: 'Ignore noise',
@@ -309,6 +328,12 @@ const th: typeof en = {
   voicesHeading: (n: number) => `เสียงที่จำได้ (${n} คน)`,
   voicesEmpty: 'ยังไม่จำเสียงใคร — ตั้งชื่อคนพูดหลังประชุมสักครั้ง ครั้งหน้าจะเติมชื่อให้เอง',
   voicesForget: 'ลืมเสียงนี้',
+  voicesSamples: (n) => `${n} ตัวอย่างเสียง`,
+  voicesRenameHint: 'แก้ชื่อได้เลย หรือพิมพ์ชื่อที่มีอยู่แล้วในลิสต์เพื่อรวมเป็นคนเดียวกัน',
+  voicesMergeTitle: (from, to) => `รวม "${from}" เข้ากับ "${to}"?`,
+  voicesMergeDetail:
+    'จะกลายเป็นคนเดียวกัน — เหลือแถวเดียวในลิสต์ ใช้ชื่อเดียวกันทุกที่ที่เคยใช้ไปแล้ว และเก็บตัวอย่างเสียงทั้งสองไว้ช่วยให้จำได้แม่นขึ้น ถ้าจะแยกกลับต้องเปลี่ยนชื่อคืนเอง',
+  voicesMergeConfirm: 'รวม',
   pendingHeading: (n: number) => `เสียงใหม่รอตั้งชื่อ (${n} คน)`,
   pendingEmpty: 'ยังไม่มีเสียงใหม่รอตั้งชื่อ',
   pendingHeard: (title: string, when: string) => `ได้ยินครั้งแรกในการประชุม ${title} · ${when}`,
@@ -382,6 +407,18 @@ const th: typeof en = {
   asrModelTimingNote: 'เวลาที่บอกเป็นค่าประมาณ วัดจาก Mac Apple Silicon เครื่องจริงอาจต่างไปบ้าง',
   meetingLangLabel: 'ภาษาที่ใช้ในที่ประชุม',
   meetingLangName: { th: 'ไทย', en: 'อังกฤษ' } as Record<MeetingLanguage, string>,
+  speakerSplitLabel: 'การแยกคนพูด',
+  speakerSplitName: {
+    fine: 'ละเอียด — ต่างกันนิดเดียวก็นับเป็นคนใหม่',
+    balanced: 'สมดุล',
+    coarse: 'หยาบ — นับเป็นคนเดียวกันบ่อยขึ้น',
+  } as Record<SpeakerSplit, string>,
+  speakerSplitHint: {
+    fine: 'คนสองคนที่เสียงคล้ายกันจะยังถูกแยกไว้ แต่คนคนเดียวที่ดังไม่เท่ากันตลอด — ผ่านแอปประชุม หรือขยับห่างไมค์ — อาจกลายเป็นหลายคน',
+    balanced: 'ค่าเริ่มต้น ใช้ได้กับการประชุมผ่านสายส่วนใหญ่',
+    coarse: 'ใช้เมื่อ transcript ออกมามีคนพูดเยอะกว่าคนในห้องจริงมาก แลกกับว่าคนที่เสียงคล้ายกันจริงๆ อาจถูกนับเป็นคนเดียวกัน',
+  } as Record<SpeakerSplit, string>,
+  speakerSplitApplies: 'มีผลกับการแยกคนพูดครั้งถัดไป — ถอดเสียงการประชุมเดิมซ้ำเพื่อให้ใช้ค่านี้',
   meetingLangHint:
     'ภาษาที่คนพูดในที่ประชุม — ไม่ใช่ภาษาของหน้าจอด้านบน เลือกผิดมีต้นทุนจริง: จากการทดสอบ ประชุมภาษาอังกฤษที่ถอดเป็นไทยผิดพลาด 9.0% ของตัวอักษร และจับศัพท์เทคนิคพลาดไปหนึ่งคำ (ได้ 17/18) แต่ถอดเป็นอังกฤษผิดพลาดแค่ 0.6% จับศัพท์ได้ครบ (18/18) ส่วนประชุมภาษาไทยที่ถอดเป็นอังกฤษผิดพลาด 34.0% (จับศัพท์ได้ 21/27) แต่ถอดเป็นไทยผิดพลาด 15.7% (จับศัพท์ได้ 22/27)',
   noiseLabel: 'กรองเสียงรบกวน',
@@ -575,6 +612,9 @@ const asrModelNoteEl = $('asr-model-note')
 const meetingLangSelect = $<HTMLSelectElement>('meeting-lang')
 const meetingLangLabelEl = $('meeting-lang-label')
 const meetingLangHintEl = $('meeting-lang-hint')
+const speakerSplitLabelEl = $('speaker-split-label')
+const speakerSplitSelect = $<HTMLSelectElement>('speaker-split')
+const speakerSplitHintEl = $('speaker-split-hint')
 const micToggle = $<HTMLButtonElement>('mictest-toggle')
 const micTestLockHint = $('mictest-lock-hint')
 const micTestRowLabel = $('mictest-row-label')
@@ -1795,30 +1835,107 @@ function showMcpError(message: string): void {
  * The voices the app has learned. Naming a speaker after a meeting teaches it one;
  * this is where you take it back.
  */
+/**
+ * Every name the app answers to, one row per person. Held here (rather than re-fetched)
+ * so the pending-voice rows below can offer the same names as suggestions without a
+ * second round trip per row.
+ */
+let knownVoiceNames: string[] = []
+
+/**
+ * Renames a person, and merges two of them when the new name is one that already
+ * exists — the same operation from the app's point of view (voices.ts's renameVoices),
+ * but not from the user's, so a merge says what it is and asks first. Merging is the
+ * whole point: diarization files the same person under a fresh voice every time it
+ * fails to recognise them, so "บิว" ends up in the list four times, and a typo'd name
+ * is a fifth person until it is renamed onto the right one.
+ */
+async function renameVoice(from: string, to: string): Promise<void> {
+  const trimmed = to.trim()
+  if (!trimmed || trimmed === from) return void (await renderVoices())
+  if (knownVoiceNames.includes(trimmed)) {
+    const answer = await window.api.ask(t().voicesMergeTitle(from, trimmed), t().voicesMergeDetail, [
+      t().voicesMergeConfirm,
+      t().deleteCancel,
+    ])
+    if (answer !== 0) return void (await renderVoices())
+  }
+  await window.api.renameVoice(from, trimmed)
+  await renderVoices()
+  await renderPendingVoices()
+}
+
 async function renderVoices(): Promise<void> {
-  const names = await window.api.knownVoices()
+  const voices = await window.api.knownVoices()
+  knownVoiceNames = voices.map((v) => v.name)
   voicesEl.replaceChildren()
 
   const heading = document.createElement('div')
   heading.className = 'hint'
-  heading.textContent = names.length > 0 ? t().voicesHeading(names.length) : t().voicesEmpty
+  heading.textContent = voices.length > 0 ? t().voicesHeading(voices.length) : t().voicesEmpty
   voicesEl.append(heading)
 
-  for (const name of names) {
+  for (const voice of voices) {
     const row = document.createElement('div')
     row.className = 'voice'
-    const who = document.createElement('span')
-    who.textContent = name
+
+    // An <input>, not a label with an edit button: renaming and merging are the two
+    // things this list exists for now, and a name that reads as editable is the whole
+    // affordance. The datalist is what makes a merge reachable without retyping — pick
+    // the person this one is really the same as.
+    const who = document.createElement('input')
+    who.className = 'voice-name'
+    who.value = voice.name
+    who.setAttribute('list', VOICE_NAMES_LIST)
+    who.title = t().voicesRenameHint
+    who.onkeydown = (e) => {
+      if (e.key === 'Enter') who.blur()
+      else if (e.key === 'Escape') {
+        who.value = voice.name
+        who.blur()
+      }
+    }
+    who.onchange = () => void renameVoice(voice.name, who.value)
+
+    // Only said when there is more than one, so the common case stays a plain name.
+    const samples = document.createElement('span')
+    samples.className = 'voice-samples'
+    samples.textContent = voice.samples > 1 ? t().voicesSamples(voice.samples) : ''
+
     const forget = document.createElement('button')
     forget.textContent = t().voicesForget
     forget.onclick = async () => {
       forget.disabled = true
-      await window.api.forgetVoice(name)
+      await window.api.forgetVoice(voice.name)
       await renderVoices()
     }
-    row.append(who, forget)
+    row.append(who, samples, forget)
     voicesEl.append(row)
   }
+
+  renderVoiceNameOptions()
+}
+
+/** The id of the one shared <datalist> every name box points at — the Speakers rows and
+ * the pending-voice rows all want the same list of people. */
+const VOICE_NAMES_LIST = 'voice-names'
+
+/** Rebuilt whenever the set of names changes; a single element, appended once, because
+ * a <datalist> is referenced by id and does not care where in the document it sits. */
+function renderVoiceNameOptions(): void {
+  let list = document.getElementById(VOICE_NAMES_LIST) as HTMLDataListElement | null
+  if (!list) {
+    list = document.createElement('datalist')
+    list.id = VOICE_NAMES_LIST
+    document.body.append(list)
+  }
+  list.replaceChildren(
+    ...knownVoiceNames.map((name) => {
+      const option = document.createElement('option')
+      option.value = name
+      return option
+    }),
+  )
 }
 
 /** Playing a pending voice's sample is one at a time — a second click (this row or
@@ -1924,6 +2041,11 @@ async function renderPendingVoices(): Promise<void> {
 
     const input = document.createElement('input')
     input.placeholder = t().pendingNamePlaceholder
+    // Suggests the people the app already knows: naming this voice with one of their
+    // names is what "this is the same person" means here, and typing it out from memory
+    // is exactly how "พี่เพิร์ด" ends up beside "พี่เพิร์ช" as a separate person.
+    input.setAttribute('list', VOICE_NAMES_LIST)
+    input.title = t().voicesRenameHint
     input.value = pendingVoiceDrafts.get(item.id) ?? ''
     input.oninput = () => pendingVoiceDrafts.set(item.id, input.value)
 
@@ -2961,6 +3083,11 @@ function applyLanguage(l: Language): void {
   meetingLangOptions[0]!.textContent = t().meetingLangName.th
   meetingLangOptions[1]!.textContent = t().meetingLangName.en
   meetingLangHintEl.textContent = t().meetingLangHint
+  speakerSplitLabelEl.textContent = t().speakerSplitLabel
+  for (const option of speakerSplitSelect.options) {
+    option.textContent = t().speakerSplitName[option.value as SpeakerSplit] ?? option.value
+  }
+  renderSpeakerSplitHint()
   noiseLabel.textContent = t().noiseLabel
   portLabel.textContent = t().portLabel
   portSave.textContent = t().portSave
@@ -3039,6 +3166,24 @@ noiseSelect.onchange = async () => {
   }
 }
 
+/** Two sentences, not one: what this step does to a transcript, and the fact that it
+ * cannot fix the transcript already on disk — the setting is only consulted when a
+ * meeting is diarized, so an existing one has to be re-transcribed to feel it. */
+function renderSpeakerSplitHint(): void {
+  const step = speakerSplitSelect.value as SpeakerSplit
+  speakerSplitHintEl.textContent = `${t().speakerSplitHint[step] ?? ''} ${t().speakerSplitApplies}`
+}
+
+speakerSplitSelect.onchange = async () => {
+  speakerSplitSelect.disabled = true
+  try {
+    await window.api.setSpeakerSplit(speakerSplitSelect.value as SpeakerSplit)
+    renderSpeakerSplitHint()
+  } finally {
+    speakerSplitSelect.disabled = false
+  }
+}
+
 meetingLangSelect.onchange = async () => {
   meetingLangSelect.disabled = true
   try {
@@ -3065,6 +3210,7 @@ void window.api.getSettings().then((settings) => {
   noiseSelect.value = settings.noiseFilter
   setTranscribeModeValue(settings.transcribeMode)
   meetingLangSelect.value = settings.meetingLanguage
+  speakerSplitSelect.value = settings.speakerSplit
   applyLanguage(settings.language)
   // A genuine first run (no settings.json at all — settings.ts's getSettings tells that
   // apart from an existing user simply upgrading into this build) lands here instead of

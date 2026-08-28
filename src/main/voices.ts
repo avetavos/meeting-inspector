@@ -392,10 +392,54 @@ export async function followMeetingRename(from: string, to: string): Promise<voi
   })
 }
 
-export const knownVoices = async (): Promise<string[]> =>
-  (await read())
-    .filter((v): v is Voice & { name: string } => v.name !== null)
-    .map((v) => v.name)
+/**
+ * One entry per PERSON, not per stored embedding. A name is what identity means here —
+ * `resolveSpeakerNames` resolves a transcript's voice id to whatever that voice is
+ * called today, and `forget` already drops every voice under a name at once — but the
+ * same person genuinely does accumulate several embeddings: `remember` mints a fresh id
+ * whenever the speaker was tied to a voice this diarize pass (its own doc comment says
+ * why), so naming the same person again in a later meeting adds a second exemplar
+ * rather than replacing the first. That is good for recognition and terrible to read:
+ * Settings › Speakers was listing "บิว" four times with no way to tell the rows apart.
+ * `samples` is that count, said out loud instead of shown as repetition.
+ */
+export type KnownVoice = { name: string; samples: number }
+export const knownVoices = async (): Promise<KnownVoice[]> => {
+  const counts = new Map<string, number>()
+  for (const voice of await read()) {
+    if (voice.name !== null) counts.set(voice.name, (counts.get(voice.name) ?? 0) + 1)
+  }
+  return [...counts]
+    .map(([name, samples]) => ({ name, samples }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Renames every voice stored under `from`, and returns how many that was.
+ *
+ * This is also how two voices get merged, because there is nothing else to merge:
+ * giving one person's second entry the name the first already has makes them one
+ * person in every place that matters — the Speakers list collapses them into one row,
+ * a later rename moves both, forgetting one forgets both, and every transcript
+ * pointing at either id already resolves through the name. The embeddings stay as they
+ * are, which is the point: two recordings of the same person are two exemplars to
+ * match against, not a duplicate to throw away.
+ *
+ * A typo'd name is the same operation from the other direction — "พี่เพิร์ด" typed once
+ * where "พี่เพิร์ช" was meant is a second person until one is renamed onto the other.
+ */
+export async function renameVoices(from: string, to: string): Promise<number> {
+  const trimmed = to.trim()
+  if (!trimmed || trimmed === from) return 0
+  return locked(async () => {
+    const voices = await read()
+    const hit = voices.filter((v) => v.name === from)
+    if (hit.length === 0) return 0
+    for (const voice of hit) voice.name = trimmed
+    await write(voices)
+    return hit.length
+  })
+}
 
 export async function forget(name: string): Promise<void> {
   await locked(async () => {

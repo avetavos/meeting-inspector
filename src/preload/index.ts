@@ -1,12 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelStatus, Progress } from '../main/download.ts'
-import type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, TranscribeMode } from '../main/settings.ts'
+import type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
 import type { TranscribeStatus } from '../main/store.ts'
 import type { Transcript } from '../shared/meetings.ts'
 
 export type { Transcript } from '../shared/meetings.ts'
 export type { ModelStatus, Progress } from '../main/download.ts'
-export type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, TranscribeMode } from '../main/settings.ts'
+export type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
 export type { TranscribeStatus } from '../main/store.ts'
 
 export type Track = 'loopback' | 'mic'
@@ -39,6 +39,10 @@ export type MeetingItem = {
  * itself is a separate call (voiceSample) since it's heavier and only wanted on
  * demand, not prefetched for every pending voice up front. */
 export type PendingVoiceItem = { id: string; meetingId: string; meetingTitle: string; at: string; text: string }
+/** One row of Settings › Speakers: a person, and how many stored embeddings are filed
+ * under that name (voices.ts's KnownVoice) — several is normal for someone named across
+ * more than one meeting, and is why the list needed collapsing. */
+export type KnownVoice = { name: string; samples: number }
 export type BatchTick = { id: string; index: number; total: number; fraction: number }
 export type BatchItem = {
   id: string
@@ -98,6 +102,10 @@ const api = {
     ipcRenderer.invoke('settings:set', { noiseFilter }),
   setMeetingLanguage: (meetingLanguage: MeetingLanguage): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', { meetingLanguage }),
+  /** How eagerly diarization merges what it hears into one speaker. Takes effect the
+   * next time a meeting is diarized, not retroactively. */
+  setSpeakerSplit: (speakerSplit: SpeakerSplit): Promise<Settings> =>
+    ipcRenderer.invoke('settings:set', { speakerSplit }),
   setTranscribeMode: (transcribeMode: TranscribeMode): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', { transcribeMode }),
   setAsrModel: (asrModel: AsrModel): Promise<Settings> => ipcRenderer.invoke('settings:set', { asrModel }),
@@ -110,7 +118,10 @@ const api = {
   /** Releases whisper-server once the mic test is done with it (spec item 4). */
   endMicTest: (): Promise<void> => ipcRenderer.invoke('mic:test-end'),
 
-  knownVoices: (): Promise<string[]> => ipcRenderer.invoke('voices:list'),
+  knownVoices: (): Promise<KnownVoice[]> => ipcRenderer.invoke('voices:list'),
+  /** Renames every stored voice under `from`, and resolves to how many that was.
+   * Renaming onto a name that already exists is how two people get merged into one. */
+  renameVoice: (from: string, to: string): Promise<number> => ipcRenderer.invoke('voices:rename', from, to),
   forgetVoice: (name: string): Promise<void> => ipcRenderer.invoke('voices:forget', name),
 
   /** Voices waiting to be named (spec item 1), oldest first-heard first. */

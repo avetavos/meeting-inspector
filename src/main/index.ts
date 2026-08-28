@@ -3,7 +3,7 @@ import { mkdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
-import { assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
+import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
@@ -20,6 +20,7 @@ import {
   nameVoice,
   pendingVoices,
   remember,
+  renameVoices,
   resolveSpeakerNames,
   sampleWav,
   trackPending,
@@ -170,7 +171,7 @@ function releaseWhisper(): void {
 async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signal?: AbortSignal): Promise<void> {
   if (notify) wc.send('meeting:diarizing')
   try {
-    const turns = await diarize(join(dir, 'loopback.wav'), signal)
+    const turns = await diarize(join(dir, 'loopback.wav'), signal, SPEAKER_SPLIT_THRESHOLD[(await getSettings()).speakerSplit])
     const previous = await readTranscript(dir)
     const segments = assignSpeakers(previous.segments, turns)
     // HIGH 3: previous.speakerVoices tells speakerNames() which keys not to trust a
@@ -643,6 +644,13 @@ function registerIpc(): void {
 
   ipcMain.handle('voices:list', () => knownVoices())
   ipcMain.handle('voices:forget', (_e, name: string) => forget(name))
+  /** Renames every voice stored under one name — which is also the merge (voices.ts's
+   * renameVoices): renaming one person onto a name another already holds makes them one
+   * person. Returns how many stored voices moved, so the renderer can say so. */
+  ipcMain.handle('voices:rename', (_e, from: string, to: string) => {
+    if (typeof from !== 'string' || typeof to !== 'string') throw new Error('voices:rename expects two names')
+    return renameVoices(from, to)
+  })
 
   // Voices diarization has clustered but nobody has named yet (spec item 1) — enriched
   // here, not in voices.ts, with what the settings panel actually wants to show: a

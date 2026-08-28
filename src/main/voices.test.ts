@@ -54,7 +54,7 @@ test('voices: a named voice is recognised again, and a different one is not', { 
   assert.deepEqual(await voices.knownVoices(), [], 'starts with nothing learned')
 
   await voices.remember(dir, transcript, 'SPEAKER_00', 'พี่โจ้')
-  assert.deepEqual(await voices.knownVoices(), ['พี่โจ้'])
+  assert.deepEqual(await voices.knownVoices(), [{ name: 'พี่โจ้', samples: 1 }])
 
   // The same voice in the same recording must come back with the name on it.
   assert.equal((await voices.identify(dir, transcript, 'SPEAKER_00'))?.name, 'พี่โจ้')
@@ -70,7 +70,7 @@ test('voices: forgetting a voice stops it matching', { skip: skip() }, async () 
 
   await voices.forget('น้องมิ้น')
   assert.equal(await voices.identify(dir, transcript, 'SPEAKER_01'), null)
-  assert.ok(!(await voices.knownVoices()).includes('น้องมิ้น'))
+  assert.ok(!(await voices.knownVoices()).some((v) => v.name === 'น้องมิ้น'))
 })
 
 test('voices: a voice keeps the same id across remember() calls for the same name', { skip: skip() }, async () => {
@@ -104,7 +104,7 @@ test('voices: a speaker with almost no audio is not learned', { skip: skip() }, 
   // match, so too little audio must produce nothing rather than something wrong.
   const brief: Transcript = { ...transcript, segments: [{ t0: 0, t1: 0.4, speaker: 'SPEAKER_00', text: 'x' }] }
   await voices.remember(dir, brief, 'SPEAKER_00', 'ไม่ควรจำ')
-  assert.ok(!(await voices.knownVoices()).includes('ไม่ควรจำ'))
+  assert.ok(!(await voices.knownVoices()).some((v) => v.name === 'ไม่ควรจำ'))
 })
 
 test(
@@ -140,7 +140,7 @@ test('voices: naming a pending voice clears it from the pending list everywhere 
 
   await voices.nameVoice(id!, 'พี่หนึ่ง')
   assert.ok(!(await voices.pendingVoices()).some((p) => p.id === id), 'must stop being pending once named')
-  assert.ok((await voices.knownVoices()).includes('พี่หนึ่ง'))
+  assert.ok((await voices.knownVoices()).some((v) => v.name === 'พี่หนึ่ง'))
   // (Whether identify() now picks this exact id for SPEAKER_00 over an older named
   // voice built from the same fixture audio is a tie-breaking question this test
   // doesn't need to answer — the pending/known-list checks above are the behaviour
@@ -159,8 +159,8 @@ test('voices: renaming a speaker the app already recognised retargets that id, n
   }
   const second = await voices.remember(dir, recognised, 'SPEAKER_01', 'คุณบีทู')
   assert.equal(second, first, 'a recognised speaker must be renamed in place, by id — not given a new one')
-  assert.ok((await voices.knownVoices()).includes('คุณบีทู'))
-  assert.ok(!(await voices.knownVoices()).includes('คุณบี'), 'the old name must not linger as a second entry')
+  assert.ok((await voices.knownVoices()).some((v) => v.name === 'คุณบีทู'))
+  assert.ok(!(await voices.knownVoices()).some((v) => v.name === 'คุณบี'), 'the old name must not linger as a second entry')
 })
 
 test('voices: resolveSpeakerNames resolves the live name, then the stored fallback, then leaves an unrecognised key alone', async () => {
@@ -235,4 +235,44 @@ test('voices: a renamed meeting takes its pending voices with it (followMeetingR
   // A rename of some other meeting must leave this one alone.
   await voices.followMeetingRename('a-meeting-nothing-points-at', 'something-else')
   assert.equal((await voices.pendingVoices()).find((p) => p.id === id)?.meetingId, `${from}-retro`)
+})
+
+test('voices: the Speakers list is one row per person, and renaming onto an existing name merges them', { skip: skip() }, async () => {
+  // Reproduces the real complaint exactly. Diarization splits one person across two
+  // clusters; trackPending files each under its own pending voice; the user names both
+  // "บิว" in the transcript. remember() reuses the id each speaker key is already tied
+  // to (its own doc comment says why it must), so that is two stored voices with one
+  // name — and Settings › Speakers used to list "บิว" once per stored voice.
+  await voices.forget('บิว')
+  const first = await voices.trackPending(dir, transcript, 'SPEAKER_00', 'meeting-split')
+  const second = await voices.trackPending(dir, transcript, 'SPEAKER_01', 'meeting-split')
+  assert.ok(first && second && first !== second)
+  const recognised: Transcript = {
+    ...transcript,
+    speakerVoices: {
+      SPEAKER_00: { voiceId: first!, name: 'Speaker 1' },
+      SPEAKER_01: { voiceId: second!, name: 'Speaker 2' },
+    },
+  }
+  await voices.remember(dir, recognised, 'SPEAKER_00', 'บิว')
+  await voices.remember(dir, recognised, 'SPEAKER_01', 'บิว')
+
+  const listed = await voices.knownVoices()
+  assert.equal(listed.filter((v) => v.name === 'บิว').length, 1, 'one row per person, however many embeddings are stored')
+  assert.equal(listed.find((v) => v.name === 'บิว')?.samples, 2, 'and it says how many that was')
+
+  // A typo'd name is a separate person until it is renamed onto the right one.
+  await voices.forget('พี่เพิร์ด')
+  await voices.remember(dir, transcript, 'SPEAKER_00', 'พี่เพิร์ด')
+  const moved = await voices.renameVoices('พี่เพิร์ด', 'บิว')
+  assert.ok(moved > 0, 'returns how many stored voices moved')
+  const merged = await voices.knownVoices()
+  assert.equal(merged.filter((v) => v.name === 'บิว').length, 1)
+  assert.equal(merged.some((v) => v.name === 'พี่เพิร์ด'), false, 'the name it was merged out of must be gone')
+  assert.equal(merged.find((v) => v.name === 'บิว')?.samples, 2 + moved, 'the merged-in embeddings are kept, not discarded')
+
+  // All no-ops: nothing to rename, nothing to rename to, and nothing to change.
+  assert.equal(await voices.renameVoices('nobody-by-this-name', 'บิว'), 0)
+  assert.equal(await voices.renameVoices('บิว', '   '), 0)
+  assert.equal(await voices.renameVoices('บิว', 'บิว'), 0)
 })

@@ -60,6 +60,16 @@ export type Settings = {
    */
   meetingLanguage: MeetingLanguage
   noiseFilter: NoiseFilter
+  /**
+   * How eagerly diarization merges what it hears into one speaker (diarize.ts's
+   * SPEAKER_SPLIT_THRESHOLD). There is no value that is right for every room — a close
+   * mic and one person per voice tolerates a fine split; a meeting recorded through a
+   * conference app, where the same person's voice arrives at different levels through
+   * the call, needs a coarse one or it comes back with dozens of speakers who are all
+   * the same person. Default 'balanced', which is looser than the fixed value this
+   * replaced.
+   */
+  speakerSplit: SpeakerSplit
   transcribeMode: TranscribeMode
   /** Default 'turbo': lightest on RAM, and the default recording mode ('after') means
    * this is what most 16GB machines will run unattended. */
@@ -77,6 +87,11 @@ export type Settings = {
   onboarded: boolean
 }
 
+/** Named steps rather than a raw number: the underlying value is a cosine distance
+ * threshold nobody outside diarize.ts should have to reason about. */
+export const SPEAKER_SPLITS = ['fine', 'balanced', 'coarse'] as const
+export type SpeakerSplit = (typeof SPEAKER_SPLITS)[number]
+
 /** Below 1024 needs root; the app has no business asking for that. Exported so the
  * main-process write path can reject garbage instead of trusting the renderer's copy
  * of this same check. */
@@ -91,6 +106,7 @@ const DEFAULTS: Settings = {
   language: 'en',
   meetingLanguage: 'th',
   noiseFilter: 'medium',
+  speakerSplit: 'balanced',
   transcribeMode: 'after',
   asrModel: 'turbo',
   mcpPort: PREFERRED_PORT,
@@ -136,6 +152,9 @@ export async function getSettings(): Promise<Settings> {
       noiseFilter: ['low', 'medium', 'high'].includes(stored.noiseFilter as string)
         ? (stored.noiseFilter as NoiseFilter)
         : DEFAULTS.noiseFilter,
+      speakerSplit: SPEAKER_SPLITS.includes(stored.speakerSplit as SpeakerSplit)
+        ? (stored.speakerSplit as SpeakerSplit)
+        : DEFAULTS.speakerSplit,
       transcribeMode:
         stored.transcribeMode === 'live' || stored.transcribeMode === 'after' || stored.transcribeMode === 'manual'
           ? stored.transcribeMode
