@@ -28,6 +28,9 @@ const en = {
   stop: 'End meeting',
   pause: 'Pause',
   resume: 'Resume',
+  micMute: 'Mute mic',
+  micUnmute: 'Unmute mic',
+  micMutedNote: 'Microphone off — your voice is not going into the recording. Everyone else still is.',
   pausedNote: 'Paused — nothing from now until you resume goes into the recording.',
   miniOpen: 'Back to the recording',
   meterOthers: 'Others',
@@ -388,6 +391,9 @@ const th: typeof en = {
   stop: 'จบประชุม',
   pause: 'หยุดพัก',
   resume: 'อัดต่อ',
+  micMute: 'ปิดไมค์',
+  micUnmute: 'เปิดไมค์',
+  micMutedNote: 'ไมค์ปิดอยู่ — เสียงของคุณไม่ถูกบันทึก ส่วนเสียงคนอื่นยังบันทึกอยู่',
   pausedNote: 'พักอยู่ — ตั้งแต่ตอนนี้จนกดอัดต่อ จะไม่ถูกบันทึกลงไฟล์',
   miniOpen: 'กลับไปหน้าที่กำลังอัด',
   meterOthers: 'คนอื่น',
@@ -854,11 +860,14 @@ function showPage(page: HTMLElement): void {
   renderRecordingControls()
 }
 
+const micMuteBtn = $<HTMLButtonElement>('mic-mute')
+const micNoteEl = $('mic-note')
 const pauseBtn = $<HTMLButtonElement>('pause')
 const pausedNoteEl = $('paused-note')
 const miniEl = $('mini')
 const miniTimeEl = $('mini-time')
 const miniTitleEl = $('mini-title')
+const miniMicBtn = $<HTMLButtonElement>('mini-mic')
 const miniPauseBtn = $<HTMLButtonElement>('mini-pause')
 const miniStopBtn = $<HTMLButtonElement>('mini-stop')
 const miniOpenBtn = $<HTMLButtonElement>('mini-open')
@@ -883,16 +892,27 @@ function renderRecordingControls(): void {
   const on = recorder !== null
   const paused = recorder?.isPaused === true
 
+  const muted = recorder?.isMicMuted === true
+
   toggle.textContent = on ? t().stop : t().start
   pauseBtn.hidden = !on
   pauseBtn.textContent = paused ? t().resume : t().pause
   pausedNoteEl.hidden = !paused
   pausedNoteEl.textContent = t().pausedNote
+  micMuteBtn.hidden = !on
+  micMuteBtn.textContent = muted ? t().micUnmute : t().micMute
+  micMuteBtn.className = muted ? 'muted' : ''
+  // Not shown while paused: nothing at all is being recorded then, and two notices
+  // saying overlapping things is how neither gets read.
+  micNoteEl.hidden = !muted || paused
+  micNoteEl.textContent = t().micMutedNote
 
   // Only where the capsule is not: on the main page every one of these controls is
   // already on screen, and a second copy of them is just somewhere else to click.
   miniEl.hidden = !on || currentPage === mainView
   miniEl.className = `mini ${paused ? 'paused' : 'rec'}`
+  miniMicBtn.textContent = muted ? t().micUnmute : t().micMute
+  miniMicBtn.className = muted ? 'mini-mic muted' : 'mini-mic'
   miniPauseBtn.textContent = paused ? t().resume : t().pause
   miniStopBtn.textContent = t().stop
   miniOpenBtn.title = t().miniOpen
@@ -913,6 +933,17 @@ function setPaused(paused: boolean): void {
   renderRecordingControls()
 }
 
+/** Mutes or unmutes the microphone mid-meeting. The loopback track is untouched: the
+ * other side is still talking and still worth recording. */
+function setMicMuted(muted: boolean): void {
+  if (!recorder) return
+  recorder.setMicMuted(muted)
+  if (muted) setLevel('mic', 0)
+  renderRecordingControls()
+}
+
+micMuteBtn.onclick = () => setMicMuted(recorder?.isMicMuted !== true)
+miniMicBtn.onclick = () => setMicMuted(recorder?.isMicMuted !== true)
 pauseBtn.onclick = () => setPaused(recorder?.isPaused !== true)
 miniPauseBtn.onclick = () => setPaused(recorder?.isPaused !== true)
 miniStopBtn.onclick = () => void stop()

@@ -92,6 +92,23 @@ export class Recorder {
    */
   private paused = false
 
+  /**
+   * Muting the microphone writes silence into mic.wav rather than writing nothing.
+   *
+   * Dropping the frames was the first attempt and it is wrong, which the files said
+   * plainly: a meeting muted twice came back with loopback.wav at 28.8s and mic.wav at
+   * 20.3s. Each track's timestamps are derived from its own sample count, so from the
+   * first unmute onward every one of your own lines would be filed 8.5 seconds early —
+   * into the middle of whatever the other side was saying — and the detail page's
+   * player, which seeks both tracks to the same position, would have them talking over
+   * each other. Only `paused` can drop frames, and only because it drops them from both
+   * tracks at once, which is what keeps those two in step.
+   *
+   * The silence costs 32KB a second and nothing else: whisper never sees it, because
+   * the same speech gate that skips a quiet room (vad.ts) skips this too.
+   */
+  private micMuted = false
+
   private constructor(
     private readonly ctx: AudioContext,
     private readonly streams: MediaStream[],
@@ -103,6 +120,14 @@ export class Recorder {
 
   setPaused(paused: boolean): void {
     this.paused = paused
+  }
+
+  get isMicMuted(): boolean {
+    return this.micMuted
+  }
+
+  setMicMuted(muted: boolean): void {
+    this.micMuted = muted
   }
 
   static async start(title: string, events: RecorderEvents): Promise<{ recorder: Recorder; dir: string }> {
@@ -155,8 +180,11 @@ export class Recorder {
       // there, and leaving them frozen at whatever the last frame happened to be reads
       // as "still listening".
       if (this.paused) return events.onLevel(track, 0)
-      events.onLevel(track, rms(frame))
-      const pcm = toInt16(frame)
+      const muted = this.micMuted && track === 'mic'
+      // Reported as silence rather than skipped: the meter has to go flat and stay
+      // there, and one frozen at whatever the last frame held reads as still listening.
+      events.onLevel(track, muted ? 0 : rms(frame))
+      const pcm = muted ? new Int16Array(frame.length) : toInt16(frame)
       void window.api.pcm(track, pcm.buffer as ArrayBuffer)
     }
     new MediaStreamAudioSourceNode(this.ctx, { mediaStream: stream }).connect(node).connect(sink)

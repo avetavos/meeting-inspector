@@ -366,8 +366,11 @@ a { color: inherit; -webkit-app-region: no-drag; }
    that happens to be quiet. */
 .paused-note { margin-top: var(--space-md); font-size: var(--text-secondary); color: var(--accent-rec); }
 .paused-note[hidden] { display: none; }
-#pause { flex: 0 0 auto; padding: var(--space-md) var(--space-2xl); border-radius: var(--radius-pill); }
-#pause[hidden] { display: none; }
+#pause, #mic-mute { flex: 0 0 auto; padding: var(--space-md) var(--space-2xl); border-radius: var(--radius-pill); }
+#pause[hidden], #mic-mute[hidden] { display: none; }
+/* Muted is a state worth seeing without reading: the button that turns it back on is
+   the one that carries the alarm colour. */
+#mic-mute.muted, .mini .mini-mic.muted { color: var(--accent-rec); }
 
 /* ---------- the recording controls that follow you off the main page ------- */
 .mini {
