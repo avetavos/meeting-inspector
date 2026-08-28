@@ -236,6 +236,8 @@ const en = {
   speakerScopeHint: 'A 🔊 speaker is a voice this app already recognises — renaming them updates every meeting. Anyone else is renamed only in this meeting.',
   voiceRecognisedTag: 'recognised',
   speakerParts: (n: number) => `${n} parts`,
+  speakerHear: 'Hear',
+  speakerHearHint: 'Plays their longest line, so you can tell who this is before naming them.',
   speakerWrongVoice: 'Not them',
   speakerWrongVoiceHint: 'This speaker was matched to a stored voice — say so if it is the wrong person.',
   speakerWrongTitle: (name: string) => `This is not ${name}?`,
@@ -570,6 +572,8 @@ const th: typeof en = {
   speakerScopeHint: 'ผู้พูดที่มี 🔊 คือเสียงที่แอปนี้จำได้แล้ว — เปลี่ยนชื่อจะอัปเดตทุกการประชุม ส่วนคนอื่นจะเปลี่ยนแค่ในการประชุมนี้',
   voiceRecognisedTag: 'จำได้แล้ว',
   speakerParts: (n) => `${n} ช่วง`,
+  speakerHear: 'ฟังเสียง',
+  speakerHearHint: 'เล่นประโยคที่ยาวที่สุดของคนนี้ จะได้รู้ว่าเป็นใครก่อนตั้งชื่อ',
   speakerWrongVoice: 'ไม่ใช่คนนี้',
   speakerWrongVoiceHint: 'คนพูดคนนี้ถูกจับคู่กับเสียงที่แอปจำไว้ — ถ้าจับคู่ผิดคน กดตรงนี้',
   speakerWrongTitle: (name) => `นี่ไม่ใช่${name}ใช่ไหม?`,
@@ -2008,6 +2012,25 @@ function renderSpeakerPanel(
     }
     inputs.set(first, input)
     row.append(tag, input)
+
+    // Hear who this is, from the row where you name them. The detail page is already
+    // streaming the meeting (openPlayer), so a sample is not a second extraction and a
+    // second player — it is a seek. The longest line of theirs, because the shortest is
+    // usually "ครับ" and tells you nothing about whose voice it is.
+    const longest = playerSegments
+      .filter((seg) => labels.includes(seg.speaker))
+      .reduce<Transcript['segments'][number] | null>((best, seg) => (!best || seg.t1 - seg.t0 > best.t1 - best.t0 ? seg : best), null)
+    if (container === detailSpeakersEl && players.length > 0 && longest) {
+      const hear = document.createElement('button')
+      hear.className = 'hear-voice'
+      hear.textContent = t().speakerHear
+      hear.title = t().speakerHearHint
+      hear.onclick = () => {
+        seekPlayer(longest.t0)
+        if (!playing()) void togglePlayer()
+      }
+      row.append(hear)
+    }
 
     if (linked.length > 0) {
       const wrong = document.createElement('button')

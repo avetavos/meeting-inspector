@@ -428,6 +428,7 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 #voices .voice button { flex: 0 0 auto; }
 /* Reporting a bad match is a correction, not a primary action — quiet until hovered,
    and never wider than the name it sits beside. */
+button.hear-voice { flex: 0 0 auto; padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); }
 button.wrong-voice { flex: 0 0 auto; padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); color: var(--text-dim); }
 button.wrong-voice:hover:not(:disabled) { color: var(--accent-rec); }
 #voices button { padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); }
