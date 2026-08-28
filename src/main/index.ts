@@ -42,6 +42,7 @@ import {
   writeTranscript,
   type Transcript,
 } from './store.ts'
+import { bundlePathOf, downloadUpdate, installUpdate, latestUpdate, type UpdateInfo } from './update.ts'
 import { WavWriter } from './wav.ts'
 import { DEFAULT_PROMPT, Whisper } from './whisper.ts'
 
@@ -306,6 +307,9 @@ async function transcribeOne(
 }
 
 let downloads: AbortController | null = null
+/** One update at a time, and cancellable while the download is still running — the
+ * install itself is a few seconds of file moves with nothing worth interrupting. */
+let updating: AbortController | null = null
 
 // The meetings-list batch queue (spec item 4). `batchFailed` is runtime-only — a
 // restart forgets it, which is fine: the meeting really is still untranscribed, so it
@@ -951,6 +955,41 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('shell:reveal', (_e, dir: string) => shell.openPath(assertMeetingDir(dir)))
+
+  // ---- in-app update (update.ts) ----------------------------------------
+  ipcMain.handle('update:version', () => app.getVersion())
+  ipcMain.handle('update:check', () => latestUpdate(app.getVersion()))
+  /**
+   * Downloads and installs in one call, reporting progress as it goes, then relaunches.
+   * One call rather than two because there is nothing useful the user can do with a
+   * downloaded .dmg they did not ask for — and leaving one on disk between the two
+   * halves would be a stale version waiting to be installed by mistake.
+   *
+   * `app.relaunch()` re-execs the same path the running app is at, which is exactly the
+   * path just replaced, so it comes back as the new version. `quit` is what actually
+   * ends this process; without it relaunch only arms the restart.
+   */
+  ipcMain.handle('update:install', async (e, info: UpdateInfo) => {
+    if (updating) throw new Error('an update is already running')
+    // `isPackaged`, not just "is there an .app above the executable": under
+    // electron-vite dev/preview there IS one — Electron's own, inside node_modules —
+    // and replacing that with a Meeting Inspector build would wreck the dev install.
+    const bundle = app.isPackaged ? bundlePathOf(app.getPath('exe')) : null
+    if (!bundle) throw new Error('อัปเดตในแอปได้เฉพาะตัวที่ติดตั้งแล้ว — ตัวที่รันจากซอร์สให้ git pull เอา')
+    if (transcriptionBusy(current !== null || sessionStarting, batchController !== null)) {
+      throw new Error('ยังถอดเสียงอยู่ — รอให้เสร็จก่อนแล้วค่อยอัปเดต')
+    }
+    updating = new AbortController()
+    try {
+      const dmg = await downloadUpdate(info, (progress) => e.sender.send('update:progress', progress), updating.signal)
+      await installUpdate(dmg, bundle)
+    } finally {
+      updating = null
+    }
+    app.relaunch()
+    app.quit()
+  })
+  ipcMain.handle('update:cancel', () => updating?.abort())
 
   /** Where every recording and transcript lives — shown (and opened) by onboarding's
    * files step, so "where did my meeting go?" has an answer before the first one is

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ModelStatus, Progress } from '../main/download.ts'
 import type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
+import type { UpdateInfo, UpdateProgress } from '../main/update.ts'
 import type { TranscribeStatus } from '../main/store.ts'
 import type { Transcript } from '../shared/meetings.ts'
 
@@ -8,6 +9,7 @@ export type { Transcript } from '../shared/meetings.ts'
 export type { ModelStatus, Progress } from '../main/download.ts'
 export type { AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
 export type { TranscribeStatus } from '../main/store.ts'
+export type { UpdateInfo, UpdateProgress } from '../main/update.ts'
 
 export type Track = 'loopback' | 'mic'
 export type Segment = { t0: number; t1: number; text: string }
@@ -142,6 +144,17 @@ const api = {
   /** The folder every recording and transcript is saved into, and a way to open it —
    * onboarding's files step shows both. */
   notesRoot: (): Promise<string> => ipcRenderer.invoke('notes:root'),
+
+  /** This build's own version, as shown in Settings › General. */
+  appVersion: (): Promise<string> => ipcRenderer.invoke('update:version'),
+  /** The latest release if it is newer than this build, else null. */
+  checkForUpdate: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:check'),
+  /** Downloads that release and replaces this app with it, then relaunches — so this
+   * call resolving is not the normal outcome; the app quitting is. */
+  installUpdate: (info: UpdateInfo): Promise<void> => ipcRenderer.invoke('update:install', info),
+  cancelUpdate: (): Promise<void> => ipcRenderer.invoke('update:cancel'),
+  onUpdateProgress: (fn: (progress: UpdateProgress) => void) =>
+    ipcRenderer.on('update:progress', (_e, progress: UpdateProgress) => fn(progress)),
   openNotesFolder: (): Promise<string> => ipcRenderer.invoke('notes:open'),
   /** Deletes saved meetings. `keepTranscript` drops only the two WAVs and leaves
    * transcript.json/.md in place — offered only for meetings that HAVE been

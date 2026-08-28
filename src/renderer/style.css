@@ -168,6 +168,10 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* ---------- models panel ------------------------------------------------ */
 #models .file { display: grid; grid-template-columns: 1fr 128px; gap: var(--space-sm) var(--space-lg); align-items: center; margin-top: var(--space-md); font-size: var(--text-secondary); }
+/* Same track the model downloads use — one progress bar, two callers. */
+#update-bar { height: 6px; margin-top: var(--space-md); border-radius: var(--radius-pill); background: var(--track-bg); overflow: hidden; }
+#update-bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width 120ms linear; }
+
 #models .bar { grid-column: 1 / -1; height: 6px; border-radius: var(--radius-pill); background: var(--track-bg); overflow: hidden; }
 #models .bar > i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); }
 #models .size { text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }

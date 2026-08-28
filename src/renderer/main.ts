@@ -11,6 +11,7 @@ import type {
   PendingVoiceItem,
   SpeakerSplit,
   Transcript,
+  UpdateInfo,
   TranscribeMode,
   TranscribeStatus,
 } from '../preload/index.ts'
@@ -295,6 +296,17 @@ const en = {
   onbSkip: 'Skip for now',
   onbGetStarted: 'Get started',
   onbStepOf: (i: number, n: number) => `Step ${i} of ${n}`,
+  updateLabel: (version: string) => `Version ${version}`,
+  updateCheck: 'Check for updates',
+  updateChecking: 'Checking…',
+  updateUpToDate: 'This is the latest version.',
+  updateAvailable: (version: string, mb: number) => `Version ${version} is available (${mb} MB).`,
+  updateInstall: 'Download and install',
+  updateDownloading: (pct: number) => `Downloading… ${pct}%`,
+  updateInstalling: 'Installing — the app will restart on its own.',
+  updateCancel: 'Cancel',
+  updateFailed: (msg: string) => `Could not update: ${msg}`,
+  updateBusyHint: 'Recording or transcribing has to finish first — the update replaces the running app.',
   onboardingRerunLabel: 'First-run setup',
   onboardingRerun: 'Run setup again',
   // MEDIUM 2: onboarding has no way to stop a recording (Start/Stop, the meetings
@@ -542,6 +554,17 @@ const th: typeof en = {
   onbSkip: 'ข้ามไปก่อน',
   onbGetStarted: 'เริ่มใช้งาน',
   onbStepOf: (i, n) => `ขั้นตอน ${i} จาก ${n}`,
+  updateLabel: (version) => `เวอร์ชัน ${version}`,
+  updateCheck: 'เช็คอัปเดต',
+  updateChecking: 'กำลังเช็ค…',
+  updateUpToDate: 'เป็นเวอร์ชันล่าสุดแล้ว',
+  updateAvailable: (version, mb) => `มีเวอร์ชัน ${version} ให้อัปเดต (${mb} MB)`,
+  updateInstall: 'ดาวน์โหลดและติดตั้ง',
+  updateDownloading: (pct) => `กำลังดาวน์โหลด… ${pct}%`,
+  updateInstalling: 'กำลังติดตั้ง — แอปจะรีสตาร์ทเอง',
+  updateCancel: 'ยกเลิก',
+  updateFailed: (msg) => `อัปเดตไม่สำเร็จ: ${msg}`,
+  updateBusyHint: 'ต้องให้การอัดหรือถอดเสียงเสร็จก่อน เพราะการอัปเดตจะแทนที่ตัวแอปที่กำลังรันอยู่',
   onboardingRerunLabel: 'ตั้งค่าเริ่มต้นใช้งาน',
   onboardingRerun: 'ทำใหม่อีกครั้ง',
   onboardingRerunLockedReason: 'ใช้ไม่ได้ตอนนี้ — กำลังอัดเสียงหรือถอดเสียงการประชุมอยู่',
@@ -888,6 +911,104 @@ const setOnbTranscribeModeValue = (v: TranscribeMode): void => {
 
 const onbFinishTitleEl = $('onb-finish-title')
 const onbFinishBodyEl = $('onb-finish-body')
+
+const updateLabelEl = $('update-label')
+const updateCheckBtn = $<HTMLButtonElement>('update-check')
+const updateStateEl = $('update-state')
+const updateBarEl = $('update-bar')
+const updateBarFill = updateBarEl.querySelector('i') as HTMLElement
+
+/**
+ * The update card walks one line at a time: idle → checking → up to date, or → an
+ * offer, → downloading, → installing (after which the app relaunches and this state is
+ * gone with it). Held as data rather than as rendered text, the same reason every other
+ * message in this file is: a language switch has to be able to re-derive it.
+ */
+type UpdateState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'current' }
+  | { kind: 'available'; info: UpdateInfo }
+  | { kind: 'downloading'; info: UpdateInfo; received: number; total: number }
+  | { kind: 'installing' }
+  | { kind: 'failed'; message: string }
+let updateState: UpdateState = { kind: 'idle' }
+let appVersion = ''
+
+const megabytes = (bytes: number): number => Math.round(bytes / 1_000_000)
+
+function renderUpdate(): void {
+  updateLabelEl.textContent = t().updateLabel(appVersion)
+  const busy = updateState.kind === 'downloading' || updateState.kind === 'installing'
+  updateBarEl.hidden = updateState.kind !== 'downloading'
+
+  if (updateState.kind === 'downloading') {
+    const pct = updateState.total > 0 ? Math.round((updateState.received / updateState.total) * 100) : 0
+    updateBarFill.style.width = `${pct}%`
+    updateStateEl.textContent = t().updateDownloading(pct)
+  } else if (updateState.kind === 'checking') updateStateEl.textContent = t().updateChecking
+  else if (updateState.kind === 'current') updateStateEl.textContent = t().updateUpToDate
+  else if (updateState.kind === 'available') {
+    updateStateEl.textContent = t().updateAvailable(updateState.info.version, megabytes(updateState.info.bytes))
+  } else if (updateState.kind === 'installing') updateStateEl.textContent = t().updateInstalling
+  else if (updateState.kind === 'failed') updateStateEl.textContent = t().updateFailed(updateState.message)
+  else updateStateEl.textContent = ''
+
+  // The one button changes job rather than three buttons taking turns being hidden:
+  // there is exactly one thing worth doing at each step.
+  updateCheckBtn.textContent =
+    updateState.kind === 'available'
+      ? t().updateInstall
+      : updateState.kind === 'downloading'
+        ? t().updateCancel
+        : t().updateCheck
+  updateCheckBtn.disabled = updateState.kind === 'checking' || updateState.kind === 'installing'
+  // Main refuses an update mid-pass (it is replacing the app that is doing the work),
+  // so say that before the click rather than after it.
+  if (!busy && transcriptionBusy()) updateStateEl.textContent = t().updateBusyHint
+}
+
+updateCheckBtn.onclick = async () => {
+  if (updateState.kind === 'downloading') {
+    await window.api.cancelUpdate()
+    updateState = { kind: 'idle' }
+    return renderUpdate()
+  }
+  if (updateState.kind === 'available') {
+    const info = updateState.info
+    updateState = { kind: 'downloading', info, received: 0, total: info.bytes }
+    renderUpdate()
+    try {
+      // Resolving is not the expected outcome — main relaunches the app on success —
+      // so anything that comes back here means it stopped short of restarting.
+      await window.api.installUpdate(info)
+      updateState = { kind: 'installing' }
+    } catch (err) {
+      updateState = { kind: 'failed', message: reason(err) }
+    }
+    return renderUpdate()
+  }
+  updateState = { kind: 'checking' }
+  renderUpdate()
+  try {
+    const info = await window.api.checkForUpdate()
+    updateState = info ? { kind: 'available', info } : { kind: 'current' }
+  } catch (err) {
+    updateState = { kind: 'failed', message: reason(err) }
+  }
+  renderUpdate()
+}
+
+window.api.onUpdateProgress((progress) => {
+  if (updateState.kind !== 'downloading') return
+  updateState = { ...updateState, received: progress.received, total: progress.total }
+  renderUpdate()
+})
+
+void window.api.appVersion().then((version) => {
+  appVersion = version
+  renderUpdate()
+})
 
 const onboardingRerunLabelEl = $('onboarding-rerun-label')
 const onboardingRerunBtn = $<HTMLButtonElement>('onboarding-rerun')
@@ -2642,6 +2763,10 @@ function updateTranscriptionLocks(): void {
   // other way into this trap: Start, then Settings › General › "Run setup again".
   onboardingRerunBtn.disabled = busy
   onboardingRerunLockHint.textContent = busy ? t().onboardingRerunLockedReason : ''
+
+  // The update card is locked for the same reason (it replaces the app doing the work),
+  // and says so from renderUpdate — which has to run again whenever `busy` changes.
+  renderUpdate()
 }
 
 function updateMeetingsActionsFor(panel: MeetingsPanel): void {
@@ -3103,6 +3228,7 @@ function applyLanguage(l: Language): void {
   mcpLabel.textContent = t().mcpLabel
   mcpConnectTitleEl.textContent = t().mcpConnectTitle
   mcpConnectOffEl.textContent = t().mcpConnectOff
+  renderUpdate()
   onboardingRerunLabelEl.textContent = t().onboardingRerunLabel
   onboardingRerunBtn.textContent = t().onboardingRerun
 
