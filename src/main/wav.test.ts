@@ -11,6 +11,7 @@ import {
   readTranscript,
   slug,
   deleteMeeting,
+  dropEchoedMic,
   renameMeeting,
   writeTranscript,
 } from './store.ts'
@@ -215,4 +216,37 @@ test('store: deleting audio keeps the transcript; deleting the meeting takes the
   // An id that could climb out of the notes folder is refused before anything is touched.
   await assert.rejects(() => deleteMeeting('../../etc', false, root))
   await assert.rejects(() => renameMeeting('../../etc', 'x', root))
+})
+
+test('store: the speakers coming back into the mic are dropped, real speech is not', () => {
+  const line = 'ส่วนขาแรกที่เป็นขา agent ที่บอกว่าขา with lead เราก็จะปล่อยให้มันเหมือนเดิมไปนะครับ'
+  const kept = dropEchoedMic([
+    { t0: 7.0, t1: 12.0, speaker: 'SPEAKER_00', text: line },
+    // The microphone's copy of that same sentence: a moment later, cut short, and
+    // punctuated differently by whisper because the chunk boundaries fell elsewhere.
+    { t0: 7.4, t1: 10.1, speaker: 'me', text: 'ส่วนขาแรกที่เป็นขา agent ที่บอกว่า' },
+    // Genuinely ours: nothing on the other track says this.
+    { t0: 13.0, t1: 15.0, speaker: 'me', text: 'เดี๋ยวผมขอเช็คของฝั่งผมก่อนนะครับ' },
+    // Short agreement over the top of them — people do this constantly, and it must
+    // survive even though it is a prefix of what the other side said.
+    { t0: 7.5, t1: 7.9, speaker: 'me', text: 'ครับ' },
+    // The same words, but half a minute later: a callback, not an echo.
+    { t0: 60.0, t1: 64.0, speaker: 'me', text: line },
+  ])
+
+  assert.deepEqual(
+    kept.map((s) => `${s.speaker}@${s.t0}`),
+    ['SPEAKER_00@7', 'me@13', 'me@7.5', 'me@60'],
+  )
+})
+
+test('store: an echo pass over a meeting with no other track changes nothing', () => {
+  // A mic-only recording (nothing was playing) has no reference to match against, so
+  // every line must survive however long or repetitive it is.
+  const only = [
+    { t0: 0, t1: 4, speaker: 'me', text: 'เอาละครับวันนี้เรามาคุยเรื่อง deploy กัน' },
+    { t0: 5, t1: 9, speaker: 'me', text: 'เอาละครับวันนี้เรามาคุยเรื่อง deploy กัน' },
+  ]
+  assert.deepEqual(dropEchoedMic(only), only)
+  assert.deepEqual(dropEchoedMic([]), [])
 })

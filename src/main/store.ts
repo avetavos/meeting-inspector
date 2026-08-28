@@ -150,6 +150,53 @@ export function meetingDone(transcript: Transcript | null): boolean {
 }
 
 /**
+ * Drops mic lines that are the room's own speakers coming back in.
+ *
+ * The two tracks are recorded and transcribed separately (spec §4.1): `loopback` is
+ * what the meeting app played, `mic` is what the microphone heard. On speakers rather
+ * than headphones the microphone hears both — so the far end's own sentence is
+ * transcribed twice, once under their name and once, a moment later and often cut
+ * short, under "You". Nothing downstream can tell those apart afterwards, and
+ * diarization happily files the echo as its own speaker.
+ *
+ * The near-end signal never leaks the other way (the loopback track is system output;
+ * your voice is not in it), so the mic copy is always the one to drop.
+ *
+ * Deliberately a text-and-time match rather than acoustic echo cancellation, which is
+ * the real answer and needs an adaptive filter running against the loopback signal at
+ * capture time — far more than this buys. ponytail: heuristic, and the ceiling is
+ * visible — someone deliberately repeating a long sentence back within a couple of
+ * seconds loses their copy of it. `MIN_ECHO_CHARS` keeps that away from the short
+ * agreements ("ครับ", "ok") people genuinely say over each other all the time, and the
+ * whole pass is off with one setting.
+ */
+const MIN_ECHO_CHARS = 10
+/** Compared with spacing and punctuation removed: whisper punctuates the same audio
+ * differently depending on how much of it a chunk contained, so the echo copy is
+ * rarely character-identical to the original. */
+const normalize = (text: string): string => text.replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase()
+
+export function dropEchoedMic(segments: Transcript['segments'], withinSec = 2): Transcript['segments'] {
+  const others = segments.filter((s) => s.speaker !== 'me').map((s) => ({ ...s, text: normalize(s.text) }))
+  if (others.length === 0) return segments
+
+  return segments.filter((segment) => {
+    if (segment.speaker !== 'me') return true
+    const mine = normalize(segment.text)
+    if (mine.length < MIN_ECHO_CHARS) return true
+    return !others.some((other) => {
+      // Overlapping in time, give or take the lag between something being played and
+      // the microphone hearing it.
+      if (other.t1 + withinSec < segment.t0 || segment.t1 + withinSec < other.t0) return false
+      // Either direction: the echo is usually the shorter of the two (the microphone
+      // catches the tail end of a sentence, or whisper cuts the chunk differently), but
+      // it can be the longer one when the far end's own line was the clipped one.
+      return other.text.startsWith(mine) || mine.startsWith(other.text)
+    })
+  })
+}
+
+/**
  * Builds the Transcript to persist after a retroactive/batch replay pass (transcribeOne,
  * index.ts) — pulled out of index.ts so the "don't destroy an existing transcript when
  * the WAVs are gone" rule (HIGH 2) is testable without spawning whisper-server. `total`

@@ -108,6 +108,9 @@ const api = {
    * next time a meeting is diarized, not retroactively. */
   setSpeakerSplit: (speakerSplit: SpeakerSplit): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', { speakerSplit }),
+  /** Whether to drop mic lines that are the room's own speakers echoing back. Applies
+   * to the next transcript written, not to the ones already on disk. */
+  setEchoFilter: (echoFilter: boolean): Promise<Settings> => ipcRenderer.invoke('settings:set', { echoFilter }),
   setTranscribeMode: (transcribeMode: TranscribeMode): Promise<Settings> =>
     ipcRenderer.invoke('settings:set', { transcribeMode }),
   setAsrModel: (asrModel: AsrModel): Promise<Settings> => ipcRenderer.invoke('settings:set', { asrModel }),

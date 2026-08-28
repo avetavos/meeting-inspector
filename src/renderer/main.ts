@@ -128,6 +128,9 @@ const en = {
   asrModelTimingNote: 'Times are approximate, measured on an Apple Silicon Mac — yours may differ.',
   meetingLangLabel: 'Meeting language',
   meetingLangName: { th: 'Thai', en: 'English' } as Record<MeetingLanguage, string>,
+  echoLabel: 'Remove the speakers from the mic',
+  echoHint:
+    'On speakers rather than headphones, the microphone hears the meeting as well, so the far end gets transcribed twice — once under their name and once, a moment later, under You. This drops that second copy. Turn it off on headphones: there is no echo to remove, and all it can do there is take away a line someone genuinely repeated.',
   speakerSplitLabel: 'Splitting speakers apart',
   speakerSplitName: {
     fine: 'Fine — every difference is a new person',
@@ -423,6 +426,9 @@ const th: typeof en = {
   asrModelTimingNote: 'เวลาที่บอกเป็นค่าประมาณ วัดจาก Mac Apple Silicon เครื่องจริงอาจต่างไปบ้าง',
   meetingLangLabel: 'ภาษาที่ใช้ในที่ประชุม',
   meetingLangName: { th: 'ไทย', en: 'อังกฤษ' } as Record<MeetingLanguage, string>,
+  echoLabel: 'ตัดเสียงลำโพงที่เข้าไมค์',
+  echoHint:
+    'ถ้าเปิดลำโพงแทนหูฟัง ไมค์จะได้ยินเสียงประชุมไปด้วย ทำให้ประโยคของอีกฝั่งถูกถอดสองครั้ง — ครั้งหนึ่งในชื่อเขา อีกครั้งช้ากว่านิดหน่อยในชื่อ "เรา" ตัวนี้จะตัดอันหลังทิ้ง ถ้าใช้หูฟังให้ปิดไว้ เพราะไม่มีเสียงสะท้อนให้ตัด มีแต่จะเผลอตัดประโยคที่คนพูดซ้ำจริงๆ',
   speakerSplitLabel: 'การแยกคนพูด',
   speakerSplitName: {
     fine: 'ละเอียด — ต่างกันนิดเดียวก็นับเป็นคนใหม่',
@@ -639,6 +645,9 @@ const asrModelNoteEl = $('asr-model-note')
 const meetingLangSelect = $<HTMLSelectElement>('meeting-lang')
 const meetingLangLabelEl = $('meeting-lang-label')
 const meetingLangHintEl = $('meeting-lang-hint')
+const echoLabelEl = $('echo-label')
+const echoToggle = $<HTMLInputElement>('echo-filter')
+const echoHintEl = $('echo-hint')
 const speakerSplitLabelEl = $('speaker-split-label')
 const speakerSplitSelect = $<HTMLSelectElement>('speaker-split')
 const speakerSplitHintEl = $('speaker-split-hint')
@@ -3247,6 +3256,8 @@ function applyLanguage(l: Language): void {
   meetingLangOptions[0]!.textContent = t().meetingLangName.th
   meetingLangOptions[1]!.textContent = t().meetingLangName.en
   meetingLangHintEl.textContent = t().meetingLangHint
+  echoLabelEl.textContent = t().echoLabel
+  echoHintEl.textContent = t().echoHint
   speakerSplitLabelEl.textContent = t().speakerSplitLabel
   for (const option of speakerSplitSelect.options) {
     option.textContent = t().speakerSplitName[option.value as SpeakerSplit] ?? option.value
@@ -3339,6 +3350,16 @@ function renderSpeakerSplitHint(): void {
   speakerSplitHintEl.textContent = `${t().speakerSplitHint[step] ?? ''} ${t().speakerSplitApplies}`
 }
 
+echoToggle.onchange = async () => {
+  echoToggle.disabled = true
+  try {
+    // Applies to the next transcript written, not to the ones already on disk.
+    await window.api.setEchoFilter(echoToggle.checked)
+  } finally {
+    echoToggle.disabled = false
+  }
+}
+
 speakerSplitSelect.onchange = async () => {
   speakerSplitSelect.disabled = true
   try {
@@ -3376,6 +3397,7 @@ void window.api.getSettings().then((settings) => {
   setTranscribeModeValue(settings.transcribeMode)
   meetingLangSelect.value = settings.meetingLanguage
   speakerSplitSelect.value = settings.speakerSplit
+  echoToggle.checked = settings.echoFilter
   applyLanguage(settings.language)
   // A genuine first run (no settings.json at all — settings.ts's getSettings tells that
   // apart from an existing user simply upgrading into this build) lands here instead of

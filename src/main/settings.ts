@@ -70,6 +70,14 @@ export type Settings = {
    * replaced.
    */
   speakerSplit: SpeakerSplit
+  /**
+   * Whether to drop mic lines that are the room's own speakers coming back in
+   * (store.ts's dropEchoedMic). On by default: recording a call on speakers is the
+   * normal case, and every one of those meetings has the far end transcribed twice.
+   * Worth turning off on headphones, where there is no echo to remove and the only
+   * thing the pass can do is take away a line someone genuinely repeated.
+   */
+  echoFilter: boolean
   transcribeMode: TranscribeMode
   /** Default 'turbo': lightest on RAM, and the default recording mode ('after') means
    * this is what most 16GB machines will run unattended. */
@@ -107,6 +115,7 @@ const DEFAULTS: Settings = {
   meetingLanguage: 'th',
   noiseFilter: 'medium',
   speakerSplit: 'balanced',
+  echoFilter: true,
   transcribeMode: 'after',
   asrModel: 'turbo',
   mcpPort: PREFERRED_PORT,
@@ -155,6 +164,7 @@ export async function getSettings(): Promise<Settings> {
       speakerSplit: SPEAKER_SPLITS.includes(stored.speakerSplit as SpeakerSplit)
         ? (stored.speakerSplit as SpeakerSplit)
         : DEFAULTS.speakerSplit,
+      echoFilter: typeof stored.echoFilter === 'boolean' ? stored.echoFilter : DEFAULTS.echoFilter,
       transcribeMode:
         stored.transcribeMode === 'live' || stored.transcribeMode === 'after' || stored.transcribeMode === 'manual'
           ? stored.transcribeMode

@@ -31,6 +31,7 @@ import {
   assertMeetingDir,
   createMeetingDir,
   deleteMeeting,
+  dropEchoedMic,
   finishReplayTranscript,
   listMeetings,
   localIso,
@@ -303,7 +304,11 @@ async function transcribeOne(
   // it twice. Heals a legacy meeting along the way: once `language` is resolved (even
   // via the fallback above), it is persisted, so a second retroactive pass over the
   // same meeting no longer needs the fallback at all.
-  await writeTranscript(dir, finishReplayTranscript(previous, collected, language, total))
+  // Same echo removal the live path applies — a retroactive pass reads the very same
+  // two tracks, so it has the very same duplicates to drop.
+  const settings = await getSettings()
+  const heard = settings.echoFilter ? dropEchoedMic(collected) : collected
+  await writeTranscript(dir, finishReplayTranscript(previous, heard, language, total))
   return dir
 }
 
@@ -461,7 +466,10 @@ async function finishSessionStop(
     // writeTranscript (store.ts) sorts by t0 before persisting — no need to do it
     // twice, even though 'after' mode transcribing the two tracks one after another
     // means these arrive with every mic segment after every loopback segment.
-    segments: s.segments,
+    // The microphone hears the meeting's own speakers on anything but headphones, so
+    // the far end's sentences arrive twice — once from the loopback track under their
+    // name, once from the mic a moment later under "You" (dropEchoedMic, store.ts).
+    segments: (await getSettings()).echoFilter ? dropEchoedMic(s.segments) : s.segments,
     // Written unconditionally, in every mode — 'manual' mode writes no segments here
     // at all, so this is the ONLY chance to record what language this meeting was
     // spoken in; the batch queue reads it back via resolveLanguage whenever the user
