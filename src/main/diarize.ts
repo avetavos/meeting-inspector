@@ -97,6 +97,37 @@ export function assignSpeakers(
   })
 }
 
+/**
+ * Folds speakers who barely spoke back into the unattributed bucket.
+ *
+ * Diarization runs over the whole loopback WAV with no speech gate in front of it —
+ * unlike whisper, whose chunks pass VAD first — so a cough, a chair, a notification
+ * chime gets clustered as its own SPEAKER_NN. Each one then surfaces as a "ผู้พูด 13"
+ * row the user is asked to name, and there is nobody to name. Anyone whose lines total
+ * under `minSec` across the WHOLE meeting goes back to `them` ("คนอื่น") instead of
+ * becoming a numbered person.
+ *
+ * 2 seconds is the same floor voices.ts uses for "not enough audio to learn a voice
+ * from", for the same reason: below it there is no identity to work with. The trade is
+ * stated rather than hidden — a real person whose only contribution was one word gets
+ * folded too, and their word is still in the transcript, attributed to "others".
+ */
+export const MIN_SPEAKER_SEC = 2
+
+export function foldBriefSpeakers(
+  segments: Transcript['segments'],
+  minSec: number = MIN_SPEAKER_SEC,
+): Transcript['segments'] {
+  const total = new Map<string, number>()
+  for (const s of segments) {
+    if (s.speaker === 'me' || s.speaker === UNKNOWN) continue
+    total.set(s.speaker, (total.get(s.speaker) ?? 0) + (s.t1 - s.t0))
+  }
+  const brief = new Set([...total].filter(([, sec]) => sec < minSec).map(([speaker]) => speaker))
+  if (brief.size === 0) return segments
+  return segments.map((s) => (brief.has(s.speaker) ? { ...s, speaker: UNKNOWN } : s))
+}
+
 /** What an unnamed speaker is called, in whichever language the UI is set to. */
 export type SpeakerLabels = { me: string; them: string; speaker: (n: number) => string }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { assignSpeakers, speakerNames, type SpeakerLabels, type Turn } from './diarize.ts'
+import { assignSpeakers, speakerNames, type SpeakerLabels, type Turn, foldBriefSpeakers } from './diarize.ts'
 
 const EN: SpeakerLabels = { me: 'You', them: 'Others', speaker: (n) => `Speaker ${n}` }
 
@@ -73,4 +73,26 @@ test('speaker names: an untracked (manually typed) name is still kept — only v
   // existing "keeps names the user already typed" behaviour must survive.
   const named = speakerNames(segments, { SPEAKER_00: 'Bob' }, EN)
   assert.equal(named['SPEAKER_00'], 'Bob')
+})
+
+test('diarize: a cough is not a speaker; a quiet person still is, barely', () => {
+  const segments = [
+    { t0: 0, t1: 8, speaker: 'SPEAKER_00', text: 'คนที่พูดจริง' },
+    // A chair scrape diarization clustered on its own: 0.6s total across the meeting.
+    { t0: 9.0, t1: 9.6, speaker: 'SPEAKER_28', text: 'อือ' },
+    // Two short lines from one cluster that ADD UP past the floor — a genuinely quiet
+    // person, kept. The floor is about the total, not any single line.
+    { t0: 12.0, t1: 13.2, speaker: 'SPEAKER_30', text: 'ครับ' },
+    { t0: 20.0, t1: 21.1, speaker: 'SPEAKER_30', text: 'เห็นด้วยครับ' },
+    // Ours and the already-unattributed pass through untouched.
+    { t0: 30, t1: 31, speaker: 'me', text: 'โอเค' },
+    { t0: 32, t1: 32.5, speaker: 'them', text: '…' },
+  ]
+  const folded = foldBriefSpeakers(segments)
+  assert.deepEqual(
+    folded.map((s) => s.speaker),
+    ['SPEAKER_00', 'them', 'SPEAKER_30', 'SPEAKER_30', 'me', 'them'],
+  )
+  // The noise line itself survives — it is attribution that changes, never text.
+  assert.equal(folded[1]!.text, 'อือ')
 })

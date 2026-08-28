@@ -1956,6 +1956,11 @@ function openPlayer(id: string, tracks: Record<string, boolean>, segs: Transcrip
       renderPlayer()
     })
     audio.addEventListener('ended', renderPlayer)
+    // play()/pause() take effect asynchronously (playing is not true until media
+    // actually starts) — these are what keep the button honest without awaiting.
+    audio.addEventListener('play', renderPlayer)
+    audio.addEventListener('playing', renderPlayer)
+    audio.addEventListener('pause', renderPlayer)
     players.push(audio)
   }
   // One track drives the clock; the others follow it. Whichever it is, they were all
@@ -1975,9 +1980,12 @@ async function togglePlayer(): Promise<void> {
   if (playing()) {
     for (const audio of players) audio.pause()
   } else {
-    // Both at once rather than one after the other: awaiting the first would start the
-    // second a beat late, and that beat is audible as an echo of the same room.
-    await Promise.allSettled(players.map((a) => a.play()))
+    // Fired together rather than one after the other — awaiting the first would start
+    // the second a beat late, audible as an echo of the same room. And the UI is
+    // rendered before the promises settle, not after: play() only resolves once the
+    // media can actually start, so a buffering stall used to leave the button frozen
+    // on ▶ and reading as a dead click.
+    for (const audio of players) void audio.play().catch(() => {})
   }
   renderPlayer()
 }

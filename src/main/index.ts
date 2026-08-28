@@ -1,10 +1,9 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, net, protocol, session, shell, systemPreferences, type WebContents } from 'electron'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, protocol, session, shell, systemPreferences, type WebContents } from 'electron'
+import { mkdir, open, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
-import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, speakerNames, type SpeakerLabels } from './diarize.ts'
+import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, foldBriefSpeakers, speakerNames, type SpeakerLabels } from './diarize.ts'
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
@@ -216,7 +215,9 @@ async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signa
   try {
     const turns = await diarize(join(dir, 'loopback.wav'), signal, SPEAKER_SPLIT_THRESHOLD[(await getSettings()).speakerSplit])
     const previous = await readTranscript(dir)
-    const segments = assignSpeakers(previous.segments, turns)
+    // Noise clustered as people is folded away before anyone is asked to name it —
+    // see foldBriefSpeakers' own comment for the threshold and the trade.
+    const segments = foldBriefSpeakers(assignSpeakers(previous.segments, turns))
     // HIGH 3: previous.speakerVoices tells speakerNames() which keys not to trust a
     // stale name from — a key it recognised (named or pending) last pass is about to
     // be re-checked by identify() below, and a wrong guess in the meantime is worse
@@ -1218,8 +1219,8 @@ function registerIpc(): void {
 /**
  * `meeting://audio/<id>/<track>.wav` — one meeting's recorded audio, for the detail
  * page's player. Everything about the path is rebuilt here from an id and a track name
- * that are both checked first, so the renderer cannot name a file; `net.fetch` over a
- * file:// URL is what carries Range through, so the player seeks without downloading.
+ * that are both checked first, so the renderer cannot name a file. Range requests are
+ * answered by hand below — see the comment inside for why.
  *
  * The id rides in the PATH, behind a fixed host, rather than being the host itself. A
  * URL host is not a string: parsers lowercase it and may punycode it, and a meeting is
@@ -1234,7 +1235,50 @@ function serveMeetingAudio(): void {
       return new Response('not found', { status: 404 })
     }
     const path = assertMeetingDir(join(NOTES_ROOT, id, track))
-    return net.fetch(pathToFileURL(path).toString())
+
+    // Served by hand, not `net.fetch(file://…)`, which this replaced: that response
+    // carries no Content-Length and ignores Range, so Chromium treated the WAV as an
+    // unbounded live stream — pausing dropped the connection, and every resume or seek
+    // re-read the file from byte 0. That was the multi-second freeze the play button
+    // was blamed for.
+    //
+    // And served as bounded 206 slices, not a streamed body. The streamed version was
+    // tried and stalled in a worse way: Chromium cancels its first speculative request
+    // once it has read ahead, the cancel never reaches the node stream behind
+    // `Readable.toWeb`, and with that pipe left pumping into a dead sink, the NEXT
+    // range request's data never arrived at all (seen as `buffered` frozen while the
+    // handler logged a correct 206). A short 206 is ordinary HTTP — the element just
+    // asks again where the slice ended — and a plain Buffer has nothing to cancel.
+    const size = await stat(path).then((st) => st.size).catch(() => null)
+    if (size === null) return new Response('not found', { status: 404 })
+
+    const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('range') ?? '')
+    const from = range?.[1] ? Number(range[1]) : 0
+    // An open-ended `bytes=N-` is capped rather than honoured to the end of the file:
+    // the cap is what bounds memory (a 3-hour WAV is ~350MB), and it is also what keeps
+    // every response small enough that abandoning it costs nothing.
+    const SLICE = 4 << 20
+    const to = Math.min(range?.[2] ? Number(range[2]) : from + SLICE - 1, size - 1)
+    if (from > to || from >= size) {
+      return new Response(null, { status: 416, headers: { 'content-range': `bytes */${size}` } })
+    }
+
+    const buf = Buffer.alloc(to - from + 1)
+    const fh = await open(path, 'r')
+    try {
+      await fh.read(buf, 0, buf.length, from)
+    } finally {
+      await fh.close()
+    }
+    return new Response(buf, {
+      status: 206,
+      headers: {
+        'content-type': 'audio/wav',
+        'accept-ranges': 'bytes',
+        'content-length': String(buf.length),
+        'content-range': `bytes ${from}-${to}/${size}`,
+      },
+    })
   })
 }
 
