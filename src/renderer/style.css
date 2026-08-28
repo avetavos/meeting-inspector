@@ -382,7 +382,13 @@ select:disabled { opacity: 0.4; cursor: default; }
    card is one of its children) — a separate margin-top here would just stack on top
    of that gap instead of matching it, uneven against every other pair of cards. */
 #mictest-line { margin-top: var(--space-md); font-size: var(--text-body); line-height: 1.7; }
-#mictest-verdict { font-size: var(--text-secondary); width: 8em; color: var(--text-dim); }
+/* The bar reads as a level, so it gets the full width of the card; the verdict sits
+   under it rather than stealing a fixed 8em column and wrapping to three lines. */
+#mictest .row { flex-direction: column; align-items: stretch; gap: var(--space-sm); }
+/* .meter's own `flex: 1` means flex-basis 0 — down the column that zeroes its height
+   (and wins over the 8px), so the track has to opt out of flexing here. */
+#mictest .row .meter { flex: none; }
+#mictest-verdict { font-size: var(--text-secondary); color: var(--text-dim); }
 #mictest-verdict.speech { color: var(--accent); font-weight: 600; }
 #mictest-verdict.dropped { color: var(--accent-rec); font-weight: 600; }
 
