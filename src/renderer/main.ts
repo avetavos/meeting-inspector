@@ -235,6 +235,13 @@ const en = {
   speakerMergeHint: 'If someone got split into two speakers, give them the same name to merge them.',
   speakerScopeHint: 'A 🔊 speaker is a voice this app already recognises — renaming them updates every meeting. Anyone else is renamed only in this meeting.',
   voiceRecognisedTag: 'recognised',
+  speakerWrongVoice: 'Not them',
+  speakerWrongVoiceHint: 'This speaker was matched to a stored voice — say so if it is the wrong person.',
+  speakerWrongTitle: (name: string) => `This is not ${name}?`,
+  speakerWrongDetail:
+    'The link between this speaker and the stored voice is dropped, and this meeting alone forgets the name. The voice itself is kept — it is presumably right in the meetings where it was matched correctly, and deleting it would take those with it. Then type who this actually is: an existing name puts them with that person, a new one starts a new voice.',
+  speakerWrongYes: 'Wrong person — unlink',
+  speakerJump: 'Find this speaker above',
   copy: 'Copy',
   copied: 'Copied',
   speakerDefaults: { me: 'You', them: 'Others' },
@@ -561,6 +568,13 @@ const th: typeof en = {
   speakerMergeHint: 'ถ้าแยกคนพูดผิด ตั้งชื่อเดียวกันให้สองคน = รวมเป็นคนเดียว',
   speakerScopeHint: 'ผู้พูดที่มี 🔊 คือเสียงที่แอปนี้จำได้แล้ว — เปลี่ยนชื่อจะอัปเดตทุกการประชุม ส่วนคนอื่นจะเปลี่ยนแค่ในการประชุมนี้',
   voiceRecognisedTag: 'จำได้แล้ว',
+  speakerWrongVoice: 'ไม่ใช่คนนี้',
+  speakerWrongVoiceHint: 'คนพูดคนนี้ถูกจับคู่กับเสียงที่แอปจำไว้ — ถ้าจับคู่ผิดคน กดตรงนี้',
+  speakerWrongTitle: (name) => `นี่ไม่ใช่${name}ใช่ไหม?`,
+  speakerWrongDetail:
+    'จะตัดการเชื่อมระหว่างคนพูดคนนี้กับเสียงที่จำไว้ และลืมชื่อเฉพาะในการประชุมนี้ ตัวเสียงยังอยู่ เพราะในประชุมอื่นที่จับคู่ถูกก็ยังถูกอยู่ ลบทิ้งจะพังตามไปด้วย จากนั้นพิมพ์ว่าจริงๆ แล้วเป็นใคร — ถ้าใช้ชื่อที่มีอยู่แล้วจะรวมเป็นคนเดียวกัน ถ้าเป็นชื่อใหม่ก็เริ่มเป็นเสียงใหม่',
+  speakerWrongYes: 'จับคู่ผิด — ตัดการเชื่อม',
+  speakerJump: 'ไปที่คนพูดคนนี้ด้านบน',
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
   speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
@@ -1851,6 +1865,19 @@ function renderPlayer(): void {
 playerPlayBtn.onclick = () => void togglePlayer()
 playerSeek.oninput = () => seekPlayer((Number(playerSeek.value) / 1000) * playerDuration)
 
+/** Scrolls the detail page's speaker editor to one speaker and marks it, so a name
+ * noticed in the transcript can be corrected without hunting for its row. */
+function jumpToSpeakerRow(speaker: string): void {
+  const input = detailSpeakersEl.querySelector<HTMLInputElement>(`input[data-speaker="${CSS.escape(speaker)}"]`)
+  if (!input) return
+  const row = input.closest('.who')
+  row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  row?.classList.add('found')
+  // Removed on its own: the mark is a "here it is", not a selection to be dismissed.
+  setTimeout(() => row?.classList.remove('found'), 1600)
+  input.focus()
+}
+
 function renderTranscript(
   segs: Transcript['segments'] = segments,
   names: Record<string, string> = speakers,
@@ -1867,6 +1894,17 @@ function renderTranscript(
       const who = document.createElement('span')
       who.className = 'who'
       who.textContent = speakerDisplayName(s.speaker, names, numbering)
+      // A wrong name is spotted here, while reading, but it is fixed in the editor above
+      // — and with a meeting that came back with forty speakers, finding the right row
+      // up there is the hard part. Clicking the name does that walk.
+      if (container === detailTranscriptEl) {
+        who.classList.add('who-jump')
+        who.title = t().speakerJump
+        who.onclick = (e) => {
+          e.stopPropagation() // the row itself seeks the player; the name does not
+          jumpToSpeakerRow(s.speaker)
+        }
+      }
       const text = document.createElement('span')
       text.textContent = s.text
       // Only the detail page has a player to seek, and only while the audio it plays
@@ -1915,7 +1953,10 @@ function renderSpeakerPanel(
     // Visible up front, not just after saving (spec item 3): a voice this diarize
     // pass already tied to an id renames everywhere that id is used; anything else
     // renames only this meeting — see speakerScopeHint below for the full rule.
-    if (spkVoices?.[label]) {
+    // Only a speaker the app matched to a stored voice can BE mis-matched — everyone
+    // else is just a name someone typed here, and the ordinary rename already fixes that.
+    const linked = spkVoices?.[label]
+    if (linked) {
       const badge = document.createElement('span')
       badge.className = 'voice-badge'
       badge.textContent = '🔊'
@@ -1929,12 +1970,45 @@ function renderSpeakerPanel(
     // "พี่เพิร์ช" and becomes a second person — and picking the existing name here is
     // the same merge the hint below already promises for two speakers in one meeting.
     input.setAttribute('list', VOICE_NAMES_LIST)
+    input.dataset['speaker'] = label
     input.oninput = () => {
       spk[label] = input.value
       onPreview()
     }
     inputs.set(label, input)
     row.append(tag, input)
+
+    if (linked) {
+      const wrong = document.createElement('button')
+      wrong.className = 'wrong-voice'
+      wrong.textContent = t().speakerWrongVoice
+      wrong.title = t().speakerWrongVoiceHint
+      wrong.onclick = async () => {
+        if (!dir) return
+        const answer = await window.api.ask(t().speakerWrongTitle(spk[label] ?? label), t().speakerWrongDetail, [
+          t().speakerWrongYes,
+          t().deleteCancel,
+        ])
+        if (answer !== 0) return
+        wrong.disabled = true
+        // Unlinking is the report; naming is the correction, and that is left to the
+        // user, because the app has just been told its own guess was wrong.
+        await window.api.unlinkSpeaker(dir, label)
+        // Emptied rather than deleted: an absent key would take the row out of this
+        // editor, and the row is where the correction gets typed. Empty is also what
+        // every reader of `speakers` already treats as unnamed — the transcript falls
+        // straight back to "Speaker N" (speakerDisplayName) without being told.
+        spk[label] = ''
+        if (spkVoices) delete spkVoices[label]
+        onSave(spk)
+        onPreview()
+        renderSpeakerPanel(dir, spk, container, onPreview, onSave, spkVoices)
+        const fresh = container.querySelector<HTMLInputElement>(`input[data-speaker="${CSS.escape(label)}"]`)
+        fresh?.focus()
+      }
+      row.append(wrong)
+    }
+
     container.append(row)
   }
 

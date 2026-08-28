@@ -244,15 +244,28 @@ export function resolveLanguage(stored: MeetingLanguage | null | undefined, fall
  *
  * `force: true` throughout — a WAV already gone (a half-deleted folder, a second click)
  * is the desired end state, not an error.
+ *
+ * Deliberately a real delete, not the Trash, in BOTH cases here — but index.ts sends the
+ * whole-meeting case to the Trash before ever reaching this, and only the audio-only
+ * case actually lands on the `!keepTranscript` branch through the app. Reclaiming disk
+ * is the entire point of dropping the audio, and a 350MB file sitting in the Trash has
+ * not reclaimed anything.
  */
 export async function deleteMeeting(id: string, keepTranscript: boolean, root = NOTES_ROOT): Promise<void> {
-  if (!safeId(id)) throw new Error(`not a meeting: ${id}`)
-  const dir = join(root, id)
+  const dir = meetingPath(id, root)
   if (!keepTranscript) {
     await rm(dir, { recursive: true, force: true })
     return
   }
   for (const track of ['loopback', 'mic']) await rm(join(dir, `${track}.wav`), { force: true })
+}
+
+/** A meeting's folder, with the id checked first — for the one caller that has to act
+ * on the folder itself rather than ask this module to (index.ts moves it to the Trash,
+ * which needs Electron and so cannot happen in here). */
+export function meetingPath(id: string, root = NOTES_ROOT): string {
+  if (!safeId(id)) throw new Error(`not a meeting: ${id}`)
+  return join(root, id)
 }
 
 /**

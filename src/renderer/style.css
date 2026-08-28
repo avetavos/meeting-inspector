@@ -286,6 +286,11 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 #detail-transcript p { padding: var(--space-2xs) var(--space-sm); margin-left: calc(var(--space-sm) * -1); }
 #transcript .t, #detail-transcript .t { color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: var(--text-secondary); }
 #transcript .who, #detail-transcript .who { color: var(--text-dim); font-size: var(--text-secondary); }
+/* The name in a line is the way to its row in the editor above. */
+#detail-transcript .who-jump { cursor: pointer; text-decoration-line: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-color: var(--line-lo); }
+#detail-transcript .who-jump:hover { color: var(--accent); text-decoration-color: currentColor; }
+/* Where the jump lands, briefly. */
+#detail-speakers .who.found { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius-sm); }
 #transcript .me .who, #detail-transcript .me .who { color: var(--text); font-weight: 600; }
 
 /* ---------- MCP connection state (settings > Connections) ---------------- */
@@ -421,6 +426,10 @@ body.recording #toggle { background: var(--accent-rec); box-shadow: inset 0 1px 
 .voice-name { flex: 1; min-width: 0; }
 .voice-samples { flex: 0 0 auto; font-size: var(--text-caption); color: var(--text-dim); white-space: nowrap; }
 #voices .voice button { flex: 0 0 auto; }
+/* Reporting a bad match is a correction, not a primary action — quiet until hovered,
+   and never wider than the name it sits beside. */
+button.wrong-voice { flex: 0 0 auto; padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); color: var(--text-dim); }
+button.wrong-voice:hover:not(:disabled) { color: var(--accent-rec); }
 #voices button { padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); }
 
 /* pending voices — clustered by diarization but not yet named (spec item 1) */

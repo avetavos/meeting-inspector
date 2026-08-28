@@ -37,6 +37,7 @@ import {
   finishReplayTranscript,
   listMeetings,
   localIso,
+  meetingPath,
   micTestLocked,
   readTranscript,
   renameMeeting,
@@ -637,6 +638,37 @@ function registerIpc(): void {
 
   // Typing one name for two speakers is how you merge them (spec §8) — the summary
   // sees one person, and nothing has to reshuffle the segments.
+ /**
+   * Breaks the link between one speaker in one meeting and the stored voice it was
+   * matched to. The report is "these are not the same person" — recognition put a name
+   * on this speaker that belongs to somebody else.
+   *
+   * Only the link goes. The voice itself is untouched, because it is almost certainly
+   * fine everywhere it was matched correctly, and renaming this speaker would otherwise
+   * rename that innocent person in every meeting they appear in (remember(), voices.ts,
+   * reuses whichever id the transcript already ties a speaker to — which is exactly the
+   * propagation that has to be stopped first here). With the link gone, naming this
+   * speaker starts over: it embeds this meeting's own audio for them and files it under
+   * whatever name is typed, matching an existing person by name or minting a new one.
+   */
+  ipcMain.handle('meeting:unlink-speaker', async (_e, dir: string, speaker: string) => {
+    if (typeof speaker !== 'string' || !speaker) throw new Error('meeting:unlink-speaker expects a speaker')
+    const guarded = assertMeetingDir(dir)
+    const previous = await readTranscript(guarded)
+    const { [speaker]: _removed, ...speakerVoices } = previous.speakerVoices ?? {}
+    // Emptied, not deleted. The name goes — it came from the match that just turned out
+    // to be wrong — but the KEY has to stay: the speaker editor builds its rows from
+    // this map, so a deleted key means the row to type the correction into disappears
+    // the next time the meeting is opened, and that speaker can never be named again
+    // (found by reopening the page in a test, not by reading the code). Empty is what
+    // every reader here already treats as unnamed — the transcript falls straight back
+    // to "Speaker N".
+    const speakers = { ...previous.speakers, [speaker]: '' }
+    const next: Transcript = { ...previous, speakers, speakerVoices }
+    await writeTranscript(guarded, next)
+    return { ...next, speakers: await resolveSpeakerNames(next.speakers, next.speakerVoices) }
+  })
+
   ipcMain.handle('meeting:rename', async (_e, dir: string, speakers: Record<string, string>) => {
     const guarded = assertMeetingDir(dir)
     const previous = await readTranscript(guarded)
@@ -840,7 +872,19 @@ function registerIpc(): void {
     if (transcriptionBusy(current !== null || sessionStarting, batchController !== null)) {
       throw new Error('ยังถอดเสียงอยู่ — รอให้เสร็จก่อนแล้วค่อยลบ')
     }
-    for (const id of ids) await deleteMeeting(id, keepTranscript === true)
+    for (const id of ids) {
+      if (keepTranscript === true) {
+        // Only the audio goes, and it goes for good: this exists to reclaim the disk,
+        // and a 350MB WAV in the Trash has reclaimed nothing.
+        await deleteMeeting(id, true)
+        continue
+      }
+      // The whole meeting: to the Trash, not `rm`. Deleting a recording is the one
+      // irreversible thing in this app, and macOS already has the place where
+      // irreversible things wait to be reconsidered. Falls back to a real delete only
+      // if the Trash refuses (a volume without one), because the user asked for it gone.
+      await shell.trashItem(meetingPath(id)).catch(() => deleteMeeting(id, false))
+    }
   })
 
   /**

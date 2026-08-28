@@ -78,6 +78,10 @@ const api = {
   onTranscriptError: (fn: (message: string) => void) =>
     ipcRenderer.on('transcript:error', (_e, message: string) => fn(message)),
 
+  /** Reports that a speaker in this meeting was matched to the wrong stored voice, and
+   * breaks that link. The voice itself is left alone — it is only wrong here. */
+  unlinkSpeaker: (dir: string, speaker: string): Promise<Transcript> =>
+    ipcRenderer.invoke('meeting:unlink-speaker', dir, speaker),
   renameSpeakers: (dir: string, speakers: Record<string, string>): Promise<Transcript> =>
     ipcRenderer.invoke('meeting:rename', dir, speakers),
   onDiarizing: (fn: () => void) => ipcRenderer.on('meeting:diarizing', () => fn()),
