@@ -6,16 +6,19 @@ import { test } from 'node:test'
 import {
   NOTES_ROOT,
   assertMeetingDir,
+  createMeetingDir,
   localIso,
-  meetingId,
+  readMeta,
   readTranscript,
-  slug,
   deleteMeeting,
   dropEchoedMic,
-  renameMeeting,
+  dropSpeakers,
+  migrateMeetingMeta,
+  setMeetingTitle,
+  uuidv7,
   writeTranscript,
 } from './store.ts'
-import { safeId, titleOf, untitledTitle } from '../shared/meetings.ts'
+import { displayTitle, safeId, titlePartOf, untitledTitle } from '../shared/meetings.ts'
 import { WavWriter } from './wav.ts'
 
 test('wav: header matches what was actually written, across many appends', async () => {
@@ -48,39 +51,60 @@ test('wav: header matches what was actually written, across many appends', async
   }
 })
 
-test('store: meeting id is sortable and keeps Thai', () => {
+test('store: ids are uuid v7, and they sort into the order the meetings happened', () => {
   const at = new Date(2026, 7, 27, 14, 0)
-  assert.equal(meetingId('sprint planning', at), '2026-08-27-1400-sprint-planning')
-  assert.equal(meetingId('ประชุม ทีม', at), '2026-08-27-1400-ประชุม-ทีม')
+  const id = uuidv7(at)
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, 'version 7, RFC variant')
+
+  // The whole reason for v7 over v4/v5: plain string order is time order, so a folder
+  // listing and the meetings list agree without anyone parsing a date out of a name.
+  const ids = [
+    uuidv7(new Date(2026, 7, 27, 14, 0)),
+    uuidv7(new Date(2026, 7, 27, 14, 1)),
+    uuidv7(new Date(2026, 7, 28, 9, 0)),
+    uuidv7(new Date(2027, 0, 1, 0, 0)),
+  ]
+  assert.deepEqual([...ids].sort(), ids)
+
+  // Same millisecond, different meeting — 74 random bits, so nothing collides the way
+  // the old minute-resolution id did (MEDIUM 3).
+  assert.notEqual(uuidv7(at), uuidv7(at))
 })
 
-test('store: an untitled meeting is just its timestamp', () => {
+test('store: a new meeting gets its title in meeting.json, not in its folder name', async () => {
+  const root = join(tmpdir(), `create-test-${process.pid}`)
   const at = new Date(2026, 7, 27, 14, 0)
-  // No filler word in the folder name, and no date repeated after the date.
-  assert.equal(meetingId('', at), '2026-08-27-1400')
-  assert.equal(meetingId('   ', at), '2026-08-27-1400')
+  const { id, dir } = await createMeetingDir('ประชุม ทีม / Q3: แผน', at, root)
+
+  assert.equal(dir, join(root, id))
+  assert.match(id, /^[0-9a-f]{8}-/, 'the folder name is the id, and the id is a uuid')
+  // Freetext: slashes and colons used to be stripped because the title WAS a path.
+  assert.deepEqual(await readMeta(dir), { id, title: 'ประชุม ทีม / Q3: แผน', startedAt: localIso(at) })
+
+  // Untitled is a real state now, not a folder named after the clock.
+  const untitled = await createMeetingDir('   ', at, root)
+  assert.equal((await readMeta(untitled.dir))?.title, '')
 })
 
 test('meetings: an untitled meeting reads as the time it happened', () => {
-  assert.equal(titleOf('2026-08-27-1400'), '27-08-2026 14:00')
-  assert.equal(titleOf('2026-08-27-1400-sprint-planning'), 'sprint-planning')
-  assert.equal(titleOf('2026-08-27-1400-ประชุม-ทีม'), 'ประชุม-ทีม')
-  assert.equal(titleOf('not-a-meeting-id'), 'not-a-meeting-id')
+  assert.equal(displayTitle('', '2026-08-27T14:00:00'), '27-08-2026 14:00')
+  assert.equal(displayTitle('   ', '2026-08-27T14:00:00'), '27-08-2026 14:00')
+  assert.equal(displayTitle('sprint planning', '2026-08-27T14:00:00'), 'sprint planning')
 })
 
 test('meetings: the composer placeholder is exactly what an untitled meeting gets called', () => {
   // The whole point of showing it before the recording exists — if these two ever
   // disagree, the placeholder is promising a name the meeting will not have.
   const at = new Date(2026, 7, 27, 14, 0)
-  assert.equal(untitledTitle(at), titleOf(meetingId('', at)))
+  assert.equal(untitledTitle(at), displayTitle('', localIso(at)))
   assert.equal(untitledTitle(at), '27-08-2026 14:00')
 })
 
-test('store: slug cannot escape the notes folder', () => {
-  assert.equal(slug('../../etc/passwd'), 'etcpasswd')
-  assert.equal(slug('a/b:c'), 'abc')
-  assert.equal(slug('   '), '')
-  assert.equal(slug(''), '')
+test('meetings: a pre-uuid id still gives up its title half, for the migration', () => {
+  assert.equal(titlePartOf('2026-08-27-1400-sprint-planning'), 'sprint-planning')
+  assert.equal(titlePartOf('2026-08-27-1400-ประชุม-ทีม'), 'ประชุม-ทีม')
+  assert.equal(titlePartOf('2026-08-27-1400'), '', 'stamped but never titled')
+  assert.equal(titlePartOf('not-a-meeting-id'), null)
 })
 
 test('store: a transcript survives the round trip, sorted by time', async () => {
@@ -104,7 +128,9 @@ test('store: a transcript survives the round trip, sorted by time', async () => 
   assert.deepEqual(read, { ...written, segments: [written.segments[1]!, written.segments[0]!] })
 
   const md = await readFile(join(dir, 'transcript.md'), 'utf8')
-  assert.match(md, /# 2026-08-27-1400-sprint-planning/)
+  // No meeting.json beside it, so the heading falls back to the time — the id is a uuid
+  // now and would tell a reader nothing.
+  assert.match(md, /# 27-08-2026 14:00/)
   assert.match(md, /\*\*คนอื่น\*\* `00:12`\s+ตัว backend พร้อมยัง/)
   assert.ok(md.indexOf('คนอื่น') < md.indexOf('คุณ'), 'markdown should follow the same order')
 })
@@ -163,39 +189,75 @@ async function fixture(root: string, id: string, transcribed: boolean): Promise<
 
 const exists = (path: string): Promise<boolean> => access(path).then(() => true, () => false)
 
-test('store: renaming a meeting moves the folder, keeps the timestamp, and re-stamps the transcript', async () => {
+test('store: retitling a meeting rewrites meeting.json and leaves the folder — and the id — alone', async () => {
   const root = join(tmpdir(), `rename-test-${process.pid}-a`)
-  await fixture(root, '2026-08-27-1400', true)
+  const { id, dir } = await createMeetingDir('sprint planning', new Date(2026, 7, 27, 14, 0), root)
+  await fixture(root, id, true)
 
-  const next = await renameMeeting('2026-08-27-1400', 'สรุป sprint', root)
-  assert.equal(next, '2026-08-27-1400-สรุป-sprint', 'the stamp is carried over verbatim; only the title part changes')
-  assert.equal(await exists(join(root, '2026-08-27-1400')), false, 'the old folder must not be left behind')
-  // The id is inside transcript.json (and transcript.md renders from it), so a rename
-  // that only moved the folder would leave the transcript claiming the old name.
-  assert.equal((await readTranscript(join(root, next))).id, next)
-  assert.match(await readFile(join(root, next, 'transcript.md'), 'utf8'), /2026-08-27-1400-สรุป-sprint/)
+  await setMeetingTitle(id, '  สรุป sprint / Q3  ', root)
+  assert.equal(await exists(dir), true, 'nothing moves — the id is not made out of the title any more')
+  const meta = await readMeta(dir)
+  assert.equal(meta?.id, id)
+  assert.equal(meta?.title, 'สรุป sprint / Q3', 'trimmed, but otherwise stored exactly as typed')
 
-  // Renaming back to nothing returns to the bare stamp, not a folder called "-".
-  assert.equal(await renameMeeting(next, '   ', root), '2026-08-27-1400')
+  // Blank is a real title, not a folder called "-": it reads back as the time.
+  await setMeetingTitle(id, '   ', root)
+  assert.equal((await readMeta(dir))?.title, '')
+
+  // Two meetings can hold the same title now — there is no folder left to collide.
+  const other = await createMeetingDir('', new Date(2026, 7, 27, 15, 0), root)
+  await setMeetingTitle(other.id, 'standup', root)
+  await setMeetingTitle(id, 'standup', root)
+  assert.equal((await readMeta(dir))?.title, 'standup')
+  assert.equal((await readMeta(other.dir))?.title, 'standup')
 })
 
-test('store: a rename onto a name another meeting already holds walks past it instead of swallowing it', async () => {
-  const root = join(tmpdir(), `rename-test-${process.pid}-b`)
-  await fixture(root, '2026-08-27-1400-standup', true)
+test('store: meetings recorded before uuids keep their folder and gain a meeting.json', async () => {
+  const root = join(tmpdir(), `migrate-test-${process.pid}`)
+  await fixture(root, '2026-08-27-1400-sprint-planning', true)
   await fixture(root, '2026-08-27-1500', true)
 
-  const next = await renameMeeting('2026-08-27-1500', 'standup', root)
-  assert.equal(next, '2026-08-27-1500-standup', 'a different stamp is not a collision at all')
+  assert.equal(await migrateMeetingMeta(root), 2)
+  // The folder name IS the id, and voices.json/MCP clients already hold those — so it
+  // must not have moved.
+  assert.equal(await exists(join(root, '2026-08-27-1400-sprint-planning')), true)
+  const meta = await readMeta(join(root, '2026-08-27-1400-sprint-planning'))
+  assert.equal(meta?.id, '2026-08-27-1400-sprint-planning')
+  assert.equal(meta?.title, 'sprint-planning')
+  assert.equal((await readMeta(join(root, '2026-08-27-1500')))?.title, '', 'never titled, and it stays that way')
 
-  // Same stamp, same title — this one genuinely collides, and the meeting already
-  // sitting there must survive untouched.
-  await fixture(root, '2026-08-27-1400-retro', true)
-  const bumped = await renameMeeting('2026-08-27-1400-retro', 'standup', root)
-  assert.equal(bumped, '2026-08-27-1400-standup-2')
-  assert.equal(await exists(join(root, '2026-08-27-1400-standup', 'loopback.wav')), true, 'the meeting that was already there must not have been clobbered')
+  // Idempotent: a second launch must not overwrite a title the user has since changed.
+  await setMeetingTitle('2026-08-27-1400-sprint-planning', 'retro', root)
+  assert.equal(await migrateMeetingMeta(root), 0)
+  assert.equal((await readMeta(join(root, '2026-08-27-1400-sprint-planning')))?.title, 'retro')
+})
 
-  // Renaming a meeting to the name it already has is a no-op, not a walk to "-2".
-  assert.equal(await renameMeeting('2026-08-27-1400-standup', 'standup', root), '2026-08-27-1400-standup')
+test('store: a speaker who turns out to be noise takes their lines with them', () => {
+  const transcript = {
+    id: 'x',
+    startedAt: '2026-08-27T14:00:00+07:00',
+    durationSec: 60,
+    speakers: { me: 'คุณ', SPEAKER_04: '', SPEAKER_19: '', SPEAKER_06: 'บิว' },
+    segments: [
+      { t0: 0, t1: 2, speaker: 'me', text: 'สวัสดีครับ' },
+      { t0: 2, t1: 3, speaker: 'SPEAKER_04', text: 'อืม' },
+      { t0: 3, t1: 5, speaker: 'SPEAKER_06', text: 'ตัว backend พร้อมยัง' },
+      { t0: 5, t1: 6, speaker: 'SPEAKER_19', text: 'ครับๆ' },
+    ],
+    speakerVoices: {
+      SPEAKER_04: { voiceId: 'v4', name: '' },
+      SPEAKER_06: { voiceId: 'v6', name: 'บิว' },
+    },
+  }
+
+  const kept = dropSpeakers(transcript, ['SPEAKER_04', 'SPEAKER_19'])
+  assert.deepEqual(Object.keys(kept.speakers), ['me', 'SPEAKER_06'])
+  assert.deepEqual(kept.segments.map((s) => s.speaker), ['me', 'SPEAKER_06'])
+  // The link to the noise voice goes too, or the transcript points at a voice it has no
+  // audio filed under any more.
+  assert.deepEqual(kept.speakerVoices, { SPEAKER_06: { voiceId: 'v6', name: 'บิว' } })
+  // The original is untouched — the caller writes what comes back.
+  assert.equal(transcript.segments.length, 4)
 })
 
 test('store: deleting audio keeps the transcript; deleting the meeting takes the folder', async () => {
@@ -215,7 +277,7 @@ test('store: deleting audio keeps the transcript; deleting the meeting takes the
 
   // An id that could climb out of the notes folder is refused before anything is touched.
   await assert.rejects(() => deleteMeeting('../../etc', false, root))
-  await assert.rejects(() => renameMeeting('../../etc', 'x', root))
+  await assert.rejects(() => setMeetingTitle('../../etc', 'x', root))
 })
 
 test('store: the speakers coming back into the mic are dropped, real speech is not', () => {

@@ -17,7 +17,7 @@ import type {
   TranscribeMode,
   TranscribeStatus,
 } from '../preload/index.ts'
-import { titleOf, untitledTitle } from '../shared/meetings.ts'
+import { untitledTitle } from '../shared/meetings.ts'
 import { Recorder, openMicTap, type Track } from './recorder.ts'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -255,6 +255,12 @@ const en = {
   speakerWrongDetail:
     'The link between this speaker and the stored voice is dropped, and this meeting alone forgets the name. The voice itself is kept — it is presumably right in the meetings where it was matched correctly, and deleting it would take those with it. Then type who this actually is: an existing name puts them with that person, a new one starts a new voice.',
   speakerWrongYes: 'Wrong person — unlink',
+  speakerNotSpeech: 'Delete (noise)',
+  speakerNotSpeechHint: 'Delete this speaker and their lines — for a door, a cough or a fan that diarization heard as somebody talking',
+  speakerNotSpeechTitle: (name: string) => `${name} is not a person?`,
+  speakerNotSpeechDetail: (n: number) =>
+    `Their ${n} line${n === 1 ? '' : 's'} are deleted from this transcript, and the app stops asking you to name that voice. The recording itself is untouched.`,
+  speakerNotSpeechYes: 'Delete these lines',
   speakerJump: 'Find this speaker above',
   copy: 'Copy',
   copied: 'Copied',
@@ -602,6 +608,12 @@ const th: typeof en = {
   speakerWrongDetail:
     'จะตัดการเชื่อมระหว่างคนพูดคนนี้กับเสียงที่จำไว้ และลืมชื่อเฉพาะในการประชุมนี้ ตัวเสียงยังอยู่ เพราะในประชุมอื่นที่จับคู่ถูกก็ยังถูกอยู่ ลบทิ้งจะพังตามไปด้วย จากนั้นพิมพ์ว่าจริงๆ แล้วเป็นใคร — ถ้าใช้ชื่อที่มีอยู่แล้วจะรวมเป็นคนเดียวกัน ถ้าเป็นชื่อใหม่ก็เริ่มเป็นเสียงใหม่',
   speakerWrongYes: 'จับคู่ผิด — ตัดการเชื่อม',
+  speakerNotSpeech: 'ลบ (เสียงรบกวน)',
+  speakerNotSpeechHint: 'ลบคนพูดคนนี้พร้อมบททั้งหมด — ใช้กับเสียงประตู เสียงไอ เสียงพัดลม ที่ระบบเข้าใจว่าเป็นคนพูด',
+  speakerNotSpeechTitle: (name) => `${name} ไม่ใช่คนใช่ไหม?`,
+  speakerNotSpeechDetail: (n) =>
+    `บทพูด ${n} บรรทัดของคนนี้จะถูกลบออกจาก transcript และแอปจะเลิกถามชื่อเสียงนี้ ไฟล์เสียงต้นฉบับไม่ถูกแตะ`,
+  speakerNotSpeechYes: 'ลบบทพูดเหล่านี้',
   speakerJump: 'ไปที่คนพูดคนนี้ด้านบน',
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
@@ -1604,7 +1616,7 @@ function setQueueMsg(msg: (() => string) | null): void {
 /** `done` goes through the same "hold the data, not the rendered text" treatment —
  * either mid-stop ("Transcribing what's left…") or the finished "Saved … · N segments"
  * line with its reveal link. */
-type DoneState = { kind: 'pending' } | { kind: 'saved'; durationSec: number; segments: number; dir: string; id: string }
+type DoneState = { kind: 'pending' } | { kind: 'saved'; durationSec: number; segments: number; dir: string; title: string }
 let doneState: DoneState | null = null
 function renderDone(): void {
   done.replaceChildren()
@@ -1617,7 +1629,7 @@ function renderDone(): void {
   done.textContent = t().saved(fmt(state.durationSec), state.segments)
   const open = document.createElement('a')
   open.href = '#'
-  open.textContent = titleOf(state.id)
+  open.textContent = state.title
   open.onclick = () => void window.api.reveal(state.dir)
   done.append(open)
 }
@@ -2075,15 +2087,20 @@ function renderTranscript(
 
 /** `dir`/`spk`/`container` default to the live-session panel, same as renderTranscript
  * above. `onPreview` re-renders whichever transcript this panel's typing should
- * preview into; `onSave` commits the round-tripped result into whichever variable
- * owns `spk` — the live session's own `speakers`, or the detail page's own copy. */
+ * preview into; `onSaved` takes the whole transcript main hands back after a save, an
+ * unlink or a deletion and re-seats whichever page owns `spk` on it — the segments too,
+ * not just the names, since deleting a speaker deletes their lines with them. */
 function renderSpeakerPanel(
   dir: string | null = meetingDir,
   spk: Record<string, string> = speakers,
   container: HTMLElement = speakerPanel,
   onPreview: () => void = () => renderTranscript(),
-  onSave: (updated: Record<string, string>) => void = (updated) => {
-    speakers = updated
+  onSaved: (updated: Transcript) => void = (updated) => {
+    segments = updated.segments
+    speakers = updated.speakers
+    speakerVoices = updated.speakerVoices
+    renderTranscript()
+    renderSpeakerPanel()
   },
   spkVoices: Transcript['speakerVoices'] = speakerVoices,
 ): void {
@@ -2188,25 +2205,62 @@ function renderSpeakerPanel(
         // Every key under this name, because the report is about the name: the group is
         // the set of clusters currently claimed to be this person, and the claim is what
         // was just called wrong.
-        for (const label of linked) await window.api.unlinkSpeaker(dir, label)
+        let updated: Transcript | null = null
+        for (const label of linked) updated = await window.api.unlinkSpeaker(dir, label)
+        if (!updated) return
         // Emptied rather than deleted: an absent key would take the row out of this
         // editor, and the row is where the correction gets typed. Empty is also what
         // every reader of `speakers` already treats as unnamed — the transcript falls
-        // straight back to "Speaker N" (speakerDisplayName) without being told.
-        for (const label of labels) spk[label] = ''
-        for (const label of labels) if (spkVoices) delete spkVoices[label]
-        onSave(spk)
-        onPreview()
-        renderSpeakerPanel(dir, spk, container, onPreview, onSave, spkVoices)
+        // straight back to "Speaker N" (speakerDisplayName) without being told. Main
+        // blanks the keys it unlinked; the rest of the group is blanked here, since the
+        // name that was just called wrong was covering all of them.
+        for (const label of labels) updated.speakers[label] = ''
+        onSaved(updated)
         container.querySelector<HTMLInputElement>(`input[data-speaker="${CSS.escape(first)}"]`)?.focus()
       }
       row.append(wrong)
+    }
+
+    // "I listened, and that is a door." Only on the detail page, for the same reason
+    // `hear` is: this is a judgement made after playing the audio back, which the live
+    // panel has no player for — and mid-recording the transcript on disk is still being
+    // appended to, so there is nothing stable to delete lines out of yet.
+    //
+    // Never for 'me' or 'them': those are the two TRACKS (the microphone, and everything
+    // diarization could not attribute), not clusters diarization invented — deleting one
+    // would silently empty half the transcript, and a meeting that really is all noise is
+    // deleted from the meetings list as a meeting.
+    if (container === detailSpeakersEl && !labels.includes('me') && !labels.includes(UNKNOWN_SPEAKER_KEY)) {
+      const notSpeech = document.createElement('button')
+      notSpeech.className = 'not-speech'
+      notSpeech.textContent = t().speakerNotSpeech
+      notSpeech.title = t().speakerNotSpeechHint
+      notSpeech.onclick = async () => {
+        if (!dir) return
+        const lines = playerSegments.filter((seg) => labels.includes(seg.speaker)).length
+        // Named the way the transcript above names them, placeholder number and all —
+        // walking the segments in the same order rebuilds the same first-appearance
+        // numbering renderTranscript used, so the dialog asks about "Speaker 19" rather
+        // than about a SPEAKER_33 the user has never seen.
+        const numbering = new Map<string, string>()
+        for (const seg of playerSegments) speakerDisplayName(seg.speaker, spk, numbering)
+        const answer = await window.api.ask(
+          t().speakerNotSpeechTitle(speakerDisplayName(first, spk, numbering)),
+          t().speakerNotSpeechDetail(lines),
+          [t().speakerNotSpeechYes, t().deleteCancel],
+        )
+        if (answer !== 0) return
+        notSpeech.disabled = true
+        onSaved(await window.api.dropSpeakers(dir, labels))
+      }
+      row.append(notSpeech)
     }
 
     container.append(row)
   }
 
   const save = document.createElement('button')
+  save.className = 'save-speakers'
   save.textContent = t().speakerSave
   save.onclick = async () => {
     save.disabled = true
@@ -2221,14 +2275,20 @@ function renderSpeakerPanel(
         named[label] = input.value.trim()
       }
     }
-    const result = (await window.api.renameSpeakers(dir, named)).speakers
-    onSave(result)
+    const updated = await window.api.renameSpeakers(dir, named)
     // Saving here is one of the ways a voice gets a name in the first place, so the
     // suggestions are stale the moment it returns.
     knownVoiceNames = []
     void ensureVoiceNames()
-    save.disabled = false
-    save.textContent = t().speakerSaved
+    // Straight onto what main actually wrote, rather than only the names this panel
+    // sent: saving is where two speakers given one name become one row, and where
+    // `speakerVoices` gains the 🔊 link that decides whether this row can be reported
+    // as the wrong person at all. Both used to wait for the page to be reopened.
+    onSaved(updated)
+    // onSaved rebuilt this panel, so the confirmation belongs on the button that
+    // replaced this one.
+    const fresh = container.querySelector<HTMLButtonElement>('button.save-speakers')
+    if (fresh) fresh.textContent = t().speakerSaved
   }
 
   const hint = document.createElement('div')
@@ -3059,7 +3119,15 @@ async function stop(): Promise<void> {
   }
 
   meetingDir = result.dir
-  doneState = { kind: 'saved', durationSec: result.durationSec, segments: result.segments, dir: result.dir, id: result.id }
+  // The id is a uuid now, so the link says what the meeting is called — the title the
+  // user typed, or the same time-of-day placeholder the composer was already showing.
+  doneState = {
+    kind: 'saved',
+    durationSec: result.durationSec,
+    segments: result.segments,
+    dir: result.dir,
+    title: title.value.trim() || title.placeholder,
+  }
   renderDone()
   updateTranscriptionLocks()
   void renderMeetings() // the meeting just finished now belongs in the list too
@@ -3146,7 +3214,7 @@ function fmtMeetingWhen(iso: string): string {
  * `saved` guards the two ways out that can both fire for one edit — Enter also blurs
  * the input — so a rename is never sent twice. Escape restores the row without asking
  * main anything; anything else (Enter, clicking away) commits, and an unchanged or
- * blank-but-unchanged title is a no-op main will hand straight back (renameMeeting).
+ * blank-but-unchanged title is a no-op main will hand straight back (setMeetingTitle).
  */
 function startTitleEdit(row: HTMLElement, title: HTMLElement, m: MeetingItem): void {
   const input = document.createElement('input')
@@ -3211,7 +3279,7 @@ function renderMeetingRowsInto(panel: MeetingsPanel): void {
         ;(title as HTMLButtonElement).type = 'button'
         title.onclick = () => {
           window.clearTimeout(openTimer)
-          openTimer = window.setTimeout(() => void openMeetingDetail(m.id), DOUBLE_CLICK_MS)
+          openTimer = window.setTimeout(() => void openMeetingDetail(m.id, m.title), DOUBLE_CLICK_MS)
         }
       }
       title.ondblclick = (e) => {
@@ -3469,15 +3537,14 @@ async function deleteSelectedMeetings(): Promise<void> {
 }
 
 /**
- * Renames a saved meeting in place, from the row itself (double-click its title). The
- * title lives in the folder name, so main moves the folder and the meeting's id changes
- * with it — which is why the selection is retargeted at the id that comes back rather
- * than left pointing at one that no longer exists.
+ * Renames a saved meeting in place, from the row itself (double-click its title). Any
+ * text at all: the title is its own field in the meeting's meeting.json now, not half
+ * of a folder name, so it no longer has to survive being a path — and the id, and every
+ * selection pointing at it, stays exactly where it was.
  */
 async function renameMeetingRow(id: string, title: string): Promise<void> {
   try {
-    const next = await window.api.setMeetingTitle(id, title)
-    if (next !== id && selectedMeetings.delete(id)) selectedMeetings.add(next)
+    await window.api.setMeetingTitle(id, title)
     renderMeetingsProgress('')
   } catch (err) {
     renderMeetingsProgress(t().renameFailed(reason(err)))
@@ -3588,6 +3655,9 @@ allMeetingsBackBtn.onclick = () => closeAllMeetings()
  */
 let detailId: string | null = null
 let detailDir: string | null = null
+/** The meeting's own title, from the list row that opened it — no longer derivable from
+ * the id, which is a uuid. */
+let detailTitle = ''
 let detailSegments: Transcript['segments'] = []
 let detailSpeakers: Record<string, string> = {}
 /** The detail page's own copy of `speakerVoices` above, same reason it keeps its own
@@ -3607,7 +3677,7 @@ function renderDetailMeta(): void {
   detailBackLabel.textContent = t().settingsBack
   detailRevealBtn.textContent = t().detailReveal
   if (!detailId) return
-  detailTitleEl.textContent = titleOf(detailId)
+  detailTitleEl.textContent = detailTitle
   detailMetaEl.textContent =
     `${fmtMeetingWhen(detailStartedAt)} · ${fmt(detailDurationSec)}` +
     (detailHasAudio ? '' : ` · ${t().playerNoAudio}`)
@@ -3622,16 +3692,29 @@ function renderDetailSpeakers(): void {
     detailSpeakersEl,
     () => renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl),
     (updated) => {
-      detailSpeakers = updated
+      detailSegments = updated.segments
+      detailSpeakers = updated.speakers
+      detailSpeakerVoices = updated.speakerVoices
+      // The player's own copy too (it deliberately keeps one) — otherwise "Hear" would
+      // still offer a deleted speaker's audio, and the highlighted line would be indexed
+      // against a transcript that no longer exists.
+      playerSegments = updated.segments
+      renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl)
+      renderDetailSpeakers()
+      // Deleting a noise cluster forgets the pending voice behind it (main's
+      // meeting:drop-speakers), so the Settings list that was asking for its name is
+      // stale the moment this returns.
+      void renderPendingVoices()
     },
     detailSpeakerVoices,
   )
 }
 
-async function openMeetingDetail(id: string): Promise<void> {
+async function openMeetingDetail(id: string, meetingTitle: string): Promise<void> {
   const { dir, audio, transcript: tr } = await window.api.getTranscript(id)
   detailId = id
   detailDir = dir
+  detailTitle = meetingTitle
   detailSegments = tr.segments
   detailSpeakers = tr.speakers
   detailSpeakerVoices = tr.speakerVoices

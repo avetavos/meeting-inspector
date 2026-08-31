@@ -201,30 +201,21 @@ test('listMeetings: sorts by the transcript\'s own startedAt, never by folder na
   assert.deepEqual(items.map((m) => m.id), ['zzz-actually-newest', 'middle-meeting', 'aaa-renamed-folder'])
 })
 
-test('createMeetingDir: two recordings in the same minute get different folders, never overwriting each other (MEDIUM 3)', async () => {
+test('createMeetingDir: two recordings in the same minute get their own folders (MEDIUM 3)', async () => {
   const root = await mkdtemp(join(tmpdir(), 'store-collision-test-'))
   const at = new Date(2026, 7, 27, 14, 0)
 
-  const first = await createMeetingDir('daily standup', at, root)
-  const second = await createMeetingDir('daily standup', at, root)
-  const third = await createMeetingDir('daily standup', at, root)
+  // The old id had minute resolution, so this used to land all three in one folder and
+  // the third recording's WavWriter truncated the first. A uuid carries 74 random bits
+  // past the timestamp, so there is nothing left to collide.
+  const dirs = new Set<string>()
+  for (let n = 0; n < 3; n++) dirs.add((await createMeetingDir('daily standup', at, root)).dir)
+  assert.equal(dirs.size, 3)
 
-  assert.equal(first.id, '2026-08-27-1400-daily-standup')
-  assert.equal(second.id, '2026-08-27-1400-daily-standup-2')
-  assert.equal(third.id, '2026-08-27-1400-daily-standup-3')
-  assert.notEqual(first.dir, second.dir)
-  assert.notEqual(second.dir, third.dir)
-})
-
-test('createMeetingDir: an untitled meeting (just the timestamp) collides the same way', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'store-collision-test-'))
-  const at = new Date(2026, 7, 27, 14, 0)
-
-  const first = await createMeetingDir('', at, root)
-  const second = await createMeetingDir('', at, root)
-
-  assert.equal(first.id, '2026-08-27-1400')
-  assert.equal(second.id, '2026-08-27-1400-2')
+  // An untitled meeting is no different — the title was never part of the id.
+  const untitled = new Set<string>()
+  for (let n = 0; n < 2; n++) untitled.add((await createMeetingDir('', at, root)).dir)
+  assert.equal(untitled.size, 2)
 })
 
 test('listMeetings: language is the meeting\'s own stored value, or null if it predates the field — left unresolved for the caller to fall back on', async () => {

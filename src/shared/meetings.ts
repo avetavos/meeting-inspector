@@ -85,41 +85,42 @@ export interface MeetingStore {
 const STAMPED = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(?:-(.+))?$/
 
 /**
- * The id is `<date>-<time>` with an optional title after it. An untitled meeting
- * shows the time it happened, as `DD-MM-YYYY HH:mm`, rather than a placeholder word.
+ * A meeting's title is freetext held in its own `meeting.json` (store.ts), not parsed
+ * back out of the folder name — so this is the whole display rule: what the user typed,
+ * or, for a meeting nobody named, the time it happened as `DD-MM-YYYY HH:mm`.
  */
-export const titleOf = (id: string): string => {
-  const stamped = STAMPED.exec(id)
-  if (!stamped) return id
-  const [, year, month, day, hour, minute, title] = stamped
-  return title ?? `${day}-${month}-${year} ${hour}:${minute}`
+export const displayTitle = (title: string, startedAt: string): string => title.trim() || whenLabel(startedAt)
+
+const whenLabel = (iso: string): string => {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-/** The `<date>-<time>` an id opens with, without whatever title follows it — null for
- * anything that is not a stamped meeting id. Renaming a meeting keeps this verbatim
- * rather than rebuilding it from a clock (store.ts's renameMeeting): it is what the
- * meetings list sorts on, and it may carry a collision suffix createMeetingDir had to
- * add, neither of which a rename has any business changing. */
-export const stampOf = (id: string): string | null => {
-  const s = STAMPED.exec(id)
-  return s ? `${s[1]}-${s[2]}-${s[3]}-${s[4]}${s[5]}` : null
+/**
+ * The title half of a pre-uuid folder name (`2026-08-28-1900-standup` -> `standup`),
+ * empty for one that never had a title and null for a folder name that was never a
+ * stamped id at all. Read once, by store.ts's one-shot migration into meeting.json;
+ * nothing else parses a title out of an id any more.
+ */
+export const titlePartOf = (id: string): string | null => {
+  const stamped = STAMPED.exec(id)
+  return stamped ? (stamped[6] ?? '') : null
 }
 
 /**
  * What an untitled meeting started now would end up called — the composer offers it as
  * the title field's placeholder, so "leave this blank" has a visible answer. Routed
- * through `titleOf` on a stamp built the way store.ts's `meetingId` builds it, rather
- * than formatting a second time here, so the two cannot drift apart.
+ * through the same `displayTitle` the list uses, so the placeholder and the row it
+ * turns into cannot drift apart.
  */
-export const untitledTitle = (at: Date): string => {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return titleOf(`${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}`)
-}
+export const untitledTitle = (at: Date): string => displayTitle('', at.toISOString())
 
 /**
- * Best-effort `startedAt` for a meeting whose transcript.json is missing or corrupt —
- * parsed straight from the id's own timestamp, so store.ts's meetings list still sorts
- * and shows something sensible instead of dropping the folder (spec item 3).
+ * Best-effort `startedAt` for a pre-uuid meeting with no meeting.json and no usable
+ * transcript.json — parsed straight from the folder name's own timestamp, so store.ts's
+ * migration still has something to record instead of dropping the folder (spec item 3).
  */
 export const startedAtFromId = (id: string): string | null => {
   const stamped = STAMPED.exec(id)

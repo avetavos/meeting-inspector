@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
-import { writeTranscript } from './store.ts'
+import { migrateMeetingMeta, writeTranscript } from './store.ts'
 
 const TOKEN = 'test-token-do-not-guess'
 let server: McpHandle
@@ -49,6 +49,11 @@ before(async () => {
     join(root, 'voices.json'),
     JSON.stringify([{ id: 'v-joe', name: 'โจ้', embedding: [0.1, 0.2] }], null, 2),
   )
+
+  // Both fixtures are pre-uuid folders with no meeting.json, exactly like a real
+  // install upgrading into this version — so the same startup pass the app runs is what
+  // gives them their titles here (store.ts's migrateMeetingMeta).
+  await migrateMeetingMeta(root)
 
   // Port 0 so the suite never fights the running app for 8787.
   server = await startMcp({ token: TOKEN, root, port: 0 })

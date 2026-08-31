@@ -95,7 +95,10 @@ The transcript appears as you go, about half a minute behind. Press **End meetin
 and the app works out who was speaking, then lets you put real names to them.
 
 Everything is saved in `~/Documents/MeetingNotes/`, one folder per meeting, with
-the audio and the transcript as plain files you own.
+the audio and the transcript as plain files you own. The folder is named with a
+UUID v7 — so folders sort by when the meeting happened — and the title you typed
+lives in `meeting.json` beside them, where you can rename it freely without the
+meeting's identity changing.
 
 ### Connecting an AI assistant
 
@@ -211,7 +214,9 @@ Developer ID ปุ่มนั้นไม่ได้ขึ้นเสมอ�
 แล้วให้คุณตั้งชื่อจริงให้แต่ละคน
 
 ทุกอย่างเก็บใน `~/Documents/MeetingNotes/` แยกโฟลเดอร์ต่อการประชุม
-ทั้งไฟล์เสียงและ transcript เป็นไฟล์ธรรมดาที่เป็นของคุณ
+ทั้งไฟล์เสียงและ transcript เป็นไฟล์ธรรมดาที่เป็นของคุณ ชื่อโฟลเดอร์เป็น UUID v7
+(เรียงตามเวลาที่ประชุมจริง) ส่วนชื่อการประชุมเก็บแยกใน `meeting.json` จึงเปลี่ยนชื่อ
+ได้อิสระโดยที่ id ไม่เปลี่ยน
 
 ### เชื่อมต่อ AI
 

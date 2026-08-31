@@ -11,7 +11,7 @@ import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, foldBriefSpeakers, sp
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
-import { safeId, startedAtFromId, titleOf, type MeetingLanguage } from '../shared/meetings.ts'
+import { displayTitle, safeId, startedAtFromId, type MeetingLanguage } from '../shared/meetings.ts'
 import { TRACKS, transcribeRecorded, type ReplayServer, type Track } from './replay.ts'
 import { mcpToken, openrouterKey, setOpenrouterKey } from './token.ts'
 import { Remote, connect as connectOpenrouter } from './openrouter.ts'
@@ -19,7 +19,6 @@ import { getSettings, setSettings, validPort, type AsrModel, type Language, type
 import { hasSpeech } from './vad.ts'
 import {
   discardPending,
-  followMeetingRename,
   forget,
   identify,
   knownVoices,
@@ -37,14 +36,17 @@ import {
   createMeetingDir,
   deleteMeeting,
   dropEchoedMic,
+  dropSpeakers,
   finishReplayTranscript,
   listMeetings,
   localIso,
   meetingPath,
   micTestLocked,
+  migrateMeetingMeta,
+  readMeta,
   readTranscript,
-  renameMeeting,
   resolveLanguage,
+  setMeetingTitle,
   transcribeStatus,
   transcriptionBusy,
   writeTranscript,
@@ -290,7 +292,10 @@ async function fallbackTranscript(id: string, dir: string): Promise<Transcript> 
   )
   return {
     id,
-    startedAt: startedAtFromId(id) ?? localIso(new Date()),
+    // meeting.json is written the moment the folder is (createMeetingDir), so it is the
+    // answer here even when nothing else in the folder survived; the id parse is only
+    // for a pre-uuid meeting that somehow got past the startup migration.
+    startedAt: (await readMeta(dir))?.startedAt || startedAtFromId(id) || localIso(new Date()),
     durationSec: Math.max(...sizes) / 2 / SAMPLE_RATE,
     speakers: await defaultSpeakers(),
     segments: [],
@@ -677,6 +682,34 @@ function registerIpc(): void {
     return { ...next, speakers: await resolveSpeakerNames(next.speakers, next.speakerVoices) }
   })
 
+  /**
+   * Deletes a "speaker" the user has listened to and decided is not one — a door, a
+   * cough, hold music, a fan. Diarization clusters anything voice-shaped, whisper
+   * hallucinates a line or two of text out of it, and the result was a person in the
+   * transcript that nobody could remove: the speaker editor could only rename them.
+   *
+   * Their segments go with them (store.ts's dropSpeakers) — the hallucinated text is
+   * the reason to delete the row at all — and so does the pending voice they were
+   * tracked as, or Settings › Speakers would keep asking for a name for a fan.
+   * `discardPending` refuses a voice that HAS a name by itself, so a mis-click on a
+   * real, already-named person never throws away their stored voice; only this
+   * meeting's lines go, and `voices:forget` remains the way to drop a person.
+   */
+  ipcMain.handle('meeting:drop-speakers', async (_e, dir: string, labels: string[]) => {
+    if (!Array.isArray(labels) || labels.length === 0 || labels.some((l) => typeof l !== 'string')) {
+      throw new Error('meeting:drop-speakers expects at least one speaker')
+    }
+    const guarded = assertMeetingDir(dir)
+    const previous = await readTranscript(guarded)
+    const next = dropSpeakers(previous, labels)
+    await writeTranscript(guarded, next)
+    for (const label of labels) {
+      const voiceId = previous.speakerVoices?.[label]?.voiceId
+      if (voiceId) await discardPending(voiceId).catch(() => false)
+    }
+    return { ...next, speakers: await resolveSpeakerNames(next.speakers, next.speakerVoices) }
+  })
+
   ipcMain.handle('meeting:rename', async (_e, dir: string, speakers: Record<string, string>) => {
     const guarded = assertMeetingDir(dir)
     const previous = await readTranscript(guarded)
@@ -797,7 +830,14 @@ function registerIpc(): void {
           .filter((s) => (p.spans ? p.spans.some((sp) => sp.t0 === s.t0 && sp.t1 === s.t1) : s.speaker === p.speaker))
           .map((s) => s.text)
           .join(' ')
-        return { id: p.id, meetingId: p.meetingId, meetingTitle: titleOf(p.meetingId), at: p.at, text: text ?? '' }
+        const meta = await readMeta(join(NOTES_ROOT, p.meetingId)).catch(() => null)
+        return {
+          id: p.id,
+          meetingId: p.meetingId,
+          meetingTitle: displayTitle(meta?.title ?? '', meta?.startedAt ?? transcript?.startedAt ?? ''),
+          at: p.at,
+          text: text ?? '',
+        }
       }),
     )
   })
@@ -909,19 +949,20 @@ function registerIpc(): void {
   })
 
   /**
-   * Renames a saved meeting. The title lives in the folder name, so this moves the
-   * folder and the id changes with it (renameMeeting, store.ts) — voices.json holds
-   * meeting ids of its own and is walked over to match (followMeetingRename). Returns
-   * the new id so the renderer can keep any selection pointing at the same meeting.
+   * Retitles a saved meeting. The title lives in the meeting's own meeting.json now
+   * (store.ts's setMeetingTitle), so nothing moves and the id does not change — which
+   * is the point of having split them: voices.json's own meeting ids, an MCP client's
+   * notes, and the renderer's selection all keep pointing at the same meeting.
+   *
+   * Still refused mid-pass, same as before: a batch or a recording is reading and
+   * rewriting this folder, and a title write racing that would be lost anyway.
    */
   ipcMain.handle('meeting:set-title', async (_e, id: string, title: string) => {
     if (typeof id !== 'string' || typeof title !== 'string') throw new Error('meeting:set-title expects an id and a title')
     if (transcriptionBusy(current !== null || sessionStarting, batchController !== null)) {
       throw new Error('ยังถอดเสียงอยู่ — รอให้เสร็จก่อนแล้วค่อยเปลี่ยนชื่อ')
     }
-    const next = await renameMeeting(id, title)
-    if (next !== id) await followMeetingRename(id, next)
-    return next
+    await setMeetingTitle(id, title)
   })
 
   // Transcribes the given meetings one at a time, in order (spec item 4). Returns as
@@ -1283,6 +1324,12 @@ function startAudioServer(): Promise<{ port: number; token: string }> {
 app.whenReady().then(() => {
   installDisplayMediaHandler()
   registerIpc()
+  // Meetings recorded before ids became uuids keep their old folder names and get a
+  // meeting.json written beside them, so titles come from one place from here on
+  // (store.ts's migrateMeetingMeta). Fire-and-forget: it is a handful of small writes
+  // over folders nothing is reading yet, and a failure means the meetings list falls
+  // back to the folder name for one more launch rather than the window not opening.
+  void migrateMeetingMeta().catch((err: unknown) => console.error('meeting meta migration:', err))
   // An attempt that died mid-swap leaves staging directories next to the app, and the
   // next attempt then fails trying to clear them (seen in the wild as ENOTEMPTY on
   // `…app.incoming/Contents/Resources`). Clearing them at launch means one bad run

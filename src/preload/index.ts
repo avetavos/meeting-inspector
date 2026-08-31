@@ -84,6 +84,11 @@ const api = {
     ipcRenderer.invoke('meeting:unlink-speaker', dir, speaker),
   renameSpeakers: (dir: string, speakers: Record<string, string>): Promise<Transcript> =>
     ipcRenderer.invoke('meeting:rename', dir, speakers),
+  /** Reports that these speakers are not people at all — noise diarization clustered as
+   * one. Their segments leave the transcript with them, so the returned one is what the
+   * page should show from here on. */
+  dropSpeakers: (dir: string, speakers: string[]): Promise<Transcript> =>
+    ipcRenderer.invoke('meeting:drop-speakers', dir, speakers),
   onDiarizing: (fn: () => void) => ipcRenderer.on('meeting:diarizing', () => fn()),
   onDiarized: (fn: (dir: string, transcript: Transcript) => void) =>
     ipcRenderer.on('meeting:transcript', (_e, dir: string, t: Transcript) => fn(dir, t)),
@@ -207,9 +212,9 @@ const api = {
    * transcribed, since for the rest it would leave a folder with nothing in it. */
   deleteMeetings: (ids: string[], keepTranscript: boolean): Promise<void> =>
     ipcRenderer.invoke('meeting:delete', ids, keepTranscript),
-  /** Renames a saved meeting, and resolves to the id it now has — the title lives in
-   * the folder name, so a rename moves the folder and the id changes with it. */
-  setMeetingTitle: (id: string, title: string): Promise<string> =>
+  /** Retitles a saved meeting. Freetext, and the id does not change with it: the title
+   * lives in the meeting's own meeting.json, not in its folder name. */
+  setMeetingTitle: (id: string, title: string): Promise<void> =>
     ipcRenderer.invoke('meeting:set-title', id, title),
   /** A native modal worded from the renderer's own message catalogue. Resolves to the
    * index of the button pressed; the last button is the cancel/escape one. */

@@ -7,7 +7,7 @@ import {
   localhostOriginValidation,
 } from '@modelcontextprotocol/node'
 import { McpServer } from '@modelcontextprotocol/server'
-import { registerTools, safeId, titleOf, type MeetingMeta, type MeetingStore } from '../shared/meetings.ts'
+import { displayTitle, registerTools, safeId, type MeetingMeta, type MeetingStore } from '../shared/meetings.ts'
 import { readTranscript, walkMeetings } from './store.ts'
 import { resolveSpeakerNames } from './voices.ts'
 
@@ -41,7 +41,7 @@ function diskStore(root: string): MeetingStore {
       // transcript has nothing to summarize, so it is skipped here rather than shown.
       const walked = await walkMeetings(root)
       const found: MeetingMeta[] = []
-      for (const { id, transcript: t } of walked) {
+      for (const { id, meta, transcript: t } of walked) {
         // walkMeetings walks every directory entry with no filter of its own — unlike
         // store.ts's old transcript(entry.name) route this used to go through, which
         // applied safeId() on the way in. Without it, a folder name get_transcript
@@ -52,7 +52,9 @@ function diskStore(root: string): MeetingStore {
           // The folder name, not the id inside the file: `get_transcript` resolves by
           // folder, so reporting anything else lets a stray file rename a meeting.
           id,
-          title: titleOf(id),
+          // From meeting.json, not parsed out of the folder name — the id is a uuid
+          // now and the title is freetext beside it (store.ts's MeetingMetaFile).
+          title: displayTitle(meta?.title ?? '', meta?.startedAt ?? t.startedAt),
           startedAt: t.startedAt,
           durationSec: t.durationSec,
         })
