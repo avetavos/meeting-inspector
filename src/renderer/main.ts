@@ -261,6 +261,14 @@ const en = {
   speakerNotSpeechDetail: (n: number) =>
     `Their ${n} line${n === 1 ? '' : 's'} are deleted from this transcript, and the app stops asking you to name that voice. The recording itself is untouched.`,
   speakerNotSpeechYes: 'Delete these lines',
+  speakerCountLabel: 'People in this meeting (including you)',
+  speakerCountHint:
+    'Splitting speakers apart has to guess how many people were there, and on conference audio it guesses badly — a real four-person meeting came back as 28 speakers. Tell it the number and it splits into exactly that many. Count yourself in: your microphone is a track of its own, so the number here is reduced by one before the rest of the room is split. Leave it blank to let it guess.',
+  speakerCountPlaceholder: 'guess',
+  speakerCountApply: 'Split speakers again',
+  speakerCountWorking: 'Splitting speakers again…',
+  speakerCountDone: (n: number) => `Done — ${n} speaker${n === 1 ? '' : 's'}`,
+  speakerCountFailed: (msg: string) => `Couldn't split speakers again: ${msg}`,
   speakerJump: 'Find this speaker above',
   copy: 'Copy',
   copied: 'Copied',
@@ -614,6 +622,14 @@ const th: typeof en = {
   speakerNotSpeechDetail: (n) =>
     `บทพูด ${n} บรรทัดของคนนี้จะถูกลบออกจาก transcript และแอปจะเลิกถามชื่อเสียงนี้ ไฟล์เสียงต้นฉบับไม่ถูกแตะ`,
   speakerNotSpeechYes: 'ลบบทพูดเหล่านี้',
+  speakerCountLabel: 'ประชุมนี้มีกี่คน (นับตัวคุณด้วย)',
+  speakerCountHint:
+    'การแยกคนพูดต้องเดาเองว่ามีกี่คน และกับเสียงจากแอปประชุมมันเดาพลาดบ่อย ประชุม 4 คนจริงเคยออกมาเป็น 28 คน ถ้าบอกจำนวนไปมันจะแยกเป็นเท่านั้นพอดี นับตัวคุณเข้าไปด้วย — ไมค์ของคุณเป็นแทร็กแยกอยู่แล้ว ระบบจะลบออกหนึ่งก่อนแยกเสียงคนที่เหลือ เว้นว่างไว้ = ให้เดาเอง',
+  speakerCountPlaceholder: 'เดาเอง',
+  speakerCountApply: 'แยกคนพูดใหม่',
+  speakerCountWorking: 'กำลังแยกคนพูดใหม่…',
+  speakerCountDone: (n) => `เสร็จแล้ว — ${n} คน`,
+  speakerCountFailed: (msg) => `แยกคนพูดใหม่ไม่สำเร็จ: ${msg}`,
   speakerJump: 'ไปที่คนพูดคนนี้ด้านบน',
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
@@ -2298,6 +2314,84 @@ function renderSpeakerPanel(
   scopeHint.className = 'hint'
   scopeHint.textContent = t().speakerScopeHint
   container.append(save, hint, scopeHint)
+  if (container === detailSpeakersEl) container.append(speakerCountRow())
+}
+
+/** Held as a thunk rather than a rendered string, same as `queueMsg` and `doneState`
+ * above: the speaker panel is rebuilt on every save and on every language switch, and
+ * the result of a re-split has to survive both. */
+let diarizeMsg: (() => string) | null = null
+
+/**
+ * "How many people were in this meeting?", and the button that acts on the answer.
+ *
+ * The single highest-value thing the user can tell diarization, and until now there was
+ * nowhere to say it: clustering had to infer the headcount from the audio, which is what
+ * the speaker-split setting is a blunt guess at, and on conference audio it splits one
+ * person into several — a real four-person meeting came back as twenty-three speakers.
+ *
+ * Re-splits only. The old way to change how speakers came out was to re-transcribe the
+ * whole meeting, running whisper over every minute of it again to redo a clustering pass
+ * that takes seconds and changes no words at all.
+ */
+function speakerCountRow(): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'speaker-count'
+
+  const label = document.createElement('label')
+  label.textContent = t().speakerCountLabel
+  const input = document.createElement('input')
+  input.type = 'number'
+  input.min = '1'
+  input.max = '50'
+  input.placeholder = t().speakerCountPlaceholder
+  input.value = detailSpeakerCount === null ? '' : String(detailSpeakerCount)
+  label.append(input)
+
+  const apply = document.createElement('button')
+  apply.textContent = t().speakerCountApply
+  apply.onclick = async () => {
+    const id = detailId
+    if (!id) return
+    // Blank is a real answer — "I don't know after all", back to letting clustering
+    // decide — and is not the same as zero.
+    const typed = input.value.trim()
+    const count = typed === '' ? null : Number(typed)
+    if (count !== null && !(Number.isFinite(count) && count >= 1 && count <= 50)) return
+    apply.disabled = true
+    diarizeMsg = () => t().speakerCountWorking
+    renderDetailSpeakers()
+    try {
+      const updated = await window.api.rediarize(id, count)
+      detailSpeakerCount = count
+      const people = Object.keys(updated.speakers).filter((k) => k !== 'me' && k !== 'them').length
+      diarizeMsg = () => t().speakerCountDone(people)
+      // Every line's speaker just changed, so this is the whole transcript coming back,
+      // not only the names — the same path a save or a deletion takes.
+      detailSegments = updated.segments
+      detailSpeakers = updated.speakers
+      detailSpeakerVoices = updated.speakerVoices
+      playerSegments = updated.segments
+      renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl)
+      renderDetailSpeakers()
+      // A re-split re-clusters every voice from scratch, so what was waiting to be named
+      // in Settings is a different set now.
+      void renderPendingVoices()
+    } catch (err) {
+      diarizeMsg = () => t().speakerCountFailed(reason(err))
+      renderDetailSpeakers()
+    }
+  }
+
+  const hint = document.createElement('div')
+  hint.className = 'hint'
+  hint.textContent = t().speakerCountHint
+  const status = document.createElement('div')
+  status.className = 'hint'
+  status.textContent = diarizeMsg ? diarizeMsg() : ''
+
+  row.append(label, apply, hint, status)
+  return row
 }
 
 /** A button that copies a fixed value and gives the existing copy → copied feedback. */
@@ -3655,9 +3749,12 @@ allMeetingsBackBtn.onclick = () => closeAllMeetings()
  */
 let detailId: string | null = null
 let detailDir: string | null = null
-/** The meeting's own title, from the list row that opened it — no longer derivable from
- * the id, which is a uuid. */
+/** The meeting's own title, from its meeting.json — no longer derivable from the id,
+ * which is a uuid. */
 let detailTitle = ''
+/** How many people the user has said were in this meeting, or null for "let clustering
+ * decide" (store.ts's MeetingMetaFile.speakerCount). */
+let detailSpeakerCount: number | null = null
 let detailSegments: Transcript['segments'] = []
 let detailSpeakers: Record<string, string> = {}
 /** The detail page's own copy of `speakerVoices` above, same reason it keeps its own
@@ -3711,10 +3808,15 @@ function renderDetailSpeakers(): void {
 }
 
 async function openMeetingDetail(id: string, meetingTitle: string): Promise<void> {
-  const { dir, audio, transcript: tr } = await window.api.getTranscript(id)
+  const { dir, audio, meta, transcript: tr } = await window.api.getTranscript(id)
   detailId = id
   detailDir = dir
-  detailTitle = meetingTitle
+  // The list row's title is the fallback: both come from the same meeting.json, and the
+  // row already has it, so a meeting whose meta went missing still shows a name.
+  detailTitle = meta?.title?.trim() || meetingTitle
+  detailSpeakerCount = meta?.speakerCount ?? null
+  // Last meeting's "done — 4 speakers" must not greet the next one.
+  diarizeMsg = null
   detailSegments = tr.segments
   detailSpeakers = tr.speakers
   detailSpeakerVoices = tr.speakerVoices

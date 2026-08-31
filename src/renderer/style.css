@@ -470,6 +470,11 @@ button.wrong-voice { flex: 0 0 auto; padding: var(--space-3xs) var(--space-md); 
 button.wrong-voice:hover:not(:disabled) { color: var(--accent-rec); }
 button.not-speech { flex: 0 0 auto; padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); color: var(--text-dim); }
 button.not-speech:hover:not(:disabled) { color: var(--accent-rec); }
+
+#detail-speakers .speaker-count { display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: center; margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 1px solid var(--line-lo); }
+#detail-speakers .speaker-count label { display: flex; gap: var(--space-sm); align-items: center; font-size: var(--text-secondary); color: var(--text-dim); }
+#detail-speakers .speaker-count input { width: 5em; }
+#detail-speakers .speaker-count .hint { flex-basis: 100%; }
 #voices button { padding: var(--space-3xs) var(--space-md); font-size: var(--text-caption); }
 
 /* pending voices — clustered by diarization but not yet named (spec item 1) */

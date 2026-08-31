@@ -43,10 +43,53 @@ export const SPEAKER_SPLIT_THRESHOLD: Record<SpeakerSplit, number> = {
  * up first (e.g. it was queued behind another meeting in the batch's diarize pass and
  * cancel landed before its turn came).
  */
+/**
+ * How to ask sherpa to cluster: by a distance threshold, or into an exact number of
+ * people.
+ *
+ * The threshold ladder above exists entirely because the headcount is unknown — it is a
+ * guess at "how different can two clips sound and still be one person", and no value is
+ * right for every room. But the headcount is the one thing the person who was in the
+ * meeting always knows, and sherpa takes it directly. Given it, the guess is not needed
+ * at all: `numClusters: 4` returns four speakers, not the twenty-three a threshold sweep
+ * produced from the same audio.
+ *
+ * `numClusters: -1` is sherpa's "decide for yourself", and is the only case the
+ * threshold means anything in — sherpa ignores it once a real count is given, but the
+ * addon takes both fields, so the threshold is carried through rather than faked.
+ */
+export function clusteringFor(threshold: number, speakers?: number | null): { numClusters: number; threshold: number } {
+  return { numClusters: speakers && speakers > 0 ? Math.floor(speakers) : -1, threshold }
+}
+
+/**
+ * How many voices the headcount actually predicts on the track being clustered.
+ *
+ * Diarization runs over loopback.wav alone — the microphone is a separate track and is
+ * `me` by construction (spec §4.1) — and loopback is system output, which does not
+ * contain the user's own voice (store.ts's dropEchoedMic says why in full). So "four
+ * people were in this meeting" means three voices here, and handing sherpa 4 asks it to
+ * find one more person than the audio has.
+ *
+ * Measured, not assumed: a real four-person meeting whose threshold pass produced 28
+ * speakers came back with exactly 3 clusters when asked for 3.
+ *
+ * A meeting of one is the user alone, with nothing on the loopback track to cluster, so
+ * that falls back to letting clustering decide rather than asking for zero speakers.
+ *
+ * The ceiling: this assumes the user is one of the people they counted, which is true of
+ * a meeting they are in and not of a webinar they are only watching — there, everyone is
+ * on loopback and this asks for one too few. Recoverable by typing one higher, which is
+ * why the field is a number the user can adjust rather than a fact derived from anything.
+ */
+export const loopbackSpeakers = (headcount?: number | null): number | null =>
+  headcount && headcount > 1 ? Math.floor(headcount) - 1 : null
+
 export async function diarize(
   wavPath: string,
   signal?: AbortSignal,
   threshold: number = SPEAKER_SPLIT_THRESHOLD.balanced,
+  speakers?: number | null,
 ): Promise<Turn[]> {
   await requireFiles([SEGMENTATION, EMBEDDING], 'use the download button in the app')
   // Required late: this pulls in a ~30MB native addon nobody needs until a meeting ends.
@@ -57,9 +100,9 @@ export async function diarize(
   const engine = new OfflineSpeakerDiarization({
     segmentation: { pyannote: { model: SEGMENTATION } },
     embedding: { model: EMBEDDING },
-    // Let clustering decide how many people were in the room (spec §8), at the
-    // distance the user's own recordings turned out to need (see the constant above).
-    clustering: { numClusters: -1, threshold },
+    // The headcount if the user has told us one, otherwise clustering decides for
+    // itself (spec §8) at the distance the user's own recordings turned out to need.
+    clustering: clusteringFor(threshold, speakers),
   })
 
   const wav = await readFile(wavPath)
@@ -73,16 +116,24 @@ export async function diarize(
 export const speakerLabel = (n: number): string => `SPEAKER_${String(n).padStart(2, '0')}`
 
 /**
- * Gives every not-yet-attributed segment the speaker it overlaps most (spec §8.2).
- * Segments already labelled — the mic track, which is us by construction — are left
- * alone. A segment overlapping nothing keeps `them`: better unattributed than wrong.
+ * Gives every loopback segment the speaker it overlaps most (spec §8.2). The mic track
+ * is left alone — it is us by construction, whatever the loopback turns say. A segment
+ * overlapping nothing falls back to `them`: better unattributed than wrong.
+ *
+ * The skip is 'me' and only 'me'. It used to be "anything not already `them`", which is
+ * the same thing on a FIRST pass — before diarization every segment is either 'me' or
+ * 'them' — and silently a no-op on a second one: after a pass the loopback segments
+ * carry `SPEAKER_xx`, so re-running diarization returned every one of them unchanged and
+ * the new clustering was thrown away. Found by re-splitting an already-split meeting
+ * with a known headcount (index.ts's meeting:rediarize) and watching the speaker keys
+ * come back identical.
  */
 export function assignSpeakers(
   segments: Transcript['segments'],
   turns: Turn[],
 ): Transcript['segments'] {
   return segments.map((segment) => {
-    if (segment.speaker !== UNKNOWN) return segment
+    if (segment.speaker === 'me') return segment
     let best: Turn | null = null
     let bestOverlap = 0
     for (const turn of turns) {
@@ -93,7 +144,11 @@ export function assignSpeakers(
         best = turn
       }
     }
-    return best ? { ...segment, speaker: speakerLabel(best.speaker) } : segment
+    // Back to the unattributed bucket rather than keeping a label from a previous
+    // clustering: the old key means someone else entirely after a re-split (see
+    // Transcript.speakerVoices' own doc comment), so carrying it over would be worse
+    // than saying nothing.
+    return best ? { ...segment, speaker: speakerLabel(best.speaker) } : { ...segment, speaker: UNKNOWN }
   })
 }
 

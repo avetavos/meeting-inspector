@@ -3,7 +3,7 @@ import type { ModelStatus, Progress } from '../main/download.ts'
 import type { AsrEngine, AsrModel, Language, MeetingLanguage, NoiseFilter, Settings, SpeakerSplit, TranscribeMode } from '../main/settings.ts'
 import type { UpdateInfo, UpdateProgress } from '../main/update.ts'
 import type { Connection } from '../main/openrouter.ts'
-import type { TranscribeStatus } from '../main/store.ts'
+import type { MeetingMetaFile, TranscribeStatus } from '../main/store.ts'
 import type { Transcript } from '../shared/meetings.ts'
 
 export type { Transcript } from '../shared/meetings.ts'
@@ -89,6 +89,11 @@ const api = {
    * page should show from here on. */
   dropSpeakers: (dir: string, speakers: string[]): Promise<Transcript> =>
     ipcRenderer.invoke('meeting:drop-speakers', dir, speakers),
+  /** Splits this meeting's speakers apart again, told how many people were in it —
+   * `null` goes back to letting clustering decide. Re-runs diarization only, never
+   * whisper, so it costs seconds and leaves every word of the text alone. */
+  rediarize: (id: string, speakers: number | null): Promise<Transcript> =>
+    ipcRenderer.invoke('meeting:rediarize', id, speakers),
   onDiarizing: (fn: () => void) => ipcRenderer.on('meeting:diarizing', () => fn()),
   onDiarized: (fn: (dir: string, transcript: Transcript) => void) =>
     ipcRenderer.on('meeting:transcript', (_e, dir: string, t: Transcript) => fn(dir, t)),
@@ -178,7 +183,7 @@ const api = {
   /** `audio` says which of the two tracks are still on disk — the meetings list can
    * delete a meeting's audio and keep its words, and the detail page's player has to
    * know that rather than find out by failing to load. */
-  getTranscript: (id: string): Promise<{ dir: string; audio: Record<string, boolean>; transcript: Transcript }> =>
+  getTranscript: (id: string): Promise<{ dir: string; audio: Record<string, boolean>; meta: MeetingMetaFile | null; transcript: Transcript }> =>
     ipcRenderer.invoke('meeting:get', id),
   /** The folder every recording and transcript is saved into, and a way to open it —
    * onboarding's files step shows both. */

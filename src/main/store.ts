@@ -55,7 +55,23 @@ export function uuidv7(at: Date = new Date()): string {
  * title is freetext, and `startedAt` is recorded at creation so a meeting that never
  * got as far as a transcript still knows when it happened.
  */
-export type MeetingMetaFile = { id: string; title: string; startedAt: string }
+export type MeetingMetaFile = {
+  id: string
+  title: string
+  startedAt: string
+  /**
+   * How many people were actually in this meeting, if the user has said. Diarization
+   * otherwise has to infer the headcount from the audio alone, which is what the
+   * speaker-split threshold is a guess at and what produces a four-person meeting split
+   * across twenty-three speakers; given the number it clusters into exactly that many
+   * (diarize.ts's clusteringFor).
+   *
+   * Per meeting, not a setting: it is a fact about one recording, and the next meeting
+   * has a different one. Absent means "don't know", which is every meeting until someone
+   * says otherwise — never a default of 1.
+   */
+  speakerCount?: number
+}
 
 const META = 'meeting.json'
 
@@ -323,14 +339,38 @@ export function meetingPath(id: string, root = NOTES_ROOT): string {
  * survive being a path component, so it is stored exactly as typed.
  */
 export async function setMeetingTitle(id: string, title: string, root = NOTES_ROOT): Promise<void> {
+  await patchMeta(id, { title: title.trim() }, root)
+}
+
+/** How many people were in this meeting — see MeetingMetaFile.speakerCount. `null`
+ * clears it back to "don't know" rather than storing a zero that reads as a real
+ * answer. */
+export async function setSpeakerCount(id: string, count: number | null, root = NOTES_ROOT): Promise<void> {
+  await patchMeta(id, { speakerCount: count && count > 0 ? Math.floor(count) : undefined }, root)
+}
+
+/**
+ * Read-modify-write of one meeting's meta, rebuilding the parts a pre-uuid meeting may
+ * never have had. A meeting whose meeting.json is missing entirely (deleted by hand, or
+ * one the startup migration has not reached yet) is not a reason to refuse an edit — it
+ * is reconstructed from whatever the transcript and the id still know, the same way the
+ * migration would have.
+ */
+async function patchMeta(id: string, patch: Partial<MeetingMetaFile>, root: string): Promise<void> {
   const dir = meetingPath(id, root)
   const meta = await readMeta(dir)
   const transcript = meta ? null : await readTranscript(dir).catch(() => null)
-  await writeMeta(dir, {
+  const next: MeetingMetaFile = {
     id,
-    title: title.trim(),
+    title: meta?.title ?? titlePartOf(id) ?? id,
     startedAt: meta?.startedAt ?? transcript?.startedAt ?? startedAtFromId(id) ?? '',
-  })
+    ...(meta?.speakerCount !== undefined ? { speakerCount: meta.speakerCount } : {}),
+    ...patch,
+  }
+  // `speakerCount: undefined` from a patch that clears it must not survive into the
+  // file as a null-shaped key.
+  if (next.speakerCount === undefined) delete next.speakerCount
+  await writeMeta(dir, next)
 }
 
 /**

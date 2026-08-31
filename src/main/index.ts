@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
-import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, foldBriefSpeakers, speakerNames, type SpeakerLabels } from './diarize.ts'
+import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, foldBriefSpeakers, loopbackSpeakers, speakerNames, type SpeakerLabels } from './diarize.ts'
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
@@ -47,6 +47,7 @@ import {
   readTranscript,
   resolveLanguage,
   setMeetingTitle,
+  setSpeakerCount,
   transcribeStatus,
   transcriptionBusy,
   writeTranscript,
@@ -204,10 +205,18 @@ function releaseWhisper(): void {
  * event loop for the length of the call, nothing can pre-empt it), but it does stop the
  * queue from starting the *next* meeting's.
  */
-async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signal?: AbortSignal): Promise<void> {
+async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signal?: AbortSignal): Promise<boolean> {
   if (notify) wc.send('meeting:diarizing')
   try {
-    const turns = await diarize(join(dir, 'loopback.wav'), signal, SPEAKER_SPLIT_THRESHOLD[(await getSettings()).speakerSplit])
+    // The headcount the user gave for THIS meeting, if any — it beats every threshold,
+    // because the threshold is only ever a guess at what the count would have told us
+    // outright (diarize.ts's clusteringFor).
+    const turns = await diarize(
+      join(dir, 'loopback.wav'),
+      signal,
+      SPEAKER_SPLIT_THRESHOLD[(await getSettings()).speakerSplit],
+      loopbackSpeakers((await readMeta(dir))?.speakerCount),
+    )
     const previous = await readTranscript(dir)
     // Noise clustered as people is folded away before anyone is asked to name it —
     // see foldBriefSpeakers' own comment for the threshold and the trade.
@@ -252,11 +261,17 @@ async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signa
       const speakers = await resolveSpeakerNames(updated.speakers, updated.speakerVoices)
       wc.send('meeting:transcript', dir, { ...updated, speakers })
     }
+    return true
   } catch (err) {
     // A deliberate cancel is not a failure worth logging — same treatment as
     // whisper.ts's pump() gives an aborted chunk.
     if (!signal?.aborted) console.error(`diarize: ${dir}`, err)
     if (notify) wc.send('meeting:diarize-error', String(err))
+    // Reported, not thrown: every existing caller is fire-and-forget and a meeting whose
+    // diarize pass failed still has its transcript, just without speakers split. The one
+    // caller that must know is meeting:rediarize, which was asked to do exactly this and
+    // would otherwise hand back the unchanged transcript as though it had worked.
+    return false
   }
 }
 
@@ -800,6 +815,46 @@ function registerIpc(): void {
    * real, already-named person never throws away their stored voice; only this
    * meeting's lines go, and `voices:forget` remains the way to drop a person.
    */
+  /**
+   * Splits this meeting's speakers apart again, given how many people were actually in
+   * it — the answer diarization has to guess at otherwise, and gets badly wrong on
+   * conference audio (a four-person meeting came back as twenty-three speakers).
+   *
+   * Deliberately re-diarizes ONLY. Until now the only way to change how speakers were
+   * split was to re-transcribe the whole meeting, which re-runs whisper over the entire
+   * recording — minutes of work to redo a clustering pass that takes seconds and does
+   * not touch a single word of the text.
+   *
+   * Refused mid-recording or mid-batch for a hard reason, not a cautious one: sherpa's
+   * clustering is a synchronous native call that blocks the whole event loop for the
+   * length of the pass (diarize.ts), so running it under a live recording would stall
+   * the PCM writes of the meeting being recorded right now.
+   *
+   * `count` of null means "I don't know after all" — back to letting clustering decide,
+   * which is a real answer and not the same as passing 0.
+   */
+  ipcMain.handle('meeting:rediarize', async (e, id: string, count: number | null) => {
+    if (typeof id !== 'string') throw new Error('meeting:rediarize expects a meeting id')
+    if (count !== null && (typeof count !== 'number' || !Number.isFinite(count) || count < 1 || count > 50)) {
+      throw new Error('meeting:rediarize expects a speaker count between 1 and 50, or null')
+    }
+    if (transcriptionBusy(current !== null || sessionStarting, batchController !== null)) {
+      throw new Error('ยังถอดเสียงอยู่ — รอให้เสร็จก่อนแล้วค่อยแยกคนพูดใหม่')
+    }
+    const dir = assertMeetingDir(join(NOTES_ROOT, id))
+    // "Keep the words, drop the audio" is offered in the meetings list, and diarization
+    // reads the loopback WAV — say so plainly rather than failing inside sherpa.
+    const wav = await stat(join(dir, 'loopback.wav')).then((st) => st.size > 44, () => false)
+    if (!wav) throw new Error('ไม่มีไฟล์เสียงของการประชุมนี้แล้ว — แยกคนพูดใหม่ไม่ได้')
+    await setSpeakerCount(id, count)
+    // notify:false — this handler returns the transcript to whoever asked for it, and
+    // the 'meeting:transcript' broadcast is for the *live session's* panel, which is not
+    // what is being re-diarized here.
+    if (!(await diarizeMeeting(e.sender, dir, false))) throw new Error('แยกคนพูดไม่สำเร็จ — transcript เดิมไม่ถูกแตะ')
+    const updated = await readTranscript(dir)
+    return { ...updated, speakers: await resolveSpeakerNames(updated.speakers, updated.speakerVoices) }
+  })
+
   ipcMain.handle('meeting:drop-speakers', async (_e, dir: string, labels: string[]) => {
     if (!Array.isArray(labels) || labels.length === 0 || labels.some((l) => typeof l !== 'string')) {
       throw new Error('meeting:drop-speakers expects at least one speaker')
@@ -987,7 +1042,9 @@ function registerIpc(): void {
         TRACKS.map(async (track) => [track, await stat(join(dir, `${track}.wav`)).then((st) => st.size > 44, () => false)]),
       ),
     ) as Record<Track, boolean>
-    return { dir, audio, transcript: { ...transcript, speakers } }
+    // The meta as well: the title and the meeting's headcount are not derivable from the
+    // id (a uuid) or from the transcript, and the detail page needs both.
+    return { dir, audio, meta: await readMeta(dir), transcript: { ...transcript, speakers } }
   })
 
   ipcMain.handle('meeting:list', async () => {

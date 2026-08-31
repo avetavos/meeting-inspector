@@ -15,6 +15,7 @@ import {
   dropSpeakers,
   migrateMeetingMeta,
   setMeetingTitle,
+  setSpeakerCount,
   uuidv7,
   writeTranscript,
 } from './store.ts'
@@ -311,4 +312,28 @@ test('store: an echo pass over a meeting with no other track changes nothing', (
   ]
   assert.deepEqual(dropEchoedMic(only), only)
   assert.deepEqual(dropEchoedMic([]), [])
+})
+
+test('store: the headcount is per meeting, survives a rename, and can be cleared', async () => {
+  const root = join(tmpdir(), `count-test-${process.pid}`)
+  const { id, dir } = await createMeetingDir('sprint planning', new Date(2026, 7, 27, 14, 0), root)
+
+  assert.equal((await readMeta(dir))?.speakerCount, undefined, 'unknown until someone says')
+
+  await setSpeakerCount(id, 4, root)
+  assert.equal((await readMeta(dir))?.speakerCount, 4)
+
+  // Renaming must not quietly drop it — both write the same file.
+  await setMeetingTitle(id, 'retro', root)
+  const renamed = await readMeta(dir)
+  assert.equal(renamed?.title, 'retro')
+  assert.equal(renamed?.speakerCount, 4)
+
+  // Cleared back to "let clustering decide" — the key goes, rather than becoming a 0
+  // that reads as a real answer of nobody.
+  await setSpeakerCount(id, null, root)
+  assert.equal('speakerCount' in (await readMeta(dir))!, false)
+  await setSpeakerCount(id, 6, root)
+  await setSpeakerCount(id, 0, root)
+  assert.equal('speakerCount' in (await readMeta(dir))!, false, '0 is not a headcount')
 })

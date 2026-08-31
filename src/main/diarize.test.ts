@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { assignSpeakers, speakerNames, type SpeakerLabels, type Turn, foldBriefSpeakers } from './diarize.ts'
+import { clusteringFor, loopbackSpeakers, assignSpeakers, speakerNames, type SpeakerLabels, type Turn, foldBriefSpeakers } from './diarize.ts'
 
 const EN: SpeakerLabels = { me: 'You', them: 'Others', speaker: (n) => `Speaker ${n}` }
 
@@ -31,6 +31,22 @@ test('merge: the mic track is never reassigned', () => {
   const turns = [turn(0, 100, 3)]
   const [mine] = assignSpeakers([seg(10, 20, 'me')], turns)
   assert.equal(mine!.speaker, 'me')
+})
+
+test('merge: re-running diarization re-labels segments a previous pass already labelled', () => {
+  // The whole point of meeting:rediarize (index.ts) — telling diarization how many
+  // people were actually in the room and splitting again. Skipping anything that was
+  // not `them` made that a silent no-op: after one pass every loopback segment carries a
+  // SPEAKER_xx, so the second pass returned all of them untouched and its clustering was
+  // discarded.
+  const turns = [turn(0, 10, 0), turn(10, 20, 1)]
+  const again = assignSpeakers([seg(1, 5, 'SPEAKER_44'), seg(12, 18, 'SPEAKER_07'), seg(2, 4, 'me')], turns)
+  assert.deepEqual(again.map((s) => s.speaker), ['SPEAKER_00', 'SPEAKER_01', 'me'])
+
+  // And a segment the new clustering has no turn for goes back to unattributed rather
+  // than keeping a key from the old one, which now means somebody else.
+  const orphaned = assignSpeakers([seg(90, 95, 'SPEAKER_44')], turns)
+  assert.equal(orphaned[0]!.speaker, 'them')
 })
 
 test('speaker names: placeholders follow first appearance, typed names survive', () => {
@@ -95,4 +111,40 @@ test('diarize: a cough is not a speaker; a quiet person still is, barely', () =>
   )
   // The noise line itself survives — it is attribution that changes, never text.
   assert.equal(folded[1]!.text, 'อือ')
+})
+
+test('diarize: a known headcount replaces the threshold guess entirely', () => {
+  // The threshold ladder only exists because the headcount is unknown. Given one,
+  // sherpa is told to produce exactly that many speakers — this is the whole fix for a
+  // four-person meeting coming back as twenty-three.
+  assert.deepEqual(clusteringFor(0.7, 4), { numClusters: 4, threshold: 0.7 })
+  assert.deepEqual(clusteringFor(0.85, 1), { numClusters: 1, threshold: 0.85 })
+  // A fractional count could only come from a mistyped field; floor it rather than hand
+  // sherpa something it will interpret however it likes.
+  assert.deepEqual(clusteringFor(0.7, 3.9), { numClusters: 3, threshold: 0.7 })
+
+  // "I don't know" is a real answer and must go back to letting clustering decide —
+  // -1 is sherpa's own sentinel for that, and only then does the threshold mean anything.
+  for (const unknown of [undefined, null, 0]) {
+    assert.deepEqual(clusteringFor(0.7, unknown), { numClusters: -1, threshold: 0.7 }, `${unknown}`)
+  }
+})
+
+test('diarize: the headcount counts the user, the loopback track does not', () => {
+  // Clustering runs on loopback.wav alone, and the user's own voice is not in it (their
+  // microphone is a separate track, `me` by construction) — so a four-person meeting is
+  // three voices to split. Asking sherpa for 4 asks it to find someone who is not there.
+  assert.equal(loopbackSpeakers(4), 3)
+  assert.equal(loopbackSpeakers(2), 1)
+  assert.equal(loopbackSpeakers(12.7), 11, 'a mistyped fraction floors rather than reaching sherpa')
+
+  // A meeting of one is the user alone: nothing on the loopback track to split, so back
+  // to letting clustering decide rather than asking for zero speakers.
+  for (const none of [1, 0, null, undefined]) {
+    assert.equal(loopbackSpeakers(none), null, `${none}`)
+  }
+
+  // And that null is exactly what clusteringFor reads as "decide for yourself".
+  assert.deepEqual(clusteringFor(0.7, loopbackSpeakers(1)), { numClusters: -1, threshold: 0.7 })
+  assert.deepEqual(clusteringFor(0.7, loopbackSpeakers(4)), { numClusters: 3, threshold: 0.7 })
 })
