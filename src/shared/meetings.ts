@@ -73,13 +73,43 @@ export type MeetingMeta = {
 }
 
 /**
+ * The meeting being recorded right now, as far as it has got — not a Transcript,
+ * because it deliberately is not one yet: there is no `durationSec` that will not
+ * change, no diarization, and nothing to call transcribed.
+ *
+ * `transcribing` is false for a meeting recorded in 'after' or 'manual' mode, where
+ * nothing is decoded until the recording ends (settings.ts's TranscribeMode). Saying so
+ * matters: an empty `segments` under a mode that transcribes live means nobody has
+ * spoken yet, and under a mode that does not it means the words exist but have not been
+ * decoded — an assistant that cannot tell those apart will confidently report an empty
+ * meeting.
+ */
+export type LiveMeeting = {
+  id: string
+  title: string
+  startedAt: string
+  /** Audio actually recorded so far, which is not wall-clock — a paused meeting stops
+   * accumulating (wav.ts's WavWriter.durationSec). */
+  recordedSec: number
+  transcribing: boolean
+  speakers: Record<string, string>
+  segments: Segment[]
+}
+
+/**
  * Reading side of a meeting archive. Summarizing is not in here on purpose: the app
  * is offline, and whichever assistant is connected does the summarizing from the
  * transcript it pulls through these tools.
+ *
+ * `live` is the one thing here that is not on disk: the recording still in progress,
+ * read straight out of the app's memory. Optional so a store that has no notion of a
+ * live session (a test fixture, a future read-only archive) simply does not offer it,
+ * and `current_meeting` answers "nothing is being recorded" rather than failing.
  */
 export interface MeetingStore {
   list(): Promise<MeetingMeta[]>
   transcript(id: string): Promise<Transcript | null>
+  live?(): Promise<LiveMeeting | null>
 }
 
 const STAMPED = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(?:-(.+))?$/
@@ -167,6 +197,34 @@ export function registerTools(server: McpServer, store: MeetingStore): void {
       return text({
         ...transcript,
         segments: transcript.segments.map((s) => ({ ...s, speakerName: who(transcript, s.speaker) })),
+      })
+    },
+  )
+
+  /**
+   * The meeting happening RIGHT NOW — the whole point of asking an assistant something
+   * mid-meeting ("what did we just agree to?", "did anyone answer my question?").
+   *
+   * Separate from `list_meetings`/`get_transcript` rather than folded into them even
+   * though the live meeting also reaches disk every few seconds now (index.ts's
+   * startLiveFlush): those two answer from a file that is up to fifteen seconds behind
+   * and cannot say whether the meeting is still going, and "the meeting I am in" is a
+   * question with exactly one answer, not something to find by sorting a list by date.
+   */
+  server.registerTool(
+    'current_meeting',
+    {
+      title: 'Current meeting',
+      description: 'การประชุมที่กำลังอัดอยู่ตอนนี้ พร้อมบทพูดเท่าที่ถอดได้ถึงวินาทีนี้ — ใช้ตอบคำถามระหว่างประชุม',
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const live = await store.live?.()
+      if (!live) return text({ recording: false })
+      return text({
+        recording: true,
+        ...live,
+        segments: live.segments.map((s) => ({ ...s, speakerName: live.speakers[s.speaker] ?? s.speaker })),
       })
     },
   )

@@ -11,7 +11,7 @@ import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, foldBriefSpeakers, sp
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
-import { displayTitle, safeId, startedAtFromId, type MeetingLanguage } from '../shared/meetings.ts'
+import { displayTitle, safeId, startedAtFromId, type LiveMeeting, type MeetingLanguage } from '../shared/meetings.ts'
 import { TRACKS, transcribeRecorded, type ReplayServer, type Track } from './replay.ts'
 import { mcpToken, openrouterKey, setOpenrouterKey } from './token.ts'
 import { Remote, connect as connectOpenrouter } from './openrouter.ts'
@@ -390,6 +390,35 @@ const batchFailed = new Set<string>()
 
 let mcp: McpHandle | null = null
 
+/**
+ * The meeting being recorded right now, for the `current_meeting` MCP tool — straight
+ * out of `current`, with no disk read of the transcript at all, so an assistant asked a
+ * question mid-meeting gets every line decoded so far rather than everything up to the
+ * last flush (startLiveFlush, up to fifteen seconds behind).
+ *
+ * The title still comes from meeting.json, which was written when the folder was
+ * (createMeetingDir) and is the one place a title lives.
+ */
+async function currentMeeting(): Promise<LiveMeeting | null> {
+  const s = current
+  if (!s) return null
+  const meta = await readMeta(s.dir).catch(() => null)
+  return {
+    id: s.id,
+    title: displayTitle(meta?.title ?? '', meta?.startedAt ?? localIso(new Date(s.startedAt))),
+    startedAt: localIso(new Date(s.startedAt)),
+    // The loopback track: both writers receive the same frames at the same rate, and
+    // this is the one that carries the meeting itself.
+    recordedSec: s.writers.loopback.durationSec,
+    // 'after' and 'manual' decode nothing until the recording ends, so an empty
+    // `segments` under those means "not decoded yet", not "nobody spoke" — which is
+    // exactly what this flag exists to let the assistant say (LiveMeeting's own doc).
+    transcribing: s.mode === 'live',
+    speakers: await defaultSpeakers(),
+    segments: s.segments,
+  }
+}
+
 // startMcp's retry ladder can take a few hundred ms. Three IPC handlers can call
 // restartMcp() close together (toggle, port change, the un-awaited call at startup),
 // and without serializing them a slower call's assignment could overwrite a faster
@@ -416,6 +445,10 @@ async function doRestart(): Promise<void> {
     // window rather than acted on here: muting is the renderer's — it owns the capture,
     // and it is also where the button the user might have just pressed lives.
     onMic: (muted) => mainWindow?.webContents.send('mic:external', muted),
+    // Read at request time, never captured: `current` is null between meetings and a
+    // different session on either side of one, so the closure has to look it up when
+    // the question is actually asked.
+    live: currentMeeting,
   })
   // Settings can change while startMcp() was retrying — e.g. the user flipped MCP
   // off during those few hundred ms. Since restarts are serialized, nothing else
@@ -470,6 +503,92 @@ function permissions() {
 const PRIVACY_PANE: Record<'screen' | 'microphone', string> = {
   screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
   microphone: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+}
+
+/**
+ * The transcript a recording session currently amounts to — used both by the periodic
+ * flush below, mid-recording, and by finishSessionStop once the WAVs are closed. One
+ * builder so a partial write and the final one can never disagree about anything but
+ * `durationSec` and `done`.
+ *
+ * `done` becomes `transcribedAt`, and is only true once an ASR pass has actually run
+ * over this meeting AND gotten through every chunk (spec item 2) — 'manual' mode leaves
+ * it unset on purpose, a failed 'live'/'after' pass leaves it unset too, and a flush
+ * mid-recording obviously never sets it. All of those read as "not transcribed yet" via
+ * meetingDone (store.ts): `language` below is always set regardless, which is exactly
+ * the signal meetingDone uses to tell a withheld-on-purpose write apart from a
+ * transcript written before either field existed (segments alone used to read as done
+ * either way — the trap the takeFailures()/transcribeOk plumbing exists to close).
+ */
+async function sessionTranscript(s: Session, durationSec: number, done: boolean): Promise<Transcript> {
+  return {
+    id: s.id,
+    startedAt: localIso(new Date(s.startedAt)),
+    durationSec,
+    speakers: await defaultSpeakers(),
+    // writeTranscript (store.ts) sorts by t0 before persisting — no need to do it
+    // twice, even though 'after' mode transcribing the two tracks one after another
+    // means these arrive with every mic segment after every loopback segment.
+    // The microphone hears the meeting's own speakers on anything but headphones, so
+    // the far end's sentences arrive twice — once from the loopback track under their
+    // name, once from the mic a moment later under "You" (dropEchoedMic, store.ts).
+    segments: (await getSettings()).echoFilter ? dropEchoedMic(s.segments) : s.segments,
+    // Written unconditionally, in every mode — 'manual' mode writes no segments at all,
+    // so this is the ONLY chance to record what language this meeting was spoken in; the
+    // batch queue reads it back via resolveLanguage whenever the user eventually
+    // transcribes it (spec item 1).
+    language: s.language,
+    ...(done ? { transcribedAt: localIso(new Date()) } : {}),
+  }
+}
+
+/**
+ * Writes what has been transcribed so far, every few seconds, while the meeting is
+ * still running.
+ *
+ * transcript.json used to appear only at session:stop, so a meeting in progress was
+ * invisible to everything that reads the archive from disk — an assistant connected
+ * over MCP could not answer a question about the meeting the user was sitting in, only
+ * about ones that had already ended. Now it can, and a crash or a power cut mid-meeting
+ * leaves the words up to the last flush instead of nothing at all.
+ *
+ * Only when the segment count has actually moved: 'after' and 'manual' mode do not
+ * transcribe anything until the recording ends, so for those this never writes a second
+ * time, and a live meeting nobody is talking in does not rewrite the same file every
+ * fifteen seconds either.
+ *
+ * `transcribedAt` is deliberately never set here (sessionTranscript's `done`), so a
+ * meeting in progress reads as "not transcribed yet" everywhere on disk. It cannot be
+ * re-transcribed out from under itself in the meantime — batch:start refuses while a
+ * recording is running, and meeting:delete refuses through transcriptionBusy.
+ *
+ * ponytail: a fixed interval and a whole-file rewrite, not an append log — a meeting's
+ * segments are a few hundred small objects, and JSON.stringify of that every fifteen
+ * seconds is nothing next to the ASR pass already running.
+ */
+const LIVE_FLUSH_MS = 15_000
+let liveFlush: NodeJS.Timeout | null = null
+let liveFlushed = -1
+
+async function flushLive(): Promise<void> {
+  const s = current
+  if (!s || s.stopping || s.segments.length === liveFlushed) return
+  liveFlushed = s.segments.length
+  await writeTranscript(s.dir, await sessionTranscript(s, s.writers.loopback.durationSec, false))
+}
+
+function startLiveFlush(): void {
+  liveFlushed = -1
+  liveFlush ??= setInterval(() => {
+    // Best-effort: a failed flush is one stale read for an assistant, not a reason to
+    // disturb a recording that is otherwise fine. session:stop writes the real one.
+    void flushLive().catch((err: unknown) => console.error('live transcript flush:', err))
+  }, LIVE_FLUSH_MS)
+}
+
+function stopLiveFlush(): void {
+  if (liveFlush) clearInterval(liveFlush)
+  liveFlush = null
 }
 
 /**
@@ -530,33 +649,11 @@ async function finishSessionStop(
   // it finishes is fine.
   releaseWhisper()
 
-  const transcript: Transcript = {
-    id: s.id,
-    startedAt: localIso(new Date(s.startedAt)),
-    durationSec: Math.max(durations.loopback.durationSec, durations.mic.durationSec),
-    speakers: await defaultSpeakers(),
-    // writeTranscript (store.ts) sorts by t0 before persisting — no need to do it
-    // twice, even though 'after' mode transcribing the two tracks one after another
-    // means these arrive with every mic segment after every loopback segment.
-    // The microphone hears the meeting's own speakers on anything but headphones, so
-    // the far end's sentences arrive twice — once from the loopback track under their
-    // name, once from the mic a moment later under "You" (dropEchoedMic, store.ts).
-    segments: (await getSettings()).echoFilter ? dropEchoedMic(s.segments) : s.segments,
-    // Written unconditionally, in every mode — 'manual' mode writes no segments here
-    // at all, so this is the ONLY chance to record what language this meeting was
-    // spoken in; the batch queue reads it back via resolveLanguage whenever the user
-    // eventually transcribes it (spec item 1).
-    language: s.language,
-    // Only set once an ASR pass has actually run over this meeting AND gotten
-    // through every chunk (spec item 2) — 'manual' mode leaves it unset on purpose,
-    // and a failed 'live'/'after' pass now leaves it unset too. Both read as "not
-    // transcribed yet" via meetingDone (store.ts): `language` two lines up is always
-    // set here regardless, which is exactly the signal meetingDone uses to tell this
-    // withheld-on-purpose write apart from a transcript written before either field
-    // existed (segments alone used to read as done either way — the trap this
-    // takeFailures()/transcribeOk plumbing exists to close).
-    ...(s.mode !== 'manual' && transcribeOk ? { transcribedAt: localIso(new Date()) } : {}),
-  }
+  const transcript = await sessionTranscript(
+    s,
+    Math.max(durations.loopback.durationSec, durations.mic.durationSec),
+    s.mode !== 'manual' && transcribeOk,
+  )
   await writeTranscript(s.dir, transcript)
   // Nothing to diarize yet in 'manual' mode — there are no segments, and running
   // pyannote over untranscribed audio would just be a wasted pass; the batch queue's
@@ -607,6 +704,9 @@ function registerIpc(): void {
         mode: settings.transcribeMode,
         language: settings.meetingLanguage,
       }
+      // From here on the meeting is readable from disk as it happens, not only once it
+      // ends (startLiveFlush's own doc comment).
+      startLiveFlush()
       return { id, dir }
     } finally {
       sessionStarting = false
@@ -629,6 +729,11 @@ function registerIpc(): void {
     if (!current || current.stopping) return null
     const s = current
     s.stopping = true
+    // Before anything else: finishSessionStop is about to write the real transcript,
+    // and a flush landing after it would overwrite the finished one with a version that
+    // has no `transcribedAt` and none of 'after' mode's segments. `stopping` alone would
+    // already stop the next tick, but the timer has no reason to keep running either.
+    stopLiveFlush()
     // HIGH 1: 'after' mode's offline pass below can run for minutes, and before-quit
     // must not let Cmd-Q walk away from it before writeTranscript ever runs — it
     // aborts this signal (so the pass gives up promptly rather than making quit wait

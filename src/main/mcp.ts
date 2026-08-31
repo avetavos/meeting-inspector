@@ -7,7 +7,7 @@ import {
   localhostOriginValidation,
 } from '@modelcontextprotocol/node'
 import { McpServer } from '@modelcontextprotocol/server'
-import { displayTitle, registerTools, safeId, type MeetingMeta, type MeetingStore } from '../shared/meetings.ts'
+import { displayTitle, registerTools, safeId, type LiveMeeting, type MeetingMeta, type MeetingStore } from '../shared/meetings.ts'
 import { readTranscript, walkMeetings } from './store.ts'
 import { resolveSpeakerNames } from './voices.ts'
 
@@ -19,8 +19,10 @@ export const PREFERRED_PORT = 8787
 
 export type McpHandle = { url: string; port: number; close: () => Promise<void> }
 
-/** Meetings as folders on disk — the local half of the same four tools. */
-function diskStore(root: string): MeetingStore {
+/** Meetings as folders on disk — the local half of the same tools. `live` is the one
+ * thing not on disk: the recording in progress, handed in by the app (index.ts) because
+ * only it knows there is one. */
+function diskStore(root: string, live?: () => Promise<LiveMeeting | null>): MeetingStore {
   const transcript = async (id: string) => {
     if (!safeId(id)) return null
     // Reuses store.ts's own reader rather than a second readFile+JSON.parse here.
@@ -35,6 +37,7 @@ function diskStore(root: string): MeetingStore {
 
   return {
     transcript,
+    live,
     async list() {
       // Reuses store.ts's walk of the same folder rather than a second one here.
       // Unlike the meetings panel (store.ts's listMeetings), a meeting with no usable
@@ -64,9 +67,9 @@ function diskStore(root: string): MeetingStore {
   }
 }
 
-function buildServer(root: string): McpServer {
+function buildServer(root: string, live?: () => Promise<LiveMeeting | null>): McpServer {
   const server = new McpServer({ name: 'meeting-inspector', version: '0.1.0' })
-  registerTools(server, diskStore(root))
+  registerTools(server, diskStore(root, live))
   return server
 }
 
@@ -157,6 +160,9 @@ export async function startMcp(opts: {
   port?: number
   /** Called when the browser extension reports the meeting's own mic being toggled. */
   onMic?: (muted: boolean) => void
+  /** The recording in progress, read at request time — not on disk, and not something
+   * this module can know about on its own. */
+  live?: () => Promise<LiveMeeting | null>
 }): Promise<McpHandle> {
   // Loopback names only. Nothing off this machine is meant to reach the archive, and
   // this also blocks a web page from rebinding DNS onto the port.
@@ -177,7 +183,7 @@ export async function startMcp(opts: {
     }
     // Stateless: a fresh server per request, so nothing leaks between clients.
     const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined })
-    await buildServer(opts.root).connect(transport)
+    await buildServer(opts.root, opts.live).connect(transport)
     await transport.handleRequest(req, res)
   }
 

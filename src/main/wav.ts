@@ -26,11 +26,20 @@ export class WavWriter {
     return this.tail
   }
 
+  /** How much audio is actually on disk so far — read while the recording is still
+   * running (index.ts's live flush and the `current_meeting` MCP tool, neither of which
+   * can call close() to find out). Not wall-clock: a paused meeting writes nothing while
+   * it waits, so this is the length the finished WAV will have, not how long ago the
+   * user pressed Start. */
+  get durationSec(): number {
+    return this.bytes / 2 / this.sampleRate
+  }
+
   async close(): Promise<{ bytes: number; durationSec: number }> {
     await this.tail
     await this.fh.write(wavHeader(this.bytes, this.sampleRate), 0, HEADER_BYTES, 0)
     await this.fh.close()
-    return { bytes: this.bytes, durationSec: this.bytes / 2 / this.sampleRate }
+    return { bytes: this.bytes, durationSec: this.durationSec }
   }
 }
 

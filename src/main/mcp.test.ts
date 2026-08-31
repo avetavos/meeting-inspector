@@ -5,11 +5,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
+import type { LiveMeeting } from '../shared/meetings.ts'
 import { migrateMeetingMeta, writeTranscript } from './store.ts'
 
 const TOKEN = 'test-token-do-not-guess'
 let server: McpHandle
 let root: string
+/** Stands in for index.ts's `current` — the one thing the MCP server reads that is
+ * not on disk. Set by the current_meeting test, null everywhere else. */
+let live: LiveMeeting | null = null
 
 before(async () => {
   root = await mkdtemp(join(tmpdir(), 'mcp-test-'))
@@ -56,7 +60,7 @@ before(async () => {
   await migrateMeetingMeta(root)
 
   // Port 0 so the suite never fights the running app for 8787.
-  server = await startMcp({ token: TOKEN, root, port: 0 })
+  server = await startMcp({ token: TOKEN, root, port: 0, live: () => Promise.resolve(live) })
 })
 
 after(() => {
@@ -118,7 +122,7 @@ test('mcp: handshake and tool list', async () => {
   const list = (await rpc('tools/list')).body?.result as { tools: { name: string }[] }
   assert.deepEqual(
     list.tools.map((t) => t.name).sort(),
-    ['get_transcript', 'list_meetings', 'search_transcripts'],
+    ['current_meeting', 'get_transcript', 'list_meetings', 'search_transcripts'],
   )
 })
 
@@ -200,4 +204,41 @@ test('mcp: a busy requested port falls back to the default port', async (t) => {
     await fellBack.close()
     await new Promise<void>((resolve) => busy.close(() => resolve()))
   }
+})
+
+test('mcp: current_meeting answers about the recording in progress, and says so when there is none', async () => {
+  // Nothing recording — an assistant asked mid-nothing must get an answer it can say
+  // out loud, not an error and not an empty transcript that reads like a silent meeting.
+  assert.deepEqual(JSON.parse((await callTool('current_meeting')).content[0]!.text), { recording: false })
+
+  live = {
+    id: 'live-meeting-id',
+    title: 'Sprint 86 Planning',
+    startedAt: '2026-08-31T11:00:00+07:00',
+    recordedSec: 92.5,
+    transcribing: true,
+    speakers: { me: 'คุณ', them: 'คนอื่น' },
+    segments: [
+      { t0: 3, t1: 7, speaker: 'them', text: 'ตกลงเลื่อน deploy เป็นพฤหัส' },
+      { t0: 8, t1: 10, speaker: 'me', text: 'รับทราบครับ' },
+    ],
+  }
+  const now = JSON.parse((await callTool('current_meeting')).content[0]!.text)
+  assert.equal(now.recording, true)
+  assert.equal(now.title, 'Sprint 86 Planning')
+  assert.equal(now.recordedSec, 92.5)
+  assert.equal(now.transcribing, true)
+  // Resolved the same way get_transcript resolves them, so the assistant never has to
+  // know what 'them' means.
+  assert.deepEqual(now.segments.map((s: { speakerName: string }) => s.speakerName), ['คนอื่น', 'คุณ'])
+
+  // 'after'/'manual' mode: the meeting is being recorded but nothing is decoded until it
+  // ends. Empty segments there mean "not transcribed yet", not "nobody spoke" — the flag
+  // is the only thing that can tell an assistant which of the two it is looking at.
+  live = { ...live, transcribing: false, segments: [] }
+  const quiet = JSON.parse((await callTool('current_meeting')).content[0]!.text)
+  assert.equal(quiet.transcribing, false)
+  assert.deepEqual(quiet.segments, [])
+
+  live = null
 })
