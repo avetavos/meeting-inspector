@@ -89,6 +89,11 @@ const api = {
    * page should show from here on. */
   dropSpeakers: (dir: string, speakers: string[]): Promise<Transcript> =>
     ipcRenderer.invoke('meeting:drop-speakers', dir, speakers),
+  /** Corrects who said ONE line, and records the span as a hint: a later re-split uses
+   * it to re-attribute every turn in the meeting that sounds like that person. A blank
+   * name withdraws the correction. */
+  setSegmentSpeaker: (dir: string, t0: number, t1: number, name: string): Promise<Transcript> =>
+    ipcRenderer.invoke('meeting:set-segment-speaker', dir, t0, t1, name),
   /** Splits this meeting's speakers apart again, told how many people were in it —
    * `null` goes back to letting clustering decide. Re-runs diarization only, never
    * whisper, so it costs seconds and leaves every word of the text alone. */

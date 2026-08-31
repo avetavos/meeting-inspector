@@ -171,16 +171,55 @@ async function pcmFor(
   }
 }
 
-/** Pulls one speaker's own audio out of a meeting, using the times already recorded. */
-async function samplesFor(dir: string, transcript: Transcript, speaker: string): Promise<Float32Array | null> {
-  const pcm = await pcmFor(dir, transcript, speaker, MAX_SECONDS)
-  // Under a couple of seconds an embedding is mostly noise, and a bad one poisons
-  // every later match.
-  if (!pcm || pcm.length < 2 * 16000) return null
+/** Two seconds. Under that an embedding is mostly noise, and a bad one poisons every
+ * later match — the same floor foldBriefSpeakers (diarize.ts) uses to decide a cluster
+ * is too short to be a person at all. */
+const MIN_EMBED_SEC = 2
+
+const toFloat = (pcm: Int16Array): Float32Array => {
   const out = new Float32Array(pcm.length)
   for (let i = 0; i < pcm.length; i++) out[i] = pcm[i]! / 32768
   return out
 }
+
+/** Pulls one speaker's own audio out of a meeting, using the times already recorded. */
+async function samplesFor(dir: string, transcript: Transcript, speaker: string): Promise<Float32Array | null> {
+  const pcm = await pcmFor(dir, transcript, speaker, MAX_SECONDS)
+  if (!pcm || pcm.length < MIN_EMBED_SEC * 16000) return null
+  return toFloat(pcm)
+}
+
+/**
+ * An embedding for an arbitrary stretch of the loopback track, with no speaker key
+ * involved at all — how a caller asks "who does THIS sound like?" about audio it has
+ * located some other way.
+ *
+ * Two callers, both from a re-split (index.ts's diarizeMeeting): the spans the user
+ * certified as a named person (Transcript.speakerHints), and each turn diarization
+ * produced, so every turn can be compared against those people. Returns null for a
+ * stretch too short to embed honestly rather than a vector built from a syllable.
+ */
+export async function embedSpans(dir: string, spans: { t0: number; t1: number }[]): Promise<Float32Array | null> {
+  const pcm = await pcmFor(dir, EMPTY_TRANSCRIPT, 'them', MAX_SECONDS, spans)
+  if (!pcm || pcm.length < MIN_EMBED_SEC * 16000) return null
+  return embed(toFloat(pcm))
+}
+
+/** pcmFor only reads the transcript when it has no explicit `spans`, and embedSpans
+ * always has them. */
+const EMPTY_TRANSCRIPT = { segments: [] } as unknown as Transcript
+
+/** Cosine similarity between two embeddings, on the same scale MATCH_THRESHOLD is
+ * expressed in — exported so a caller comparing turns against the user's own certified
+ * spans (index.ts) uses this module's one measure of "same voice" rather than a second
+ * notion of it. */
+export const similarity = (a: Float32Array, b: Float32Array): number => cosine(a, [...b])
+
+/** How close a turn has to sound to one of the user's corrected spans before it is
+ * re-attributed to that person. The same threshold identify() uses, for the same
+ * reason: a wrong name silently attached to someone else's words is worse than leaving
+ * the clustering's own answer in place. */
+export const VOICE_MATCH_THRESHOLD = MATCH_THRESHOLD
 
 /** A few seconds of a speaker's own audio, wrapped as a playable WAV — spec item 2,
  * "hear the voice before naming it". Shares wavHeader with wav.ts (the WavWriter used

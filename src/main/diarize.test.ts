@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { clusteringFor, loopbackSpeakers, assignSpeakers, speakerNames, type SpeakerLabels, type Turn, foldBriefSpeakers } from './diarize.ts'
+import { applyHints, clusteringFor, freePersonKey, loopbackSpeakers, pickExemplar, assignSpeakers, speakerNames, type SpeakerLabels, type Turn, foldBriefSpeakers } from './diarize.ts'
 
 const EN: SpeakerLabels = { me: 'You', them: 'Others', speaker: (n) => `Speaker ${n}` }
 
@@ -147,4 +147,56 @@ test('diarize: the headcount counts the user, the loopback track does not', () =
   // And that null is exactly what clusteringFor reads as "decide for yourself".
   assert.deepEqual(clusteringFor(0.7, loopbackSpeakers(1)), { numClusters: -1, threshold: 0.7 })
   assert.deepEqual(clusteringFor(0.7, loopbackSpeakers(4)), { numClusters: 3, threshold: 0.7 })
+})
+
+test('merge: a label hook can answer with a person instead of a cluster', () => {
+  // How a re-split spends what the user corrected: the overlap arithmetic stays the one
+  // copy of itself, and the caller decides what the turn a segment landed on is called.
+  const turns = [turn(0, 10, 0), turn(10, 20, 1)]
+  const mine = new Map([[turns[1]!, 'PERSON_00']])
+  const out = assignSpeakers([seg(1, 5), seg(12, 18)], turns, (t) => mine.get(t) ?? `SPEAKER_0${t.speaker}`)
+  assert.deepEqual(out.map((s) => s.speaker), ['SPEAKER_00', 'PERSON_00'])
+})
+
+test('exemplar: a turn is only re-attributed when one person is clearly closest', () => {
+  // Sounds like nobody — clustering keeps it.
+  assert.equal(pickExemplar([{ name: 'บิว', score: 0.4 }], 0.6), null)
+  assert.equal(pickExemplar([], 0.6), null)
+  // Clearly one person.
+  assert.equal(pickExemplar([{ name: 'บิว', score: 0.81 }, { name: 'พี่เพิร์ช', score: 0.62 }], 0.6), 'บิว')
+
+  // The case corrections exist for: two voices close enough that clustering merged them.
+  // A turn sitting between them is exactly where a guess goes wrong, so it keeps the
+  // clustering's own answer rather than being handed to whichever won by a hair.
+  assert.equal(pickExemplar([{ name: 'บิว', score: 0.72 }, { name: 'พี่เพิร์ช', score: 0.70 }], 0.6), null)
+  // Far enough apart to be worth acting on.
+  assert.equal(pickExemplar([{ name: 'บิว', score: 0.72 }, { name: 'พี่เพิร์ช', score: 0.60 }], 0.6), 'บิว')
+
+  // Several corrected spans of the SAME person are one candidate, not two competing ones
+  // — otherwise a person the user corrected twice could never beat their own runner-up.
+  assert.equal(pickExemplar([{ name: 'บิว', score: 0.9 }, { name: 'บิว', score: 0.88 }], 0.6), 'บิว')
+})
+
+test('hints: a corrected line wins over anything the re-split inferred', () => {
+  // The whole point: the user listened and said so. Nothing computed afterwards, however
+  // confident, may overrule that line.
+  const segments = [seg(0, 4, 'SPEAKER_03'), seg(4, 9, 'SPEAKER_03'), seg(9, 12, 'me')]
+  const hints = [{ t0: 4, t1: 9, name: 'บิว' }]
+  const out = applyHints(segments, hints, (name) => (name === 'บิว' ? 'PERSON_00' : undefined))
+  assert.deepEqual(out.map((s) => s.speaker), ['SPEAKER_03', 'PERSON_00', 'me'])
+
+  // Matched by exact time, which is what survives a re-diarize — a hint whose span no
+  // longer exists changes nothing rather than landing on the nearest line.
+  assert.deepEqual(applyHints(segments, [{ t0: 4, t1: 8.5, name: 'บิว' }], () => 'PERSON_00'), segments)
+  // And a name no key was minted for leaves the segment as the clustering left it.
+  assert.deepEqual(applyHints(segments, hints, () => undefined), segments)
+  assert.equal(applyHints(segments, [], () => 'PERSON_00'), segments, 'no hints, no copy')
+})
+
+test('hints: a corrected person gets a key of their own, never a cluster that is taken', () => {
+  assert.equal(freePersonKey({}), 'PERSON_00')
+  // Its own series: a person the user named must not be mistaken for a cluster the app
+  // guessed at, and vice versa.
+  assert.equal(freePersonKey({ SPEAKER_00: 'x', SPEAKER_01: 'y' }), 'PERSON_00')
+  assert.equal(freePersonKey({ PERSON_00: 'บิว', PERSON_01: 'พี่เพิร์ช' }), 'PERSON_02')
 })

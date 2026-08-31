@@ -131,6 +131,11 @@ export const speakerLabel = (n: number): string => `SPEAKER_${String(n).padStart
 export function assignSpeakers(
   segments: Transcript['segments'],
   turns: Turn[],
+  /** What to call the turn a segment landed on. Defaults to the clustering's own
+   * `SPEAKER_xx`; a re-split that has the user's corrected spans to compare against
+   * passes one that can answer with a person's key instead (index.ts), so the overlap
+   * arithmetic below stays the only copy of itself. */
+  label: (turn: Turn) => string = (turn) => speakerLabel(turn.speaker),
 ): Transcript['segments'] {
   return segments.map((segment) => {
     if (segment.speaker === 'me') return segment
@@ -148,7 +153,73 @@ export function assignSpeakers(
     // clustering: the old key means someone else entirely after a re-split (see
     // Transcript.speakerVoices' own doc comment), so carrying it over would be worse
     // than saying nothing.
-    return best ? { ...segment, speaker: speakerLabel(best.speaker) } : { ...segment, speaker: UNKNOWN }
+    return best ? { ...segment, speaker: label(best) } : { ...segment, speaker: UNKNOWN }
+  })
+}
+
+/**
+ * Which of the user's corrected people a turn sounds like, or null to leave the
+ * clustering's own answer alone.
+ *
+ * Two guards, both because a confident wrong name is worse than an honest placeholder.
+ * `threshold` is the floor — sound enough like this person at all. `margin` is the one
+ * that matters here: the whole reason corrections exist is that two voices were close
+ * enough for clustering to merge them, so a turn that is nearly equidistant between them
+ * is exactly the case where guessing goes wrong, and it keeps its cluster label instead.
+ */
+export function pickExemplar(
+  scores: { name: string; score: number }[],
+  threshold: number,
+  margin = 0.05,
+): string | null {
+  const ranked = [...scores].sort((a, b) => b.score - a.score)
+  const best = ranked[0]
+  if (!best || best.score < threshold) return null
+  const runnerUp = ranked.find((s) => s.name !== best.name)
+  if (runnerUp && best.score - runnerUp.score < margin) return null
+  return best.name
+}
+
+/** A speaker key for someone the user named by correcting a line, kept apart from
+ * clustering's own `SPEAKER_xx` so nothing downstream mistakes one for the other. */
+export const personLabel = (n: number): string => `PERSON_${String(n).padStart(2, '0')}`
+
+
+
+/** The lowest `PERSON_xx` this meeting is not already using. Its own series, kept apart
+ * from clustering's `SPEAKER_xx` so nothing mistakes a person the user named for a
+ * cluster the app guessed at. */
+export function freePersonKey(speakers: Record<string, string>): string {
+  for (let n = 0; ; n++) {
+    const key = personLabel(n)
+    if (!(key in speakers)) return key
+  }
+}
+
+
+
+/**
+ * The corrected lines themselves, applied last and unconditionally.
+ *
+ * Matching a turn to a corrected voice is inference — "this turn sounds like บิว". These
+ * spans are not: the user listened and said so, and nothing computed afterwards may
+ * overrule them. Matched by exact `t0`/`t1`, which is what a hint is frozen by and what
+ * survives a re-diarize verbatim (Transcript.speakerHints' own doc comment), so a
+ * correction is never undone by the very pass it was made to correct.
+ *
+ * `keyOf` returns undefined for a hinted name no key was minted for, which leaves that
+ * segment exactly as the clustering left it rather than filing it under `undefined`.
+ */
+export function applyHints(
+  segments: Transcript['segments'],
+  hints: NonNullable<Transcript['speakerHints']>,
+  keyOf: (name: string) => string | undefined,
+): Transcript['segments'] {
+  if (hints.length === 0) return segments
+  return segments.map((segment) => {
+    const hint = hints.find((h) => h.t0 === segment.t0 && h.t1 === segment.t1)
+    const key = hint && keyOf(hint.name)
+    return key ? { ...segment, speaker: key } : segment
   })
 }
 

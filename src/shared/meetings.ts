@@ -63,6 +63,27 @@ export type Transcript = {
    * rewrite every transcript that mentions the voice.
    */
   speakerVoices?: Record<string, { voiceId: string; name: string }>
+  /**
+   * Lines the user has corrected by hand: "this stretch is บิว, whatever the clustering
+   * says". Frozen by their own `t0`/`t1`, which survive a re-diarize verbatim (only a
+   * segment's `speaker` label changes across a pass — see speakerVoices above), so a
+   * correction outlives the clustering it was correcting.
+   *
+   * The case they exist for is the one nothing else could reach: clustering merged two
+   * people into a single speaker, and the speaker editor can only put ONE name on a
+   * speaker — so there was no way to say the two lines under it were different people,
+   * let alone which was which.
+   *
+   * They are both a fix and an enrollment. The fix is immediate: that segment gets that
+   * person. The enrollment is what makes it worth more than a manual edit — a corrected
+   * span is a piece of audio the user has certified belongs to a named person, which is
+   * exactly what clustering had to guess at, so a later re-split embeds each span and
+   * re-attributes every turn in the meeting that sounds like one of them (index.ts's
+   * diarizeMeeting).
+   *
+   * Additive and optional: a transcript without them behaves exactly as it always has.
+   */
+  speakerHints?: { t0: number; t1: number; name: string }[]
 }
 
 export type MeetingMeta = {

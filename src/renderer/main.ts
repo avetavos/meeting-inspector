@@ -269,7 +269,10 @@ const en = {
   speakerCountWorking: 'Splitting speakers again…',
   speakerCountDone: (n: number) => `Done — ${n} speaker${n === 1 ? '' : 's'}`,
   speakerCountFailed: (msg: string) => `Couldn't split speakers again: ${msg}`,
-  speakerJump: 'Find this speaker above',
+  speakerJump: 'Wrong person? Type who really said this',
+  segmentSpeakerHint:
+    'Correcting one line also teaches the split: press "Split speakers again" afterwards and every line that sounds like them is re-attributed.',
+  segmentSpeakerFailed: (msg: string) => `Couldn't change who said this: ${msg}`,
   copy: 'Copy',
   copied: 'Copied',
   speakerDefaults: { me: 'You', them: 'Others' },
@@ -630,7 +633,10 @@ const th: typeof en = {
   speakerCountWorking: 'กำลังแยกคนพูดใหม่…',
   speakerCountDone: (n) => `เสร็จแล้ว — ${n} คน`,
   speakerCountFailed: (msg) => `แยกคนพูดใหม่ไม่สำเร็จ: ${msg}`,
-  speakerJump: 'ไปที่คนพูดคนนี้ด้านบน',
+  speakerJump: 'ไม่ใช่คนนี้? พิมพ์ชื่อคนที่พูดจริง',
+  segmentSpeakerHint:
+    'แก้ทีละบรรทัดแล้วระบบจะจำเสียงนั้นไว้ — กด "แยกคนพูดใหม่" ต่อ บรรทัดอื่นที่เสียงเหมือนกันจะถูกแก้ให้ทั้งไฟล์',
+  segmentSpeakerFailed: (msg) => `เปลี่ยนคนพูดไม่สำเร็จ: ${msg}`,
   copy: 'คัดลอก',
   copied: 'คัดลอกแล้ว',
   speakerDefaults: { me: 'คุณ', them: 'คนอื่น' },
@@ -2039,18 +2045,63 @@ function renderPlayer(): void {
 playerPlayBtn.onclick = () => void togglePlayer()
 playerSeek.oninput = () => seekPlayer((Number(playerSeek.value) / 1000) * playerDuration)
 
-/** Scrolls the detail page's speaker editor to one speaker and marks it, so a name
- * noticed in the transcript can be corrected without hunting for its row. */
-function jumpToSpeakerRow(speaker: string): void {
-  // `data-keys` holds every cluster the row covers — one row can be several of them.
-  const input = detailSpeakersEl.querySelector<HTMLInputElement>(`input[data-keys~="${CSS.escape(speaker)}"]`)
-  if (!input) return
-  const row = input.closest('.who')
-  row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  row?.classList.add('found')
-  // Removed on its own: the mark is a "here it is", not a selection to be dismissed.
-  setTimeout(() => row?.classList.remove('found'), 1600)
+/**
+ * Corrects who said ONE line, from the line itself.
+ *
+ * The speaker editor above names a SPEAKER, which is the right unit right up until
+ * clustering puts two people in one — and then both are behind a single field and half
+ * the lines under it are wrong with no way to say so. This is the way to say so.
+ *
+ * Swapped in place, exactly like a meeting's title (startTitleEdit): the correction is
+ * about the line already on screen, and typing a name is how everyone is named
+ * everywhere else in this app — which also means "someone already in this meeting" and
+ * "a person nobody has named yet" are the same gesture, with the same suggestions
+ * (VOICE_NAMES_LIST) behind it.
+ *
+ * `saved` guards the two exits that both fire for one edit — Enter also blurs. Escape
+ * restores the line untouched; anything else commits, and an unchanged name is a no-op
+ * main hands straight back.
+ */
+function startSegmentSpeakerEdit(who: HTMLElement, segment: Transcript['segments'][number], shown: string): void {
+  const dir = detailDir
+  if (!dir) return
+  const input = document.createElement('input')
+  input.className = 'who who-edit'
+  input.setAttribute('list', VOICE_NAMES_LIST)
+  input.value = shown
+  let saved = false
+
+  const restore = (): void => {
+    input.replaceWith(who)
+  }
+  const commit = async (next: string | null): Promise<void> => {
+    if (saved) return
+    saved = true
+    if (next === null || next.trim() === shown.trim()) return restore()
+    try {
+      const updated = await window.api.setSegmentSpeaker(dir, segment.t0, segment.t1, next)
+      detailSegments = updated.segments
+      detailSpeakers = updated.speakers
+      detailSpeakerVoices = updated.speakerVoices
+      playerSegments = updated.segments
+      renderTranscript(detailSegments, detailSpeakers, detailTranscriptEl)
+      renderDetailSpeakers()
+    } catch (err) {
+      diarizeMsg = () => t().segmentSpeakerFailed(reason(err))
+      restore()
+      renderDetailSpeakers()
+    }
+  }
+  input.onkeydown = (e) => {
+    e.stopPropagation()
+    if (e.key === 'Enter') void commit(input.value)
+    else if (e.key === 'Escape') void commit(null)
+  }
+  input.onblur = () => void commit(input.value)
+  input.onclick = (e) => e.stopPropagation() // the row seeks the player; this does not
+  who.replaceWith(input)
   input.focus()
+  input.select()
 }
 
 function renderTranscript(
@@ -2069,15 +2120,17 @@ function renderTranscript(
       const who = document.createElement('span')
       who.className = 'who'
       who.textContent = speakerDisplayName(s.speaker, names, numbering)
-      // A wrong name is spotted here, while reading, but it is fixed in the editor above
-      // — and with a meeting that came back with forty speakers, finding the right row
-      // up there is the hard part. Clicking the name does that walk.
+      // A wrong name is spotted here, while reading — so it is fixed here. Clicking used
+      // to scroll to the speaker's row in the editor above, which could only ever put
+      // ONE name on the whole speaker; when the cluster holds two people that is the
+      // wrong unit, and this is the only place the difference between two lines can be
+      // expressed at all.
       if (container === detailTranscriptEl) {
         who.classList.add('who-jump')
         who.title = t().speakerJump
         who.onclick = (e) => {
           e.stopPropagation() // the row itself seeks the player; the name does not
-          jumpToSpeakerRow(s.speaker)
+          startSegmentSpeakerEdit(who, s, who.textContent ?? '')
         }
       }
       const text = document.createElement('span')
@@ -2385,7 +2438,7 @@ function speakerCountRow(): HTMLElement {
 
   const hint = document.createElement('div')
   hint.className = 'hint'
-  hint.textContent = t().speakerCountHint
+  hint.textContent = `${t().speakerCountHint} ${t().segmentSpeakerHint}`
   const status = document.createElement('div')
   status.className = 'hint'
   status.textContent = diarizeMsg ? diarizeMsg() : ''

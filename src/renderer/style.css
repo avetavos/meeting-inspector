@@ -290,7 +290,7 @@ button.meeting-title-open:hover:not(:disabled) { transform: none; text-decoratio
 #detail-transcript .who-jump { cursor: pointer; text-decoration-line: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-color: var(--line-lo); }
 #detail-transcript .who-jump:hover { color: var(--accent); text-decoration-color: currentColor; }
 /* Where the jump lands, briefly. */
-#detail-speakers .who.found { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius-sm); }
+#detail-transcript input.who-edit { width: 9em; font-size: var(--text-secondary); padding: 2px var(--space-xs); }
 #transcript .me .who, #detail-transcript .me .who { color: var(--text); font-weight: 600; }
 
 /* ---------- MCP connection state (settings > Connections) ---------------- */

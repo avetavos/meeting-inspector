@@ -7,7 +7,21 @@ import { randomBytes } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import { runBatch, type BatchProgress } from './batch.ts'
 import { Chunker, SAMPLE_RATE, type Chunk } from './chunker.ts'
-import { SPEAKER_SPLIT_THRESHOLD, assignSpeakers, diarize, foldBriefSpeakers, loopbackSpeakers, speakerNames, type SpeakerLabels } from './diarize.ts'
+import {
+  SPEAKER_SPLIT_THRESHOLD,
+  assignSpeakers,
+  diarize,
+  applyHints,
+  foldBriefSpeakers,
+  freePersonKey,
+  loopbackSpeakers,
+  personLabel,
+  pickExemplar,
+  speakerLabel,
+  speakerNames,
+  type SpeakerLabels,
+  type Turn,
+} from './diarize.ts'
 import { ASR_MODELS, MODELS, downloadModel, modelStatus, type ModelSpec, type ModelStatus } from './download.ts'
 import { PREFERRED_PORT, startMcp, type McpHandle } from './mcp.ts'
 import { model } from './models.ts'
@@ -18,7 +32,9 @@ import { Remote, connect as connectOpenrouter } from './openrouter.ts'
 import { getSettings, setSettings, validPort, type AsrModel, type Language, type Settings } from './settings.ts'
 import { hasSpeech } from './vad.ts'
 import {
+  VOICE_MATCH_THRESHOLD,
   discardPending,
+  embedSpans,
   forget,
   identify,
   knownVoices,
@@ -28,6 +44,7 @@ import {
   renameVoices,
   resolveSpeakerNames,
   sampleWav,
+  similarity,
   trackPending,
 } from './voices.ts'
 import {
@@ -205,6 +222,71 @@ function releaseWhisper(): void {
  * event loop for the length of the call, nothing can pre-empt it), but it does stop the
  * queue from starting the *next* meeting's.
  */
+/**
+ * Turns the user's corrected lines into an answer for every turn in the meeting.
+ *
+ * A correction (Transcript.speakerHints) is a stretch of audio the user has certified
+ * belongs to a named person. That is enrollment data of exactly the kind clustering
+ * never has: embed each person's certified spans, embed every turn, and any turn that
+ * clearly sounds like one of them becomes that person — including turns clustering had
+ * merged into somebody else's speaker, which is the failure corrections exist for and
+ * the one thing re-running clustering with any threshold or headcount cannot fix.
+ *
+ * Turns matching nobody, or sitting between two people, keep the clustering's own label
+ * (pickExemplar's doc comment says why the margin matters here in particular).
+ *
+ * Lives here rather than in diarize.ts because it is the one part that needs audio and
+ * embeddings: diarize.ts stays the pure timeline arithmetic, voices.ts stays the voice
+ * measurements, and this is where the two meet — the same split diarizeMeeting already
+ * follows for identify()/trackPending().
+ *
+ * No hints means no work at all: not a single embedding is computed, so an ordinary
+ * meeting's diarize pass costs exactly what it always did.
+ *
+ * Measured on a real 20-minute meeting, with ONE corrected line per person as the only
+ * enrollment and every other span of theirs classified blind: 130 right, 7 wrong, 55
+ * left to the clustering. So it is a large improvement and not an oracle — the seven are
+ * why `applyHints` exists (a corrected line is never re-decided) and why a wrong one can
+ * simply be corrected too, which makes that person's exemplar better.
+ */
+async function hintedPeople(
+  dir: string,
+  hints: NonNullable<Transcript['speakerHints']>,
+  turns: Turn[],
+): Promise<{ label: (turn: Turn) => string; keyOf: (name: string) => string | undefined; keys: Map<string, string> }> {
+  const keys = new Map<string, string>()
+  const keyOf = (name: string): string | undefined => keys.get(name)
+  const cluster = (turn: Turn): string => speakerLabel(turn.speaker)
+  if (hints.length === 0) return { label: cluster, keyOf, keys }
+
+  // One exemplar per PERSON, from all of their corrected spans at once — two corrections
+  // each under the embedding floor still make one usable voice between them
+  // (voices.ts's embedSpans).
+  const byName = new Map<string, { t0: number; t1: number }[]>()
+  for (const hint of hints) byName.set(hint.name, [...(byName.get(hint.name) ?? []), { t0: hint.t0, t1: hint.t1 }])
+
+  const exemplars: { name: string; embedding: Float32Array }[] = []
+  for (const [name, spans] of byName) {
+    // Every corrected person gets a key even when their audio was too short to learn a
+    // voice from: the correction itself must still take (applyHints), it just cannot
+    // spread to any other turn.
+    keys.set(name, personLabel(keys.size))
+    const embedding = await embedSpans(dir, spans).catch(() => null)
+    if (embedding) exemplars.push({ name, embedding })
+  }
+  if (exemplars.length === 0) return { label: cluster, keyOf, keys }
+
+  const decided = new Map<Turn, string>()
+  for (const turn of turns) {
+    const embedding = await embedSpans(dir, [{ t0: turn.start, t1: turn.end }]).catch(() => null)
+    if (!embedding) continue
+    const scores = exemplars.map((e) => ({ name: e.name, score: similarity(embedding, e.embedding) }))
+    const who = pickExemplar(scores, VOICE_MATCH_THRESHOLD)
+    if (who) decided.set(turn, keys.get(who)!)
+  }
+  return { label: (turn) => decided.get(turn) ?? cluster(turn), keyOf, keys }
+}
+
 async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signal?: AbortSignal): Promise<boolean> {
   if (notify) wc.send('meeting:diarizing')
   try {
@@ -218,14 +300,22 @@ async function diarizeMeeting(wc: WebContents, dir: string, notify = true, signa
       loopbackSpeakers((await readMeta(dir))?.speakerCount),
     )
     const previous = await readTranscript(dir)
+    // The user's own corrections, turned into "this turn sounds like บิว" for every turn
+    // in the meeting — the one input clustering could not have had.
+    const people = await hintedPeople(dir, previous.speakerHints ?? [], turns)
     // Noise clustered as people is folded away before anyone is asked to name it —
     // see foldBriefSpeakers' own comment for the threshold and the trade.
-    const segments = foldBriefSpeakers(assignSpeakers(previous.segments, turns))
+    const segments = foldBriefSpeakers(
+      applyHints(assignSpeakers(previous.segments, turns, people.label), previous.speakerHints ?? [], people.keyOf),
+    )
     // HIGH 3: previous.speakerVoices tells speakerNames() which keys not to trust a
     // stale name from — a key it recognised (named or pending) last pass is about to
     // be re-checked by identify() below, and a wrong guess in the meantime is worse
     // than a placeholder (see speakerNames' own doc comment).
     const named = speakerNames(segments, previous.speakers, await speakerLabels(), previous.speakerVoices)
+    // A corrected person's key carries the name the user typed, not a "Speaker N"
+    // placeholder — they already said who this is.
+    for (const [name, key] of people.keys) named[key] = name
 
     // A voice the user has named before comes back with its name already on it.
     const withTranscript: Transcript = { ...previous, segments, speakers: named }
@@ -833,6 +923,53 @@ function registerIpc(): void {
    * `count` of null means "I don't know after all" — back to letting clustering decide,
    * which is a real answer and not the same as passing 0.
    */
+  /**
+   * "This line is บิว, not พี่เพ้น." The one correction the app could not express.
+   *
+   * Naming happens per SPEAKER — one name on one cluster — which is exactly right until
+   * clustering puts two people in one cluster. Then every line under it must share a
+   * single name, the transcript is wrong for half of them, and there was no way to say
+   * so: the speaker editor has one field and both people are behind it.
+   *
+   * Two things happen here, and the second is the point. The line is re-attributed
+   * immediately. And the span is recorded as a hint (Transcript.speakerHints) — audio
+   * the user has certified belongs to a named person, which is what diarizeMeeting then
+   * uses to re-attribute every other turn in the meeting that sounds like them.
+   *
+   * A blank name withdraws a correction rather than storing an unnamed one; the line
+   * keeps whatever it is showing until the next re-split, which will no longer be told
+   * anything about it.
+   */
+  ipcMain.handle('meeting:set-segment-speaker', async (_e, dir: string, t0: number, t1: number, name: string) => {
+    if (typeof t0 !== 'number' || typeof t1 !== 'number' || typeof name !== 'string') {
+      throw new Error('meeting:set-segment-speaker expects a span and a name')
+    }
+    const guarded = assertMeetingDir(dir)
+    const previous = await readTranscript(guarded)
+    // Frozen by time, not by speaker key: the key means someone different after every
+    // re-split, the times do not (Transcript.speakerVoices' own doc comment).
+    const hints = (previous.speakerHints ?? []).filter((h) => !(h.t0 === t0 && h.t1 === t1))
+    const trimmed = name.trim()
+
+    let next: Transcript = { ...previous, speakerHints: hints }
+    if (trimmed) {
+      // Reuse the key this person already holds where there is one — the speaker editor
+      // groups its rows by stored name, so a second key under the same name would show
+      // as one row anyway, and one key keeps `speakerVoices` and the transcript agreeing
+      // about who this is.
+      const existing = Object.entries(previous.speakers).find(([, n]) => n.trim() === trimmed)?.[0]
+      const key = existing ?? freePersonKey(previous.speakers)
+      next = {
+        ...next,
+        speakerHints: [...hints, { t0, t1, name: trimmed }],
+        speakers: { ...previous.speakers, [key]: trimmed },
+        segments: previous.segments.map((s) => (s.t0 === t0 && s.t1 === t1 ? { ...s, speaker: key } : s)),
+      }
+    }
+    await writeTranscript(guarded, next)
+    return { ...next, speakers: await resolveSpeakerNames(next.speakers, next.speakerVoices) }
+  })
+
   ipcMain.handle('meeting:rediarize', async (e, id: string, count: number | null) => {
     if (typeof id !== 'string') throw new Error('meeting:rediarize expects a meeting id')
     if (count !== null && (typeof count !== 'number' || !Number.isFinite(count) || count < 1 || count > 50)) {
